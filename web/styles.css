@@ -1,0 +1,1108 @@
+/* ============================================================
+   SKR · 현재가치모델 — Nike DNA 다크 에디션
+   모노크로매틱 UI · Barlow Condensed 히어로 숫자 · 샤프 엣지
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800;900&family=Black+Han+Sans&family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  color-scheme: light;
+
+  /* --- Surface ramp (Warm Beige Light) --- */
+  --bg-0: #F7F1E3;   /* page canvas — warm beige */
+  --bg-1: #FFFFFF;   /* card — pure white for contrast */
+  --bg-2: #F3EEDF;   /* subtle surface / input */
+  --bg-3: #EBE3CE;   /* hover */
+  --bg-4: #DED3B7;   /* chip stronger */
+  --line: #E2D8BE;   /* border default */
+  --line-soft: #EFE8D4;
+  --line-hard: #C3B58D;
+
+  /* --- Text (warm near-black) --- */
+  --tx-1: #1C1915;   /* primary — 진한 먹색 */
+  --tx-2: #3D3832;   /* secondary */
+  --tx-3: #6B655C;   /* tertiary / labels */
+  --tx-4: #9A9286;   /* disabled */
+
+  /* --- Brand / accent (Muted Burnt Orange — 형광 아닌 차분한 톤) --- */
+  --accent: #C85A2A;
+  --accent-2: #D97545;
+  --accent-ink: #FFFFFF;
+  --accent-wash: rgba(200, 90, 42, 0.10);
+  --accent-line: rgba(200, 90, 42, 0.35);
+
+  /* --- Semantic (pastel-muted) --- */
+  --up: #3E8B4C;                         /* muted pastel green */
+  --up-wash: rgba(62, 139, 76, 0.12);
+  --down: #B54453;                       /* muted pastel rose */
+  --down-wash: rgba(181, 68, 83, 0.12);
+  --flat: #6B655C;
+  --info: #3A7AAF;                       /* muted pastel blue */
+  --info-wash: rgba(58, 122, 175, 0.12);
+  --warn: #C89A2E;                       /* muted mustard */
+
+  /* --- Type tokens --- */
+  --ff-display: 'Barlow Condensed', 'Black Han Sans', 'Pretendard Variable', sans-serif;
+  --ff-body: 'Inter', 'Pretendard Variable', 'Pretendard', system-ui, sans-serif;
+  --ff-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+
+  /* --- Radius --- */
+  --r-sharp: 0px;
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-pill: 999px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  background: var(--bg-0);
+  color: var(--tx-1);
+  font-family: var(--ff-body);
+  font-feature-settings: 'tnum' 1, 'ss01' 1, 'cv11' 1;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ============================================================
+   TYPOGRAPHY — Nike DNA
+   ============================================================ */
+
+.display, .hero-value, .kpi-value {
+  font-family: var(--ff-display);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 0.92;
+  font-variant-numeric: tabular-nums;
+}
+
+.eyebrow {
+  font-family: var(--ff-body);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--tx-2);
+}
+
+.num, .mono { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1; }
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ============================================================
+   NAV (primary tabs)
+   ============================================================ */
+
+.nav-tab {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 0 16px; height: 54px;
+  color: var(--tx-2);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  white-space: nowrap;
+  position: relative;
+  transition: color .12s ease;
+}
+.nav-tab:hover { color: var(--tx-1); }
+.nav-tab.on { color: var(--tx-1); }
+.nav-tab.on::after {
+  content: '';
+  position: absolute; left: 12px; right: 12px; bottom: 0;
+  height: 2px; background: var(--accent);
+}
+.tab-dot { display: none; }
+.nav-tab .badge {
+  font-family: var(--ff-body);
+  font-size: 11px;
+  padding: 2px 7px;
+  background: var(--bg-3);
+  color: var(--tx-1);
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  border-radius: 4px;
+}
+
+/* ============================================================
+   FILTER BAR
+   ============================================================ */
+
+.chip-group {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 0 12px; margin-right: 0;
+  border-right: 1px solid var(--line);
+}
+.chip-group:last-of-type { border-right: none; }
+.chip-label {
+  font-family: var(--ff-body);
+  color: var(--tx-2);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-right: 10px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.chip-group { flex-wrap: nowrap; }
+.chip { white-space: nowrap; flex-shrink: 0; }
+
+.chip {
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--tx-2);
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  transition: color .12s, background .12s, border-color .12s;
+  cursor: pointer;
+}
+.chip:hover { color: var(--tx-1); background: var(--bg-2); }
+.chip.chip-on {
+  color: var(--tx-1);
+  background: var(--bg-3);
+  border-color: var(--line-hard);
+}
+.chip.chip-saa.chip-on {
+  color: var(--accent);
+  background: var(--accent-wash);
+  border-color: var(--accent-line);
+}
+
+.chip-range {
+  border: 1px solid var(--line) !important;
+  color: var(--tx-1) !important;
+  background: var(--bg-2) !important;
+  padding: 5px 12px !important;
+  border-radius: var(--r-pill) !important;
+  font-size: 11px;
+}
+.chip-range:hover { border-color: var(--line-hard) !important; }
+
+/* Segmented */
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+}
+.segmented button {
+  padding: 5px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--tx-2);
+  border-radius: var(--r-pill);
+  transition: color .12s, background .12s;
+  cursor: pointer;
+}
+.segmented button:hover { color: var(--tx-1); }
+.segmented button.on {
+  background: var(--tx-1);
+  color: var(--bg-0);
+}
+
+/* ============================================================
+   CARDS — flat, sharp, monochromatic
+   ============================================================ */
+
+.card {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 20px;
+  transition: border-color .15s ease;
+}
+.card:hover { border-color: var(--line-hard); }
+
+.card-title {
+  font-family: var(--ff-body);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--tx-1);
+  letter-spacing: 0.01em;
+  text-transform: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.card-title .hint {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--tx-3);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.card-sub {
+  font-size: 13px;
+  color: var(--tx-2);
+  margin-top: 6px;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+
+/* ============================================================
+   KPI
+   ============================================================ */
+
+.kpi-value {
+  font-family: var(--ff-display);
+  font-size: 48px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 0.95;
+  color: var(--tx-1);
+}
+
+.kpi-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--ff-body);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: var(--r-pill);
+  letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.kpi-delta.up { color: var(--up); background: var(--up-wash); }
+.kpi-delta.down { color: var(--down); background: var(--down-wash); }
+.kpi-delta.flat { color: var(--flat); background: rgba(161,161,166,0.12); }
+
+/* ============================================================
+   HERO INDEX — magazine-scale
+   ============================================================ */
+
+.hero-index {
+  position: relative;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 36px 40px 32px;
+  overflow: hidden;
+}
+.hero-index::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 120px; height: 3px;
+  background: var(--accent);
+}
+.hero-index::after {
+  content: 'MARKET INDEX';
+  position: absolute;
+  bottom: -18px; right: 20px;
+  font-family: var(--ff-display);
+  font-size: 110px;
+  font-weight: 700;
+  color: var(--bg-2);
+  letter-spacing: -0.02em;
+  line-height: 1;
+  opacity: 0.35;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+  z-index: 0;
+}
+.hero-index > * { position: relative; z-index: 1; }
+
+.hero-value {
+  font-family: var(--ff-display);
+  font-size: 120px !important;
+  font-weight: 700;
+  letter-spacing: -0.02em !important;
+  line-height: 0.88 !important;
+  color: var(--tx-1);
+  position: relative;
+}
+
+.hero-sub {
+  font-size: 11px;
+  color: var(--tx-3);
+  margin-top: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ============================================================
+   TAGS (semantic pills)
+   ============================================================ */
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-family: var(--ff-body);
+}
+.tag-saa { background: var(--accent-wash); color: var(--accent); border: 1px solid var(--accent-line); }
+.tag-lock { background: var(--bg-2); color: var(--tx-2); border: 1px solid var(--line); }
+.tag-live { background: var(--up-wash); color: var(--up); border: 1px solid rgba(30,170,82,0.35); }
+.tag-live::before {
+  content: '';
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--up);
+  box-shadow: 0 0 0 3px rgba(30,170,82,0.2);
+  margin-right: 2px;
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+.tag-soon { background: var(--info-wash); color: var(--info); border: 1px solid rgba(17,144,255,0.35); }
+.tag-export { background: rgba(168,85,247,0.14); color: #C084FC; border: 1px solid rgba(168,85,247,0.35); }
+.tag-domestic { background: var(--info-wash); color: var(--info); border: 1px solid rgba(17,144,255,0.35); }
+.tag-new { background: var(--up-wash); color: var(--up); border: 1px solid rgba(30,170,82,0.35); }
+
+/* ============================================================
+   TABLE
+   ============================================================ */
+
+.t { width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; border-collapse: collapse; }
+.t th {
+  text-align: left;
+  color: var(--tx-2);
+  font-family: var(--ff-body);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+  position: sticky; top: 0;
+}
+.t td {
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--tx-1);
+  font-size: 14px;
+}
+.t tbody tr { transition: background .1s; }
+.t tbody tr:hover { background: var(--bg-2); }
+.t .num { text-align: right; }
+
+/* ============================================================
+   HEATMAP
+   ============================================================ */
+
+.heat-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 36px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tx-1);
+  font-variant-numeric: tabular-nums;
+  border-radius: var(--r-sm);
+}
+
+/* ============================================================
+   MISC
+   ============================================================ */
+
+.spark { height: 24px; width: 80px; }
+
+.soon-placeholder {
+  border: 1.5px dashed var(--line-hard);
+  border-radius: var(--r-lg);
+  padding: 40px;
+  text-align: center;
+  color: var(--tx-3);
+  background:
+    repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255,255,255,0.02) 10px, rgba(255,255,255,0.02) 20px);
+}
+
+.divider-label {
+  font-family: var(--ff-body);
+  font-size: 10px;
+  color: var(--tx-3);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 36px 0 16px;
+}
+.divider-label::before {
+  content: '';
+  width: 24px; height: 2px;
+  background: var(--accent);
+}
+.divider-label::after {
+  content: '';
+  flex: 1; height: 1px;
+  background: var(--line);
+}
+
+.i {
+  display: inline-block;
+  width: 14px; height: 14px;
+  stroke-width: 2;
+  stroke: currentColor;
+  fill: none;
+  vertical-align: -2px;
+}
+
+/* ============================================================
+   ALERT
+   ============================================================ */
+
+.alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: var(--r-md);
+  font-size: 12px;
+  color: var(--accent);
+  background: var(--accent-wash);
+  border: 1px solid var(--accent-line);
+  border-left: 3px solid var(--accent);
+}
+
+/* ============================================================
+   BOXPLOT
+   ============================================================ */
+
+.box-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  padding: 10px 0;
+}
+.box-label {
+  width: 120px;
+  color: var(--tx-1);
+  font-weight: 700;
+  font-family: var(--ff-body);
+  font-size: 13px;
+}
+.box-track {
+  flex: 1; height: 22px;
+  position: relative;
+  background: var(--bg-2);
+  border-radius: 2px;
+}
+.box-whisker {
+  position: absolute; top: 10px;
+  height: 2px;
+  background: var(--line-hard);
+}
+.box-box {
+  position: absolute; top: 4px;
+  height: 14px;
+  background: var(--bg-3);
+  border: 1px solid var(--line-hard);
+  border-radius: 2px;
+}
+.box-median {
+  position: absolute; top: 4px;
+  width: 2px; height: 14px;
+  background: var(--accent);
+}
+.box-num {
+  width: 90px;
+  text-align: right;
+  color: var(--tx-1);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+/* Donut legend */
+.dot {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: 0;
+}
+
+/* Coming soon */
+.coming-hero {
+  background:
+    radial-gradient(ellipse at center, rgba(17,144,255,0.08) 0%, transparent 60%),
+    var(--bg-1);
+  border: 1px dashed var(--line-hard);
+  border-radius: var(--r-lg);
+  padding: 80px 40px;
+  text-align: center;
+}
+
+/* ============================================================
+   RANGE SLIDER
+   ============================================================ */
+
+.range-wrapper { position: relative; height: 40px; }
+.range-track {
+  position: absolute; top: 18px; left: 0; right: 0;
+  height: 4px;
+  background: var(--bg-3);
+  border-radius: 2px;
+}
+.range-fill {
+  position: absolute; top: 18px;
+  height: 4px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+.range-input {
+  position: absolute; top: 10px; left: 0;
+  width: 100%; height: 20px;
+  background: transparent;
+  pointer-events: none;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.range-input::-webkit-slider-thumb {
+  pointer-events: all;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--tx-1);
+  cursor: pointer;
+  border: 3px solid var(--bg-0);
+  box-shadow: 0 0 0 1px var(--line-hard);
+  transition: transform .1s;
+}
+.range-input::-webkit-slider-thumb:hover { transform: scale(1.15); }
+.range-input::-moz-range-thumb {
+  pointer-events: all;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--tx-1);
+  cursor: pointer;
+  border: 3px solid var(--bg-0);
+}
+.range-input::-webkit-slider-runnable-track { background: transparent; }
+.range-input::-moz-range-track { background: transparent; }
+
+/* ============================================================
+   FILTER PANELS
+   ============================================================ */
+
+.filter-panel {
+  border-top: 1px solid var(--line);
+  background: var(--bg-0);
+}
+.seg-chip {
+  padding: 6px 12px;
+  border-radius: var(--r-pill);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  color: var(--tx-2);
+  font-size: 11px;
+  font-weight: 500;
+  transition: all .12s;
+  cursor: pointer;
+  font-family: var(--ff-body);
+}
+.seg-chip:hover { border-color: var(--line-hard); color: var(--tx-1); }
+.seg-chip.on {
+  background: var(--tx-1);
+  color: var(--bg-0);
+  border-color: var(--tx-1);
+}
+
+select.filter-select {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  color: var(--tx-1);
+  font-size: 12px;
+  font-family: var(--ff-body);
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3e%3cpath fill='none' stroke='%236B6B71' stroke-width='1.5' d='M1 1l4 4 4-4'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+}
+select.filter-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  background-color: var(--bg-3);
+}
+
+/* ============================================================
+   HISTOGRAM / QUADRANT / Z-SCORE
+   ============================================================ */
+
+.hist-bar {
+  background: var(--accent);
+  border-radius: 2px 2px 0 0;
+}
+
+.quad-label {
+  position: absolute;
+  font-family: var(--ff-body);
+  font-size: 10px;
+  color: var(--tx-3);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.quad-label.tl { top: 10px; left: 10px; }
+.quad-label.tr { top: 10px; right: 10px; }
+.quad-label.bl { bottom: 10px; left: 10px; }
+.quad-label.br { bottom: 10px; right: 10px; }
+
+.zbadge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 2px;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--ff-body);
+  letter-spacing: 0.04em;
+}
+.zbadge.hi { background: var(--down-wash); color: var(--down); }
+.zbadge.mid { background: var(--accent-wash); color: var(--accent); }
+.zbadge.lo { background: var(--bg-3); color: var(--tx-2); }
+
+/* ============================================================
+   UTIL OVERRIDES (tailwind compat)
+   ============================================================ */
+
+/* slate-* → nike dark ramp mapping so existing markup keeps working */
+.bg-slate-950 { background-color: var(--bg-0) !important; }
+.bg-slate-900\/60 { background-color: var(--bg-1) !important; }
+.bg-slate-900\/80 { background-color: var(--bg-2) !important; }
+.bg-slate-900 { background-color: var(--bg-1) !important; }
+.bg-slate-800 { background-color: var(--bg-3) !important; }
+.bg-slate-800\/80 { background-color: var(--bg-3) !important; }
+
+.text-slate-100 { color: var(--tx-1) !important; }
+.text-slate-200 { color: var(--tx-1) !important; }
+.text-slate-300 { color: var(--tx-1) !important; }
+.text-slate-400 { color: var(--tx-2) !important; }
+.text-slate-500 { color: var(--tx-3) !important; }
+.text-slate-600 { color: var(--tx-4) !important; }
+.text-slate-700 { color: var(--tx-4) !important; }
+
+.border-slate-800 { border-color: var(--line) !important; }
+.border-slate-800\/80 { border-color: var(--line) !important; }
+.border-slate-700 { border-color: var(--line-hard) !important; }
+.border-slate-600 { border-color: var(--line-hard) !important; }
+
+/* amber → accent mapping */
+.text-amber-400 { color: var(--accent) !important; }
+.bg-amber-400 { background-color: var(--accent) !important; }
+.bg-amber-400\/5 { background-color: var(--accent-wash) !important; }
+.bg-amber-400\/10 { background-color: var(--accent-wash) !important; }
+.border-amber-400\/30 { border-color: var(--accent-line) !important; }
+.border-amber-400\/40 { border-color: var(--accent-line) !important; }
+.text-emerald-400 { color: var(--up) !important; }
+.text-rose-400 { color: var(--down) !important; }
+
+/* Button primary (amber bg) */
+.bg-amber-400.text-slate-950 {
+  background: var(--accent) !important;
+  color: var(--accent-ink) !important;
+  font-family: var(--ff-body) !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+  font-size: 12px !important;
+  padding: 11px 20px !important;
+  border-radius: var(--r-pill) !important;
+  transition: background .15s ease !important;
+}
+.bg-amber-400.text-slate-950:hover { background: var(--accent-2) !important; }
+
+/* ============================================================
+   HEADER CUSTOM
+   ============================================================ */
+
+header {
+  background: var(--bg-0) !important;
+  border-bottom: 1px solid var(--line) !important;
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--ff-display);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.brand-mark > * { white-space: nowrap; }
+.brand-mark .ko {
+  color: var(--tx-1);
+  font-size: 20px;
+  font-family: 'Black Han Sans', var(--ff-display);
+  white-space: nowrap;
+}
+.brand-mark .en {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  font-family: var(--ff-display);
+  white-space: nowrap;
+}
+.brand-mark .swoosh {
+  width: 3px; height: 18px;
+  background: var(--accent);
+  margin-right: 2px;
+  transform: skewX(-12deg);
+  align-self: center;
+}
+
+/* ============================================================
+   FOCUS
+   ============================================================ */
+
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+button { cursor: pointer; }
+
+/* ============================================================
+   HANGUL SAFETY — prevent vertical char-wrapping in squeezed flex
+   Korean has no ZWSP so narrow flex children wrap every character.
+   Apply nowrap + word-break defensively across chrome components.
+   ============================================================ */
+
+.nav-tab,
+.chip,
+.chip-label,
+.segmented button,
+.tag,
+.badge,
+.kpi-delta,
+.box-label,
+.dot + *,          /* legend label after dot */
+.brand-mark,
+.brand-mark * {
+  white-space: nowrap;
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
+
+/* Legend <span> wrappers that contain <dot> + Hangul label */
+.card .flex > span:has(> .dot) {
+  white-space: nowrap;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Hero sub-grid cards: ensure YoY/QoQ/MoM/WoW tiles stack properly
+   below the hero-value row, not overlap the ::after backdrop text */
+.hero-index .grid {
+  position: relative;
+  z-index: 2;
+}
+
+/* ============================================================
+   LIGHT MODE — TAILWIND SIZE OVERRIDES (폰트 전반 UP)
+   기존 text-[10/11/12/13px] 리터럴들을 한 단계 크게
+   ============================================================ */
+.text-\[9px\]  { font-size: 11px !important; }
+.text-\[10px\] { font-size: 12px !important; }
+.text-\[11px\] { font-size: 13px !important; }
+.text-\[12px\] { font-size: 14px !important; }
+.text-\[13px\] { font-size: 15px !important; }
+.text-\[14px\] { font-size: 16px !important; }
+
+.text-xs { font-size: 13px !important; line-height: 1.5 !important; }
+.text-sm { font-size: 15px !important; line-height: 1.6 !important; }
+.text-base { font-size: 16px !important; }
+.text-lg { font-size: 18px !important; }
+.text-xl { font-size: 22px !important; font-weight: 700 !important; }
+.text-2xl { font-size: 26px !important; font-weight: 700 !important; }
+.text-3xl { font-size: 32px !important; font-weight: 700 !important; }
+.text-4xl { font-size: 40px !important; font-weight: 700 !important; }
+
+/* ============================================================
+   LIGHT MODE — BODY BG + 슬레이트 색 역매핑 재정의
+   (기존 dark-ramp 매핑을 라이트 베이지로 재매핑)
+   ============================================================ */
+body { background: var(--bg-0) !important; color: var(--tx-1) !important; }
+
+.bg-slate-950 { background-color: var(--bg-0) !important; }
+.bg-slate-900\/60 { background-color: var(--bg-2) !important; }
+.bg-slate-900\/80 { background-color: var(--bg-2) !important; }
+.bg-slate-900 { background-color: var(--bg-1) !important; }
+.bg-slate-800, .bg-slate-800\/80 { background-color: var(--bg-3) !important; }
+
+.text-slate-100, .text-slate-200, .text-slate-300 { color: var(--tx-1) !important; }
+.text-slate-400 { color: var(--tx-2) !important; }
+.text-slate-500 { color: var(--tx-3) !important; }
+.text-slate-600, .text-slate-700 { color: var(--tx-4) !important; }
+
+.border-slate-800, .border-slate-800\/80 { border-color: var(--line) !important; }
+.border-slate-700, .border-slate-600 { border-color: var(--line-hard) !important; }
+
+/* amber → muted burnt orange */
+.text-amber-400 { color: var(--accent) !important; font-weight: 700 !important; }
+.bg-amber-400 { background-color: var(--accent) !important; }
+.bg-amber-400\/5  { background-color: rgba(200, 90, 42, 0.06) !important; }
+.bg-amber-400\/10 { background-color: rgba(200, 90, 42, 0.10) !important; }
+.border-amber-400\/30 { border-color: var(--accent-line) !important; }
+.border-amber-400\/40 { border-color: var(--accent-line) !important; }
+.text-emerald-400 { color: var(--up) !important; font-weight: 700 !important; }
+.text-rose-400 { color: var(--down) !important; font-weight: 700 !important; }
+.text-purple-300 { color: #7D5AA8 !important; font-weight: 700 !important; }
+
+.bg-slate-950.text-slate-950 { color: #FFFFFF !important; }
+.text-slate-950 { color: #FFFFFF !important; }
+
+/* ============================================================
+   LIGHT MODE — HEADER / BRAND
+   ============================================================ */
+header {
+  background: var(--bg-1) !important;
+  border-bottom: 1px solid var(--line) !important;
+}
+.brand-mark .ko { color: var(--tx-1) !important; }
+.brand-mark .en { color: var(--accent) !important; }
+.brand-mark .swoosh { background: var(--accent) !important; }
+
+/* filter bar */
+#filterBar { background: var(--bg-1) !important; border-bottom: 1px solid var(--line) !important; }
+.filter-panel { background: var(--bg-2) !important; border-top: 1px solid var(--line) !important; }
+
+/* ============================================================
+   LIGHT MODE — HERO-INDEX 백드롭 텍스트 톤 다운
+   ============================================================ */
+.hero-index { background: var(--bg-1) !important; border-color: var(--line) !important; }
+.hero-index::after { color: var(--bg-2) !important; opacity: 0.9 !important; }
+
+/* 바깥 border + 그림자 살짝 */
+.card {
+  background: var(--bg-1) !important;
+  border: 1px solid var(--line) !important;
+  box-shadow: 0 1px 2px rgba(60, 50, 30, 0.04);
+}
+.card:hover { border-color: var(--line-hard) !important; box-shadow: 0 2px 6px rgba(60, 50, 30, 0.06); }
+
+/* footer */
+footer { background: var(--bg-0) !important; border-top: 1px solid var(--line) !important; }
+
+/* ============================================================
+   FOOTNOTE LINES, DELIMITERS — 밝게 매핑
+   ============================================================ */
+.divider-label::after { background: var(--line) !important; }
+.divider-label::before { background: var(--accent) !important; }
+.divider-label { color: var(--tx-2) !important; font-size: 12px !important; font-weight: 700 !important; }
+
+/* table hover softer on light bg */
+.t tbody tr:hover { background: var(--bg-2) !important; }
+
+/* Alert banner — lighter */
+.alert { font-size: 14px !important; font-weight: 500; color: var(--accent); background: rgba(200, 90, 42, 0.08); border: 1px solid var(--accent-line); border-left: 4px solid var(--accent); }
+
+/* Segmented buttons : selected state 흰 배경 → 진한 검정 */
+.segmented { background: var(--bg-2) !important; border-color: var(--line) !important; }
+.segmented button.on { background: var(--tx-1) !important; color: #FFFFFF !important; }
+
+/* seg-chip selected */
+.seg-chip { background: var(--bg-1) !important; border-color: var(--line) !important; color: var(--tx-2) !important; font-size: 12px !important; font-weight: 600 !important; }
+.seg-chip.on { background: var(--accent) !important; color: #FFFFFF !important; border-color: var(--accent) !important; }
+
+/* chip states */
+.chip { color: var(--tx-2) !important; }
+.chip.chip-on { background: var(--tx-1) !important; color: #FFFFFF !important; border-color: var(--tx-1) !important; }
+.chip.chip-saa.chip-on { background: var(--accent) !important; color: #FFFFFF !important; border-color: var(--accent) !important; }
+.chip-range { background: var(--bg-2) !important; color: var(--tx-1) !important; border-color: var(--line) !important; }
+
+/* select (filter dropdown) */
+select.filter-select {
+  background: var(--bg-1) !important;
+  border-color: var(--line) !important;
+  color: var(--tx-1) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3e%3cpath fill='none' stroke='%236B655C' stroke-width='1.5' d='M1 1l4 4 4-4'/%3e%3c/svg%3e") !important;
+}
+
+/* Boxplot track on light */
+.box-track { background: var(--bg-2) !important; }
+.box-whisker { background: var(--line-hard) !important; }
+.box-box { background: var(--accent-wash) !important; border-color: var(--accent-line) !important; }
+.box-median { background: var(--accent) !important; }
+
+/* Range slider on light */
+.range-track { background: var(--bg-3) !important; }
+.range-fill { background: var(--accent) !important; }
+.range-input::-webkit-slider-thumb { background: #FFFFFF !important; border-color: var(--accent) !important; box-shadow: 0 1px 3px rgba(0,0,0,0.25), 0 0 0 1px var(--accent) !important; }
+.range-input::-moz-range-thumb { background: #FFFFFF !important; border-color: var(--accent) !important; }
+
+/* Heat cell text more legible */
+.heat-cell { font-size: 13px !important; font-weight: 700 !important; color: var(--tx-1) !important; }
+
+/* Coming-soon block on light */
+.coming-hero {
+  background:
+    radial-gradient(ellipse at center, rgba(58,122,175,0.06) 0%, transparent 60%),
+    var(--bg-1) !important;
+  border-color: var(--line-hard) !important;
+  color: var(--tx-1) !important;
+}
+
+/* Dark-gradient featured cards used across app — invert to warm pastel */
+[style*="#0f172a"][style*="#1e1b4b"],
+[style*="#0f172a 0%,#1e1b4b 100%"],
+[style*="linear-gradient(135deg,#0f172a 0%,#1e1b4b 100%)"] {
+  background: linear-gradient(135deg, #FFF7E6 0%, #F3E6D4 100%) !important;
+  border-color: var(--accent-line) !important;
+  color: var(--tx-1) !important;
+}
+[style*="linear-gradient(135deg,#0f172a 0%,#1e3a8a 100%)"] {
+  background: linear-gradient(135deg, #EAF1FA 0%, #D7E5F4 100%) !important;
+  border-color: #AFC4DE !important;
+  color: var(--tx-1) !important;
+}
+[style*="linear-gradient(135deg,#0f172a 0%,#2d1b69 100%)"],
+[style*="linear-gradient(135deg,#0f172a 0%,#4c1d95 100%)"] {
+  background: linear-gradient(135deg, #F5F0FA 0%, #E7DAF3 100%) !important;
+  border-color: #C9B4E3 !important;
+  color: var(--tx-1) !important;
+}
+
+/* Z-score badges on light */
+.zbadge { font-size: 12px !important; font-weight: 700 !important; padding: 3px 8px !important; }
+.zbadge.hi { background: rgba(181, 68, 83, 0.15) !important; color: var(--down) !important; }
+.zbadge.mid { background: rgba(200, 90, 42, 0.15) !important; color: var(--accent) !important; }
+.zbadge.lo { background: var(--bg-3) !important; color: var(--tx-2) !important; }
+
+/* Tag color fixes for light */
+.tag-saa { background: rgba(200, 90, 42, 0.12) !important; color: var(--accent) !important; border: 1px solid var(--accent-line) !important; }
+.tag-lock { background: var(--bg-3) !important; color: var(--tx-2) !important; border: 1px solid var(--line) !important; }
+.tag-live { background: rgba(62, 139, 76, 0.12) !important; color: var(--up) !important; border: 1px solid rgba(62, 139, 76, 0.35) !important; }
+.tag-export { background: rgba(125, 90, 168, 0.12) !important; color: #7D5AA8 !important; border: 1px solid rgba(125, 90, 168, 0.35) !important; }
+.tag-domestic { background: rgba(58, 122, 175, 0.12) !important; color: var(--info) !important; border: 1px solid rgba(58, 122, 175, 0.35) !important; }
+.tag-new { background: rgba(62, 139, 76, 0.12) !important; color: var(--up) !important; border: 1px solid rgba(62, 139, 76, 0.35) !important; }
+.tag-soon { background: rgba(58, 122, 175, 0.12) !important; color: var(--info) !important; border: 1px solid rgba(58, 122, 175, 0.35) !important; }
+
+/* KPI delta on light bg */
+.kpi-delta.up { color: var(--up) !important; background: var(--up-wash) !important; }
+.kpi-delta.down { color: var(--down) !important; background: var(--down-wash) !important; }
+.kpi-delta.flat { color: var(--flat) !important; background: rgba(107, 101, 92, 0.10) !important; }
+
+/* Side-select pill (시세 조회 등) */
+label .bg-slate-900\/80 { background: var(--bg-2) !important; color: var(--tx-1) !important; border-color: var(--line) !important; }
+
+/* ============================================================
+   ENCAR DASHBOARD — 추가 컴포넌트
+   ============================================================ */
+
+/* 데이터 출처 레이어 배지 */
+.src-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+  padding: 2px 7px; border-radius: 4px;
+  font-family: var(--ff-body); text-transform: uppercase;
+  white-space: nowrap;
+}
+.src-l0 { background: rgba(58,122,175,0.12); color: var(--info); border: 1px solid rgba(58,122,175,0.30); }
+.src-l2 { background: var(--accent-wash); color: var(--accent); border: 1px solid var(--accent-line); }
+
+/* 분위수 밴드 카드 */
+.band-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.band-cell {
+  border: 1px solid var(--line); background: var(--bg-2);
+  border-radius: var(--r-md); padding: 14px 12px; text-align: center;
+}
+.band-cell.hi { border-color: var(--accent-line); background: var(--accent-wash); }
+.band-cell .lab { font-size: 11px; font-weight: 700; color: var(--tx-3); letter-spacing: 0.04em; }
+.band-cell.hi .lab { color: var(--accent); }
+.band-cell .val { font-family: var(--ff-display); font-size: 30px; font-weight: 700; color: var(--tx-1); line-height: 1; margin-top: 8px; font-variant-numeric: tabular-nums; }
+.band-cell .unit { font-size: 11px; color: var(--tx-3); }
+
+/* 다운로드 카드 */
+.dl-card {
+  display: flex; align-items: center; gap: 16px;
+  background: var(--bg-1); border: 1px solid var(--line);
+  border-radius: var(--r-lg); padding: 18px 20px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.dl-card:hover { border-color: var(--accent-line); box-shadow: 0 2px 8px rgba(60,50,30,0.06); }
+.dl-ic {
+  width: 42px; height: 42px; flex-shrink: 0; border-radius: var(--r-md);
+  display: grid; place-items: center; background: var(--accent-wash);
+  color: var(--accent); font-size: 18px; font-weight: 800;
+}
+.dl-meta { flex: 1; min-width: 0; }
+.dl-meta .t { font-size: 14px; font-weight: 700; color: var(--tx-1); }
+.dl-meta .d { font-size: 12px; color: var(--tx-3); margin-top: 2px; }
+.dl-btn {
+  flex-shrink: 0; background: var(--accent); color: #fff;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
+  padding: 9px 16px; border-radius: var(--r-pill); text-transform: uppercase;
+  transition: background .15s;
+}
+.dl-btn:hover { background: var(--accent-2); text-decoration: none; }
+
+/* dimension selector */
+.dim-bar { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* 가로 막대 (분포 미니) */
+.barline { display: flex; align-items: center; gap: 10px; padding: 5px 0; }
+.barline .bl-label { width: 96px; font-size: 12px; color: var(--tx-2); font-weight: 600; flex-shrink: 0; white-space: nowrap; }
+.barline .bl-track { flex: 1; height: 18px; background: var(--bg-2); border-radius: 3px; overflow: hidden; }
+.barline .bl-fill { height: 100%; background: var(--accent); border-radius: 3px; }
+.barline .bl-val { width: 78px; text-align: right; font-size: 12px; font-weight: 600; color: var(--tx-1); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+
+/* note box */
+.notebox {
+  font-size: 12px; color: var(--tx-2); line-height: 1.7;
+  background: var(--bg-2); border: 1px solid var(--line);
+  border-left: 3px solid var(--info); border-radius: var(--r-md);
+  padding: 12px 16px;
+}
+
+/* skeleton/loading */
+.loading-wrap { display: grid; place-items: center; min-height: 50vh; color: var(--tx-3); }
+.spinner {
+  width: 32px; height: 32px; border: 3px solid var(--line);
+  border-top-color: var(--accent); border-radius: 50%;
+  animation: spin 0.8s linear infinite; margin-bottom: 12px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* select 화살표 타일링 방지 (Tailwind base가 background-repeat를 reset) */
+select.filter-select {
+  background-repeat: no-repeat !important;
+  background-position: right 10px center !important;
+  background-size: 10px 6px !important;
+}
+
+/* 시세조회 필터 패널: 넓은 화면에서만 sticky (좁은 화면 스택 시 겹침 방지) */
+@media (min-width: 1024px) {
+  .lk-aside {
+    position: sticky;
+    top: 64px;
+    align-self: start;
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+  }
+}

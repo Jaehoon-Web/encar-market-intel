@@ -1,0 +1,1 @@
+{"asOf":"2026-04-13","buildDate":"2026-04-13","inventoryTotal":211112,"pricingTotal":150850,"priceSampleTotal":150267,"depositExcluded":583,"modelCount":921,"manufacturerCount":43,"sources":{"L0":{"file":"ids_all.json","rows":211112,"desc":"엔카 전체 매물(목록 단계) = 시장 재고 모수"},"L2":{"file":"encar_final ∩ encar_cleaned","rows":150850,"desc":"더미·이상치 제거된 정제 데이터 = 시세 기준"}}}

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 80" width="240" height="80">
+  
+  <text x="0" y="56" class="wm">SKR</text>
+  <rect x="0" y="66" width="120" height="4" fill="#111111"></rect>
+  <text x="128" y="56" class="wm" style="font-weight:500;fill:#707072;font-size:16px;">현재가치모델</text>
+</svg>

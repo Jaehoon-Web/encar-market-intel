@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>엔카 시장 인텔리전스 — 중고차 재고·시세 대시보드</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="description" content="엔카 중고차 매물 데이터 기반 시장 재고 현황·시세 분석·인사이트 대시보드" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: { extend: {
+      fontFamily: {
+        sans: ['Inter', 'Pretendard Variable', 'Pretendard', 'system-ui', 'sans-serif'],
+        display: ['Barlow Condensed', 'Black Han Sans', 'sans-serif']
+      },
+      colors: { saa: '#C85A2A', up: '#3E8B4C', down: '#B54453' }
+    }}
+  }
+</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body class="font-sans antialiased">
+
+<header class="sticky top-0 z-40">
+  <div class="max-w-[1600px] mx-auto px-6 flex items-center gap-10" style="height:54px;">
+    <a href="#/overview" class="brand-mark shrink-0">
+      <span class="swoosh"></span>
+      <span class="ko">엔카 인텔</span>
+      <span class="en">ENCAR · MARKET INTEL</span>
+    </a>
+    <nav class="flex items-center gap-0 overflow-x-auto no-scrollbar" id="mainNav"></nav>
+    <div class="ml-auto flex items-center gap-4 shrink-0">
+      <span class="eyebrow hidden md:block" id="buildDateLbl">—</span>
+      <span class="tag tag-live">SNAPSHOT</span>
+    </div>
+  </div>
+</header>
+
+<main id="app" class="max-w-[1600px] mx-auto px-6 py-6">
+  <div class="loading-wrap"><div><div class="spinner mx-auto"></div><div class="text-center">데이터 로딩 중…</div></div></div>
+</main>
+
+<footer class="mt-16 py-10 text-center" style="border-top:1px solid var(--line);">
+  <div class="eyebrow mb-2">ENCAR MARKET INTEL · 중고차 재고·시세 데이터 플랫폼</div>
+  <div class="text-[11px]" style="color:var(--tx-4);" id="footMeta">데이터: 엔카 크롤링 스냅샷 · 재고 L0 / 시세 L2</div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
