@@ -8,6 +8,11 @@ __pycache__/
 _verify*.json
 _cleaned_headers.json
 
+# ── 자동화 로그/락 ──
+logs/
+auto_update.lock
+run.lock
+
 # ── 에디터/도구 로컬 설정 ──
 .claude/
 .vscode/
