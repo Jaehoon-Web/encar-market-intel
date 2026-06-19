@@ -1,0 +1,7 @@
+name = "encar-market-intel"
+compatibility_date = "2025-01-01"
+
+# 정적 자산 전용 배포 (Worker 스크립트 없음) — web/ 폴더를 그대로 서빙
+[assets]
+directory = "./web"
+not_found_handling = "single-page-application"
