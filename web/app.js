@@ -175,7 +175,7 @@
             전체 시장 재고 (Market Inventory) ${srcBadge('L0')}
             <span class="tag tag-live">SNAPSHOT</span>
           </div>
-          <div class="text-[11px] mt-0.5" style="color:var(--tx-3)">데이터 기준일 ${meta.asOf||meta.buildDate} (수집 매물 최신 등록일) · 엔카 전체 매물 목록</div>
+          <div class="text-[11px] mt-0.5" style="color:var(--tx-3)">데이터 수집일 ${meta.collectedDate||meta.asOf} · 최신 매물 등록 ${meta.asOf} · 엔카 전체 매물 목록</div>
           <div class="flex items-baseline gap-4 mt-4">
             <div class="hero-value">${nf(inv.total)}</div>
             <div class="text-sm" style="color:var(--tx-3)">대</div>
@@ -248,7 +248,7 @@
         <b>📌 데이터 레이어 안내.</b> 재고·점유·분포 지표는 <b>전체 매물(L0, ${nf(inv.total)}대)</b> 기준,
         시세·가격·잔존율 지표는 <b>정제 데이터(L2, ${nf(pr.count)}대)</b> 기준으로 산출됩니다.
         시세 분위수는 리스승계 인수금·placeholder 매물 <b>${nf(meta.depositExcluded||0)}건</b>을 제외한 <b>${nf(meta.priceSampleTotal||pr.count)}대</b> 표본으로 계산합니다.
-        본 데이터는 <b>${meta.asOf||meta.buildDate} 기준 스냅샷</b>(수집 매물 최신 등록일)이며, 실시간 매물 현황과 다를 수 있습니다.
+        본 데이터는 <b>${meta.collectedDate||meta.asOf} 수집 스냅샷</b>(최신 매물 등록 ${meta.asOf})이며, 실시간 매물 현황과 다를 수 있습니다.
       </div>
     `);
 
@@ -283,7 +283,7 @@
       <section class="card mb-4">
         <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
           <div class="card-title">디멘젼별 재고 현황 ${srcBadge('L0')}</div>
-          <div class="text-[11px]" style="color:var(--tx-3)">데이터 기준일 ${meta.asOf||meta.buildDate} · 전체 ${nf(inv.total)}대</div>
+          <div class="text-[11px]" style="color:var(--tx-3)">데이터 수집일 ${meta.collectedDate||meta.asOf} · 전체 ${nf(inv.total)}대</div>
         </div>
         <div class="card-sub mb-3">분석 축(디멘젼)을 선택하면 해당 기준으로 재고를 분해합니다</div>
         <div class="dim-bar mb-4" id="dimBar">
@@ -325,7 +325,7 @@
       </section>
 
       <div class="notebox">
-        <b>📈 재고 추이(시계열)에 대하여.</b> 현재 데이터는 <b>${meta.asOf||meta.buildDate} 기준 단일 스냅샷</b>입니다.
+        <b>📈 재고 추이(시계열)에 대하여.</b> 현재 데이터는 <b>${meta.collectedDate||meta.asOf} 수집 단일 스냅샷</b>입니다.
         일자별 재고 증감 추이는 <b>정기 재수집으로 스냅샷이 누적</b>되면 활성화됩니다(기획안 4.1 단계 B).
         위 "신규 매물 유입 추이"는 매물 등록일 기반으로 단일 스냅샷에서도 산출 가능한 근사 지표입니다.
       </div>
@@ -394,7 +394,7 @@
       <section class="card mb-4">
         <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
           <div class="card-title">시기별 트렌드 — 엔카 등록월 기준 ${srcBadge('L2')}</div>
-          <div class="text-[11px]" style="color:var(--tx-3)">최근 24개월 · 데이터 기준일 ${DATA.meta.asOf}</div>
+          <div class="text-[11px]" style="color:var(--tx-3)">최근 24개월 · 데이터 수집일 ${DATA.meta.collectedDate||DATA.meta.asOf}</div>
         </div>
         <div class="notebox mt-2" style="border-left-color:var(--warn)">
           <b>⏱ 시간축 안내.</b> 데이터에 별도의 <b>'크롤일' 컬럼이 없어</b> 매물의 <b>엔카 등록월</b>을 시간축으로 사용합니다.
@@ -958,7 +958,7 @@
         <div class="notebox mt-4">
           <b>소스 선택 원칙.</b> "몇 대가 시장에 있나"(재고·점유·분포)는 <b>L0(전체 매물)</b> 기준,
           "얼마에 팔리나"(시세·잔존율)는 <b>L2(정제)</b> 기준으로 산출됩니다.
-          본 데이터는 <b>${meta.asOf||meta.buildDate} 기준 스냅샷</b>(수집 매물 최신 등록일)이며 실시간 매물 현황과 다를 수 있습니다.
+          본 데이터는 <b>${meta.collectedDate||meta.asOf} 수집 스냅샷</b>(최신 매물 등록 ${meta.asOf})이며 실시간 매물 현황과 다를 수 있습니다.
           시세 분위수는 리스승계 인수금·placeholder ${nf(meta.depositExcluded||0)}건을 제외한 ${nf(meta.priceSampleTotal||meta.pricingTotal)}대 표본 기준입니다.
         </div>
       </section>
@@ -988,8 +988,8 @@
       console.error(e);
       return;
     }
-    $('#buildDateLbl').textContent = (DATA.meta.asOf || DATA.meta.buildDate);
-    $('#footMeta').textContent = `재고 L0 ${nf(DATA.meta.inventoryTotal)}대 · 시세 L2 ${nf(DATA.meta.pricingTotal)}대 · ${DATA.meta.asOf||DATA.meta.buildDate} 기준 스냅샷`;
+    $('#buildDateLbl').textContent = (DATA.meta.collectedDate || DATA.meta.asOf);
+    $('#footMeta').textContent = `재고 L0 ${nf(DATA.meta.inventoryTotal)}대 · 시세 L2 ${nf(DATA.meta.pricingTotal)}대 · ${DATA.meta.collectedDate||DATA.meta.asOf} 수집`;
     window.addEventListener('hashchange', route);
     route();
   }

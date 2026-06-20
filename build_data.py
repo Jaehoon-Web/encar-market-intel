@@ -584,8 +584,9 @@ N_DEPOSIT_CL = int(cl["dep"].sum())
 # ============================================================
 print("[6/6] meta.json + 다운로드 CSV...")
 meta = {
-    "asOf": ASOF,                       # 데이터 기준일 = 수집 매물 최신 등록일
-    "buildDate": ASOF,                  # (하위호환) 화면 표기용
+    "collectedDate": datetime.now().strftime("%Y-%m-%d"),  # 실제 수집(크롤·빌드) 일자
+    "asOf": ASOF,                       # 최신 매물 등록일 (max encar_regist_dt)
+    "buildDate": datetime.now().strftime("%Y-%m-%d"),  # (하위호환) = 수집일
     "inventoryTotal": N0,
     "pricingTotal": int(len(l2)),       # L2 정제 데이터 전체
     "priceSampleTotal": int(len(l2p)),  # 시세 분위수 산출 표본(인수금·placeholder 제외)
