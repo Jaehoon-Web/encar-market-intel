@@ -29,6 +29,7 @@
 import asyncio
 import aiohttp
 import json
+import os
 import re
 import csv
 import time
@@ -234,18 +235,28 @@ def load_json(path: Path) -> Any:
 
 
 def save_json(data: Any, path: Path):
-    with open(path, "w", encoding="utf-8") as f:
+    # 원자적 저장: 임시파일에 쓴 뒤 교체 → 저장 중 강제종료돼도 원본 보존
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
 
 
 def save_csv(rows: List[Dict], path: Path):
     if not rows:
         return
     keys = list(rows[0].keys())
-    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+    # 원자적 저장: 임시파일에 쓴 뒤 교체
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
     log.info(f"저장: {path}  ({len(rows):,}행)")
 
 
@@ -565,7 +576,7 @@ async def stage2_collect_details(car_list: List[dict],
     result_path  = OUTPUT_DIR / "details.json"
 
     done_ids   = set(load_json(done_path) or [])
-    existing   = {r["vehicle_id"]: r for r in (load_json(result_path) or [])}
+    existing   = {r["vehicle_id"]: r for r in (load_json(result_path) or []) if "vehicle_id" in r}
 
     if limit:
         car_list = car_list[:limit]
@@ -597,8 +608,12 @@ async def stage2_collect_details(car_list: List[dict],
 
             for r in results:
                 vid = r.get("vehicle_id", r.get("id"))
-                existing[str(vid)] = r
+                if vid:                          # 유효 파싱분만 저장(빈 vehicle_id 제외)
+                    existing[str(vid)] = r
                 done_ids.add(r.get("id", vid))
+            # 처리 시도한 모든 매물을 done 기록 → 판매완료/파싱실패분 무한 재처리 방지
+            for c in batch:
+                done_ids.add(c["id"])
 
             # 배치마다 중간 저장
             all_rows = list(existing.values())
