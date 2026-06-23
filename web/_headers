@@ -1,9 +1,9 @@
 # Cloudflare Pages 캐싱 헤더 (정적 자산)
-# 데이터/다운로드: 재배포 시 갱신되도록 1시간 캐시 + 재검증
+# 데이터/다운로드: 재배포 반영이 빠르도록 5분 캐시 + 재검증 (주간 갱신이라 충분)
 /data/*
-  Cache-Control: public, max-age=3600, must-revalidate
+  Cache-Control: public, max-age=300, must-revalidate
 /downloads/*
-  Cache-Control: public, max-age=3600, must-revalidate
+  Cache-Control: public, max-age=300, must-revalidate
 # 정적 코드 자산
 /styles.css
   Cache-Control: public, max-age=86400
