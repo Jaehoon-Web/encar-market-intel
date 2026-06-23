@@ -153,6 +153,13 @@ with open(os.path.join(SRC, "ids_all.json"), encoding="utf-8") as f:
 # 현재 엔카에 올라와 있는 매물 id 집합 — 시세·분석은 이 '현재 매물'로만 계산(판매완료 제외)
 CURRENT_IDS = set(str(x["id"]) for x in L0)
 
+# L2 정제 시세 데이터 미리 로드 (재고 '판매중' 필터에도 사용 → 아래 L2 섹션에서 재사용)
+#  엔카 목록 API는 판매완료(grace) 매물도 한동안 포함하므로 ids_all 전체(N0)는 과대계상.
+#  상세를 받아 실제 판매중으로 확인된 매물(AVAILABLE_IDS)만 '재고'로 집계한다.
+fin = pd.read_csv(os.path.join(SRC, "encar_final.csv"), encoding="utf-8-sig",
+                  dtype={"vehicle_id": str}, low_memory=False)
+AVAILABLE_IDS = (set(fin["vehicle_id"].dropna()) & CURRENT_IDS)
+
 l0 = pd.DataFrame(L0)
 l0["form_year"] = (pd.to_numeric(l0["year"], errors="coerce") // 100)
 l0["fuel_n"] = l0["fuel_type"].map(norm_fuel)
@@ -164,8 +171,11 @@ l0["yb"] = l0["form_year"].map(year_bucket)
 l0["pb"] = l0["price"].map(price_bucket)
 l0["mb"] = l0["mileage"].map(mileage_bucket)
 l0["green"] = (l0["green_type"] == "Y")
-N0 = len(l0)
-print(f"      L0 rows: {N0:,}")
+N0 = len(l0)                                  # 엔카 등록 매물(판매완료 grace 포함)
+# 재고/분포 집계는 '판매중 실매물'(상세 매칭)만 사용 — 판매완료 제외
+l0_av = l0[l0["id"].astype(str).isin(AVAILABLE_IDS)].copy()
+NAV = len(l0_av)
+print(f"      L0 등록 {N0:,} → 판매중 실매물(재고) {NAV:,}  (판매완료 grace {N0-NAV:,} 제외)")
 
 def dim_counts(df, col, order=None, top=None, with_price=True):
     g = df.groupby(col)
@@ -192,17 +202,19 @@ def dim_counts(df, col, order=None, top=None, with_price=True):
     return rows
 
 inventory = {
-    "total": N0,
-    "byCategory": dim_counts(l0, "cat", order=["국산","수입","기타"]),
-    "greenCount": int(l0["green"].sum()),
+    "total": NAV,                  # 판매중 실매물 = 재고(판매완료 제외)
+    "registeredTotal": N0,         # 엔카 등록 기준(판매완료 grace 포함)
+    "soldExcluded": N0 - NAV,      # 목록엔 있으나 상세상 판매완료(소진)
+    "byCategory": dim_counts(l0_av, "cat", order=["국산","수입","기타"]),
+    "greenCount": int(l0_av["green"].sum()),
     "dims": {
-        "manufacturer": dim_counts(l0, "manufacturer", top=14),
-        "model": dim_counts(l0, "model", top=20),
-        "fuel": dim_counts(l0, "fuel_n", order=["가솔린","디젤","하이브리드","LPG","전기","기타"]),
-        "sido": dim_counts(l0, "sido", order=SIDO_ORDER),
-        "yearBucket": dim_counts(l0, "yb", order=YEAR_BUCKET_ORDER),
-        "priceBucket": dim_counts(l0, "pb", order=PRICE_BUCKET_ORDER),
-        "mileageBucket": dim_counts(l0, "mb", order=MILEAGE_BUCKET_ORDER),
+        "manufacturer": dim_counts(l0_av, "manufacturer", top=14),
+        "model": dim_counts(l0_av, "model", top=20),
+        "fuel": dim_counts(l0_av, "fuel_n", order=["가솔린","디젤","하이브리드","LPG","전기","기타"]),
+        "sido": dim_counts(l0_av, "sido", order=SIDO_ORDER),
+        "yearBucket": dim_counts(l0_av, "yb", order=YEAR_BUCKET_ORDER),
+        "priceBucket": dim_counts(l0_av, "pb", order=PRICE_BUCKET_ORDER),
+        "mileageBucket": dim_counts(l0_av, "mb", order=MILEAGE_BUCKET_ORDER),
     },
 }
 
@@ -210,7 +222,7 @@ inventory = {
 top_makers = [r["key"] for r in inventory["dims"]["manufacturer"] if r["key"] != "기타"][:10]
 cross_mp = []
 for mk in top_makers:
-    sub = l0[l0["manufacturer"] == mk]
+    sub = l0_av[l0_av["manufacturer"] == mk]
     row = {"maker": mk, "cells": []}
     for pb in PRICE_BUCKET_ORDER:
         row["cells"].append(int((sub["pb"] == pb).sum()))
@@ -220,7 +232,7 @@ inventory["crossMakerPrice"] = {"cols": PRICE_BUCKET_ORDER, "rows": cross_mp}
 # 교차: 지역(시도) × 연료
 cross_rf = []
 for sd in SIDO_ORDER:
-    sub = l0[l0["sido"] == sd]
+    sub = l0_av[l0_av["sido"] == sd]
     if len(sub) == 0: continue
     row = {"sido": sd, "cells": []}
     for fu in ["가솔린","디젤","하이브리드","LPG","전기"]:
@@ -234,8 +246,7 @@ dump("inventory.json", inventory)
 # 3) L2 — 정제 시세 데이터 (encar_final ∩ clean_ids)
 # ============================================================
 print("[3/6] L2 정제 시세 데이터 로드/집계...")
-fin = pd.read_csv(os.path.join(SRC, "encar_final.csv"), encoding="utf-8-sig",
-                  dtype={"vehicle_id": str}, low_memory=False)
+# fin 은 위(L0 섹션)에서 이미 로드함 — 재로딩 생략
 # 시세·분석은 '현재 매물(ids_all)에 있는' 정제 차량만 사용 (판매완료/소진 제외)
 l2 = fin[fin["vehicle_id"].isin(clean_ids) & fin["vehicle_id"].isin(CURRENT_IDS)].copy()
 print(f"      L2 rows: {len(l2):,}")
@@ -619,25 +630,23 @@ N_DEPOSIT_CL = int(cld["dep"].sum())
 # 6) meta.json + 다운로드 CSV
 # ============================================================
 print("[6/6] meta.json + 다운로드 CSV...")
-# '판매중 실매물' = 현재 목록(ids_all) 중 상세가 매칭된 차량.
-#   엔카 목록 API는 판매완료(grace) 매물도 한동안 포함하므로 inventoryTotal(목록 전체)은
-#   과대계상됨. 상세를 받아보면 판매완료라 매칭 안 되는 차가 곧 '소진분'.
-available_total = len(set(fin["vehicle_id"]) & CURRENT_IDS)
-sold_in_listing = max(0, N0 - available_total)
+# '판매중 실매물'(NAV) = 현재 목록(ids_all) 중 상세가 매칭된 차량 = 재고.
+#   엔카 목록 API는 판매완료(grace) 매물도 한동안 포함하므로 등록 전체(N0)는 과대계상.
 meta = {
     "collectedDate": datetime.now().strftime("%Y-%m-%d"),  # 실제 수집(크롤·빌드) 일자
     "asOf": ASOF,                       # 최신 매물 등록일 (max encar_regist_dt)
     "buildDate": datetime.now().strftime("%Y-%m-%d"),  # (하위호환) = 수집일
-    "inventoryTotal": N0,
-    "availableTotal": available_total,  # 판매중 실매물(상세 매칭) = 판매완료 제외
-    "soldInListing": sold_in_listing,   # 목록엔 있으나 상세상 판매완료(소진)
+    "inventoryTotal": NAV,              # 재고 = 판매중 실매물(판매완료 제외)
+    "registeredTotal": N0,              # 엔카 등록 기준(판매완료 grace 포함)
+    "availableTotal": NAV,              # (하위호환) = inventoryTotal
+    "soldInListing": N0 - NAV,          # 목록엔 있으나 상세상 판매완료(소진)
     "pricingTotal": int(len(l2)),       # L2 정제 데이터 전체
     "priceSampleTotal": int(len(l2p)),  # 시세 분위수 산출 표본(인수금·placeholder 제외)
     "depositExcluded": N_DEPOSIT,       # 시세 산출에서 제외된 인수금/placeholder 건수
     "modelCount": sum(len(v["models"]) for v in tree.values()),
     "manufacturerCount": len(tree),
     "sources": {
-        "L0": {"file": "ids_all.json", "rows": N0, "desc": "엔카 전체 매물(목록 단계) = 시장 재고 모수"},
+        "L0": {"file": "ids_all.json", "rows": N0, "desc": "엔카 등록 매물(목록, 판매완료 grace 포함) — 재고는 판매중 실매물만"},
         "L2": {"file": "encar_final ∩ encar_cleaned", "rows": int(len(l2)), "desc": "더미·이상치 제거된 정제 데이터 = 시세 기준"},
     },
 }
