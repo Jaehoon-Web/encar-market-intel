@@ -624,12 +624,11 @@ pd.DataFrame(pricing["byManufacturer"]).rename(columns={
 }).to_csv(os.path.join(OUT_DL, "manufacturer_summary.csv"), index=False, encoding="utf-8-sig")
 
 # 다운로드 CSV 4: 컴팩트 매물 (핵심 컬럼)
-comp = l2[["vehicle_id","manufacturer","model_group","model","grade","form_year",
-           "mileage","fuel","body_type","transmission","color","sido",
-           "origin_price","sale_price","residual","cat"]].copy()
+# ※ Cloudflare Workers 자산 파일당 25MiB 제한 → 핵심 11개 컬럼만 유지(용량 < 25MB)
+comp = l2[["vehicle_id","manufacturer","model","grade","form_year",
+           "mileage","fuel","body_type","sido","sale_price","residual"]].copy()
 comp["residual"] = comp["residual"].round(1)
-comp.columns = ["매물ID","제조사","모델그룹","모델","등급","연식","주행km","연료","차체",
-                "변속기","색상","시도","출고가","판매가","잔존율","구분"]
+comp.columns = ["매물ID","제조사","모델","등급","연식","주행km","연료","차체","시도","판매가","잔존율"]
 comp.to_csv(os.path.join(OUT_DL, "listings_compact.csv"), index=False, encoding="utf-8-sig")
 
 for fn in os.listdir(OUT_DL):

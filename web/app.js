@@ -927,7 +927,7 @@
   function renderDownload() {
     const meta = DATA.meta, inv = DATA.inventory, pr = DATA.pricing;
     const files = [
-      ['listings_compact.csv', '전체 매물 (컴팩트)', `${nf(pr.count)}행 · 핵심 16개 컬럼 (제조사·모델·등급·연식·주행·연료·차체·가격·잔존율 등)`, 'L2'],
+      ['listings_compact.csv', '전체 매물 (컴팩트)', `${nf(pr.count)}행 · 핵심 11개 컬럼 (제조사·모델·등급·연식·주행·연료·차체·시도·판매가·잔존율)`, 'L2'],
       ['model_price_summary.csv', '모델별 시세 요약', `${nf(meta.modelCount)}개 모델 · 분위수(P10~P90)·중앙주행·잔존율`, 'L2'],
       ['manufacturer_summary.csv', '제조사별 요약', '제조사별 재고·중앙시세·잔존율·평균주행', 'L2'],
       ['region_summary.csv', '지역별 요약', '시도별 매물수·중앙시세·잔존율·중앙주행', 'L2'],
