@@ -150,6 +150,9 @@ print("[2/6] L0 전체 재고 로드/집계...")
 with open(os.path.join(SRC, "ids_all.json"), encoding="utf-8") as f:
     L0 = json.load(f)
 
+# 현재 엔카에 올라와 있는 매물 id 집합 — 시세·분석은 이 '현재 매물'로만 계산(판매완료 제외)
+CURRENT_IDS = set(str(x["id"]) for x in L0)
+
 l0 = pd.DataFrame(L0)
 l0["form_year"] = (pd.to_numeric(l0["year"], errors="coerce") // 100)
 l0["fuel_n"] = l0["fuel_type"].map(norm_fuel)
@@ -233,7 +236,8 @@ dump("inventory.json", inventory)
 print("[3/6] L2 정제 시세 데이터 로드/집계...")
 fin = pd.read_csv(os.path.join(SRC, "encar_final.csv"), encoding="utf-8-sig",
                   dtype={"vehicle_id": str}, low_memory=False)
-l2 = fin[fin["vehicle_id"].isin(clean_ids)].copy()
+# 시세·분석은 '현재 매물(ids_all)에 있는' 정제 차량만 사용 (판매완료/소진 제외)
+l2 = fin[fin["vehicle_id"].isin(clean_ids) & fin["vehicle_id"].isin(CURRENT_IDS)].copy()
 print(f"      L2 rows: {len(l2):,}")
 
 l2["sale_price"] = pd.to_numeric(l2["sale_price"], errors="coerce")
@@ -470,7 +474,7 @@ dump("insights.json", insights)
 #   · dataset: 클라이언트측 커스텀 시세조회용 컬럼형(dict-encode)
 # ============================================================
 print("[5.5/6] trend.json + dataset.json (cleaned 기반)...")
-NEED = ["제조사","모델그룹","모델","등급","등급상세","연식_년","연식_월","출고연도","차종","연료","색상",
+NEED = ["차량ID","제조사","모델그룹","모델","등급","등급상세","연식_년","연식_월","출고연도","차종","연료","색상",
         "차령_년","주행거리_km","판매가_만원","출고가_만원","감가율_pct","국산여부",
         "외판이상있음","골격이상있음","외판_교환부위","골격_교환부위","리스렌탈의심","엔카등록일"]
 cl = pd.read_csv(os.path.join(SRC, "encar_cleaned.csv"), encoding="utf-8-sig",
@@ -535,7 +539,11 @@ trend = {
 }
 dump("trend.json", trend)
 
-# ---- dataset.json : 클라이언트 커스텀 시세조회용 컬럼형 ----
+# ---- dataset.json : 클라이언트 커스텀 시세조회용 컬럼형 (현재 매물만!) ----
+# 시세조회는 '현재 엔카에 있는' 차량만 → cl을 CURRENT_IDS로 필터
+cld = cl[cl["차량ID"].astype(str).isin(CURRENT_IDS)].reset_index(drop=True)
+print(f"      시세조회 데이터셋: 현재 매물 {len(cld):,} (누적 {len(cl):,} 중)")
+
 def encode(series, fill="(미상)"):
     """범주형 → (사전, 인덱스배열). 결측은 fill 토큰."""
     s = series.fillna(fill).astype(str).replace({"": fill})
@@ -546,26 +554,26 @@ dim, col = {}, {}
 for short, name in [("mfr","제조사"),("mg","모델그룹"),("md","모델"),
                     ("gr","등급"),("gd","등급상세"),("cls","차종"),
                     ("fuel","연료_n"),("color","색상")]:
-    cats, codes = encode(cl[name])
+    cats, codes = encode(cld[name])
     dim[short] = cats
     col[short] = codes
 
 def intcol(series, default=-1, scale=1):
     return [int(round(v/scale)) if pd.notna(v) else default for v in series]
 
-col["yr"]   = intcol(cl["연식_년"])
-col["oyr"]  = intcol(cl["출고연도"])
-col["age"]  = intcol(cl["차령_년"])
-col["km"]   = intcol(cl["주행거리_km"])          # km 단위
-col["price"]= intcol(cl["판매가_만원"])
-col["res"]  = intcol(cl["잔존_disp"])                # 잔존율(%) 합리구간만, 외 -1
-col["acc"]  = [0 if v else 1 for v in cl["무사고"]]   # 0=무사고, 1=사고/이상
-col["exch"] = [1 if v else 0 for v in cl["교환"]]     # 1=교환이력
-col["lease"]= [1 if v else 0 for v in cl["리스의심"]]
-col["dep"]  = [1 if v else 0 for v in cl["dep"]]      # 1=인수금 의심(기본 제외)
+col["yr"]   = intcol(cld["연식_년"])
+col["oyr"]  = intcol(cld["출고연도"])
+col["age"]  = intcol(cld["차령_년"])
+col["km"]   = intcol(cld["주행거리_km"])          # km 단위
+col["price"]= intcol(cld["판매가_만원"])
+col["res"]  = intcol(cld["잔존_disp"])                # 잔존율(%) 합리구간만, 외 -1
+col["acc"]  = [0 if v else 1 for v in cld["무사고"]]   # 0=무사고, 1=사고/이상
+col["exch"] = [1 if v else 0 for v in cld["교환"]]     # 1=교환이력
+col["lease"]= [1 if v else 0 for v in cld["리스의심"]]
+col["dep"]  = [1 if v else 0 for v in cld["dep"]]      # 1=인수금 의심(기본 제외)
 
 dataset = {
-    "n": int(len(cl)),
+    "n": int(len(cld)),
     "asOf": ASOF,
     "dim": dim,
     "col": col,
@@ -577,7 +585,7 @@ dataset = {
     },
 }
 dump("dataset.json", dataset)
-N_DEPOSIT_CL = int(cl["dep"].sum())
+N_DEPOSIT_CL = int(cld["dep"].sum())
 
 # ============================================================
 # 6) meta.json + 다운로드 CSV
