@@ -177,11 +177,15 @@
             전체 시장 재고 (Market Inventory) ${srcBadge('L0')}
             <span class="tag tag-live">SNAPSHOT</span>
           </div>
-          <div class="text-[11px] mt-0.5" style="color:var(--tx-3)">데이터 수집일 ${meta.collectedDate||meta.asOf} · 최신 매물 등록 ${meta.asOf} · 엔카 전체 매물 목록</div>
+          <div class="text-[11px] mt-0.5" style="color:var(--tx-3)">데이터 수집일 ${meta.collectedDate||meta.asOf} · 최신 매물 등록 ${meta.asOf} · 엔카 전체 등록 매물(판매완료 grace 포함)</div>
           <div class="flex items-baseline gap-4 mt-4">
             <div class="hero-value">${nf(inv.total)}</div>
             <div class="text-sm" style="color:var(--tx-3)">대</div>
           </div>
+          ${meta.availableTotal ? `<div class="text-[12px] mt-3 flex flex-wrap items-center gap-x-3 gap-y-1" style="color:var(--tx-2)">
+            <span>이 중 <b style="color:var(--accent)">판매중 실매물 ${nf(meta.availableTotal)}대</b></span>
+            <span style="color:var(--tx-4)">· 판매완료(소진) ${nf(meta.soldInListing||0)}대는 시세에서 제외</span>
+          </div>` : ''}
           <div class="grid grid-cols-3 gap-2 mt-6">
             ${[['국산', cat['국산'], PAL.accent], ['수입', cat['수입'], PAL.blue], ['미분류', cat['기타']||0, PAL.muted]].map(([k,v,c]) => `
               <div class="rounded-lg border px-3 py-3" style="border-color:var(--line);background:var(--bg-2)">
@@ -1003,13 +1007,16 @@
         <table class="t">
           <thead><tr><th>레이어</th><th>모집단</th><th class="num">건수</th><th>용도</th></tr></thead>
           <tbody>
-            <tr><td>${srcBadge('L0')}</td><td>엔카 전체 매물 (목록 단계)</td><td class="num"><b>${nf(meta.inventoryTotal)}</b></td><td style="color:var(--tx-2)">시장 재고 현황·분포</td></tr>
+            <tr><td>${srcBadge('L0')}</td><td>엔카 전체 등록 매물 (목록 단계, 판매완료 grace 포함)</td><td class="num"><b>${nf(meta.inventoryTotal)}</b></td><td style="color:var(--tx-2)">시장 재고 모수</td></tr>
+            ${meta.availableTotal ? `<tr><td>${srcBadge('L0')}</td><td>판매중 실매물 (상세 매칭 · 판매완료 ${nf(meta.soldInListing||0)}대 제외)</td><td class="num"><b>${nf(meta.availableTotal)}</b></td><td style="color:var(--tx-2)">실제 판매중 현황</td></tr>` : ''}
             <tr><td>${srcBadge('L2')}</td><td>더미·이상치 제거 정제 데이터</td><td class="num"><b>${nf(meta.pricingTotal)}</b></td><td style="color:var(--tx-2)">시세·가격·잔존율 분석</td></tr>
           </tbody>
         </table>
         <div class="notebox mt-4">
           <b>소스 선택 원칙.</b> "몇 대가 시장에 있나"(재고·점유·분포)는 <b>L0(전체 매물)</b> 기준,
           "얼마에 팔리나"(시세·잔존율)는 <b>L2(정제)</b> 기준으로 산출됩니다.
+          엔카 목록 API는 <b>판매완료(grace) 매물도 한동안 포함</b>하므로 L0 전체(${nf(meta.inventoryTotal)})에는 이미 팔린 매물이 섞여 있고,
+          상세를 받아 실제 판매중으로 확인된 <b>판매중 실매물(${nf(meta.availableTotal||meta.pricingTotal)})</b>만 시세·분석에 사용합니다.
           본 데이터는 <b>${meta.collectedDate||meta.asOf} 수집 스냅샷</b>(최신 매물 등록 ${meta.asOf})이며 실시간 매물 현황과 다를 수 있습니다.
           시세 분위수는 리스승계 인수금·placeholder ${nf(meta.depositExcluded||0)}건을 제외한 ${nf(meta.priceSampleTotal||meta.pricingTotal)}대 표본 기준입니다.
         </div>

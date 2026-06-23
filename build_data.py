@@ -619,11 +619,18 @@ N_DEPOSIT_CL = int(cld["dep"].sum())
 # 6) meta.json + 다운로드 CSV
 # ============================================================
 print("[6/6] meta.json + 다운로드 CSV...")
+# '판매중 실매물' = 현재 목록(ids_all) 중 상세가 매칭된 차량.
+#   엔카 목록 API는 판매완료(grace) 매물도 한동안 포함하므로 inventoryTotal(목록 전체)은
+#   과대계상됨. 상세를 받아보면 판매완료라 매칭 안 되는 차가 곧 '소진분'.
+available_total = len(set(fin["vehicle_id"]) & CURRENT_IDS)
+sold_in_listing = max(0, N0 - available_total)
 meta = {
     "collectedDate": datetime.now().strftime("%Y-%m-%d"),  # 실제 수집(크롤·빌드) 일자
     "asOf": ASOF,                       # 최신 매물 등록일 (max encar_regist_dt)
     "buildDate": datetime.now().strftime("%Y-%m-%d"),  # (하위호환) = 수집일
     "inventoryTotal": N0,
+    "availableTotal": available_total,  # 판매중 실매물(상세 매칭) = 판매완료 제외
+    "soldInListing": sold_in_listing,   # 목록엔 있으나 상세상 판매완료(소진)
     "pricingTotal": int(len(l2)),       # L2 정제 데이터 전체
     "priceSampleTotal": int(len(l2p)),  # 시세 분위수 산출 표본(인수금·placeholder 제외)
     "depositExcluded": N_DEPOSIT,       # 시세 산출에서 제외된 인수금/placeholder 건수
