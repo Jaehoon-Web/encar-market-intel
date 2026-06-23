@@ -246,12 +246,22 @@ def main():
                 details_path = OUTPUT_DIR / "details.json"
                 if details_path.exists():
                     done_cnt  = len(json.load(open(done_path, encoding="utf-8"))) if done_path.exists() else 0
-                    # details.json 기준 실제 완료 수 빠르게 체크 (메모리 효율 위해 grep 방식)
-                    import subprocess as sp
-                    actual_cnt = int(sp.run(
-                        ["grep", "-c", '"inspect_crawled": true', str(details_path)],
-                        capture_output=True, text=True
-                    ).stdout.strip() or "0")
+                    # details.json 기준 실제 완료 수 (grep 의존 제거 → 순수 파이썬 청크 스캔, 메모리 효율)
+                    actual_cnt = 0
+                    try:
+                        needle = '"inspect_crawled": true'
+                        with open(details_path, encoding="utf-8") as _f:
+                            _prev = ""
+                            while True:
+                                _chunk = _f.read(1 << 20)  # 1MB씩 스트리밍
+                                if not _chunk:
+                                    break
+                                _buf = _prev + _chunk
+                                actual_cnt += _buf.count(needle)
+                                _prev = _buf[-len(needle):]  # 청크 경계에 걸친 패턴 보정
+                    except Exception as _e:
+                        print(f"[경고] 체크포인트 카운트 실패({_e}) → 복구 건너뜀")
+                        actual_cnt = 0
                     if actual_cnt > done_cnt * 2:  # 체크포인트가 실제보다 크게 적으면 복구
                         print(f"\n[자동 복구] 체크포인트({done_cnt:,}대) vs 실제 데이터({actual_cnt:,}대) 불일치 → 재동기화")
                         repair_inspect_checkpoint()
@@ -280,6 +290,9 @@ def main():
     else:
         print("[파이프라인 중단] 오류를 확인하고 다시 실행하세요.")
         print("  이어서 실행: python run.py")
+
+    # 감시 루프가 성공/실패를 종료코드로 판별할 수 있도록
+    sys.exit(0 if ok else 1)
 
 
 if __name__ == "__main__":
