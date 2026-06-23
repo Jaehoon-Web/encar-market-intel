@@ -123,6 +123,8 @@
   // ============================================================
   const srcBadge = lv => lv==='L0'
     ? '<span class="src-badge src-l0" title="전체 재고 · ids_all">재고 L0</span>'
+    : lv==='HIST'
+    ? '<span class="src-badge" style="background:rgba(125,90,168,0.14);color:#7D5AA8;border:1px solid rgba(125,90,168,0.35)" title="누적 이력 · history">누적 이력</span>'
     : '<span class="src-badge src-l2" title="정제 시세 · cleaned">시세 L2</span>';
 
   const kpiCard = (label, value, unit, sub, src) => `
@@ -390,16 +392,42 @@
   function renderTrend() {
     const tr = DATA.trend, m = tr.months;
     const labels = m.map(x => x.ym);
+    const cs = tr.crawlSnapshots || [];
+    const last = cs[cs.length - 1] || {};
+    const crawlReady = cs.length >= 2;
+    const crawlSection = crawlReady ? `
+      <section class="card mb-4">
+        <div class="card-title mb-1">크롤일별 시장 추세 ${srcBadge('HIST')}</div>
+        <div class="card-sub mb-3">크롤(수집) 시점별 시장 변화 · ${cs.length}회 누적</div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div style="height:240px"><canvas id="csVol"></canvas></div>
+          <div style="height:240px"><canvas id="csPrice"></canvas></div>
+        </div>
+      </section>` : `
+      <section class="card mb-4">
+        <div class="card-title mb-1">크롤일별 시장 추세 ${srcBadge('HIST')}</div>
+        <div class="card-sub mb-3">크롤 ${cs.length}회 누적 — 매주 수요일 쌓여 <b>추세 그래프가 자동 활성화</b>됩니다 (2회차부터)</div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          ${[['재고수', last.inventory!=null?nf(last.inventory)+'대':'–'],
+             ['신규 유입', last.newIn!=null?nf(last.newIn)+'대':'–'],
+             ['판매 소진', last.soldOut!=null?nf(last.soldOut)+'대':'–'],
+             ['평균 체류일', last.avgDwell!=null?last.avgDwell+'일':'–']].map(([k,v])=>`
+            <div class="rounded-lg border p-3" style="border-color:var(--line);background:var(--bg-2)">
+              <div class="text-[11px]" style="color:var(--tx-3)">${k}</div>
+              <div class="text-lg font-bold mt-1">${v}</div></div>`).join('')}
+        </div>
+        <div class="text-[11px] mt-2" style="color:var(--tx-4)">최신 크롤: ${last.date||'–'} · 다음 누적: 매주 수 09:00</div>
+      </section>`;
     mount(`
+      ${crawlSection}
       <section class="card mb-4">
         <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
-          <div class="card-title">시기별 트렌드 — 엔카 등록월 기준 ${srcBadge('L2')}</div>
+          <div class="card-title">보조: 엔카 등록월 기준 추이 ${srcBadge('L2')}</div>
           <div class="text-[11px]" style="color:var(--tx-3)">최근 24개월 · 데이터 수집일 ${DATA.meta.collectedDate||DATA.meta.asOf}</div>
         </div>
         <div class="notebox mt-2" style="border-left-color:var(--warn)">
-          <b>⏱ 시간축 안내.</b> 데이터에 별도의 <b>'크롤일' 컬럼이 없어</b> 매물의 <b>엔카 등록월</b>을 시간축으로 사용합니다.
-          본 데이터는 단일 스냅샷이라, 과거 월일수록 이미 판매되어 적게 남는 <b>생존편향</b>이 있습니다(과거 구간 수치는 "그 달 등록되어 아직 거래 중인 매물" 기준).
-          최근 구간일수록 신규 유입에 가깝습니다. <b>크롤을 정기 반복해 스냅샷이 누적되면</b> 진짜 재고 증감 추이가 가능합니다(기획안 단계 B).
+          <b>⏱ 안내.</b> 위 '크롤일별 추세'가 누적될 때까지의 보조 지표입니다. 매물 <b>엔카 등록월</b>을 시간축으로 하며,
+          과거 월일수록 이미 판매돼 적게 남는 <b>생존편향</b>이 있습니다(최근 구간일수록 신규 유입에 가까움).
         </div>
       </section>
 
@@ -451,6 +479,28 @@
         </div>
       </section>
     `);
+
+    if (crawlReady) {
+      const cl_ = cs.map(s=>s.date);
+      track(new Chart($('#csVol'), {
+        type:'line',
+        data:{ labels: cl_, datasets:[
+          { label:'재고수', data: cs.map(s=>s.inventory), borderColor:PAL.blue, backgroundColor:PAL.blue, tension:0.3, pointRadius:2, borderWidth:2, yAxisID:'y' },
+          { label:'신규 유입', data: cs.map(s=>s.newIn), borderColor:PAL.green, backgroundColor:PAL.green, tension:0.3, pointRadius:2, borderWidth:2, yAxisID:'y1' },
+          { label:'판매 소진', data: cs.map(s=>s.soldOut), borderColor:PAL.down, backgroundColor:PAL.down, tension:0.3, pointRadius:2, borderWidth:2, yAxisID:'y1' },
+        ]},
+        options:{ responsive:true, maintainAspectRatio:false, scales:{ x:axX(),
+          y:axY({position:'left',title:{display:true,text:'재고',color:PAL.fg}}),
+          y1:axY({position:'right',grid:{display:false},title:{display:true,text:'유입/소진',color:PAL.fg}}) } }
+      }));
+      track(new Chart($('#csPrice'), {
+        type:'line',
+        data:{ labels: cl_, datasets:[
+          { label:'중앙 시세(만원)', data: cs.map(s=>s.medPrice), borderColor:PAL.accent, backgroundColor:withAlpha(PAL.accent,0.1), fill:true, tension:0.3, pointRadius:2, borderWidth:2.5 },
+        ]},
+        options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ x:axX(), y:axY({ticks:{callback:v=>nf(v)+'만',color:PAL.axis}}) } }
+      }));
+    }
 
     barChart($('#trCount'), labels, m.map(x=>x.count), { color: PAL.accent, label:'등록 매물수', valueFmt:v=>nf(v)+'대' });
 
@@ -927,15 +977,17 @@
   function renderDownload() {
     const meta = DATA.meta, inv = DATA.inventory, pr = DATA.pricing;
     const files = [
-      ['listings_compact.csv', '전체 매물 (컴팩트)', `${nf(pr.count)}행 · 핵심 11개 컬럼 (제조사·모델·등급·연식·주행·연료·차체·시도·판매가·잔존율)`, 'L2'],
+      ['listings_compact.csv', '현재 매물 (컴팩트)', `${nf(pr.count)}행 · 현재 엔카 매물 · 핵심 11개 컬럼 (제조사·모델·등급·연식·주행·연료·차체·시도·판매가·잔존율)`, 'L2'],
       ['model_price_summary.csv', '모델별 시세 요약', `${nf(meta.modelCount)}개 모델 · 분위수(P10~P90)·중앙주행·잔존율`, 'L2'],
       ['manufacturer_summary.csv', '제조사별 요약', '제조사별 재고·중앙시세·잔존율·평균주행', 'L2'],
       ['region_summary.csv', '지역별 요약', '시도별 매물수·중앙시세·잔존율·중앙주행', 'L2'],
+      ['history_accumulated.csv', '누적 이력 (전체 크롤)', '판매완료 포함 · 차량별 가격변동/판매상태 이력 · 크롤일 태깅', 'HIST'],
+      ['trend_snapshots.csv', '크롤일별 시장 추세 집계', '재고·평균/중앙시세·신규유입·판매소진·평균체류일·연료믹스 (주간 누적)', 'HIST'],
     ];
     mount(`
       <section class="card mb-4">
         <div class="card-title mb-1">데이터 다운로드</div>
-        <div class="card-sub mb-4">집계·요약 데이터를 CSV(UTF-8)로 내려받을 수 있습니다. 엑셀에서 바로 열립니다.</div>
+        <div class="card-sub mb-4">집계·요약 데이터를 CSV로 내려받을 수 있습니다. <b>엑셀(한국어)에서 바로 열려도 한글이 깨지지 않도록 CP949로 저장</b>됩니다.</div>
         <div class="space-y-3">
           ${files.map(([fn,t,d,src]) => `
             <div class="dl-card">

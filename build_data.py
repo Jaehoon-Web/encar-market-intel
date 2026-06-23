@@ -531,10 +531,38 @@ for per in recent:
         "domesticShare": round(float(m["국산"].mean() * 100), 1),
         "fuel": {f: round(float(fuelmix.get(f, 0.0)), 1) for f in ["가솔린","디젤","하이브리드","전기","LPG"]},
     })
+# ---- 크롤일별 스냅샷 시계열 (history 기반 — 진짜 시장 추세) ----
+crawl_snaps = []
+_trend_csv = os.path.join(SRC, "trend_snapshots.csv")
+def _n(v):
+    try:
+        if pd.isna(v): return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(v, str) and v == "": return None
+    return v
+def _i(v):
+    return int(v) if pd.notna(v) else None
+if os.path.exists(_trend_csv):
+    ts = pd.read_csv(_trend_csv, encoding="utf-8-sig")
+    for _, r in ts.iterrows():
+        crawl_snaps.append({
+            "date": str(r["크롤일"]),
+            "inventory": _i(r["재고수"]), "detailed": _i(r["상세수"]),
+            "avgPrice": _n(r["평균가"]), "medPrice": _n(r["중앙가"]),
+            "newIn": _i(r["신규유입"]), "soldOut": _i(r["판매소진"]),
+            "avgDwell": _n(r["평균체류일"]),
+            "avgYear": _n(r["평균연식"]), "medMileage": _n(r["중앙주행"]),
+            "fuel": {"가솔린": _n(r["가솔린%"]), "디젤": _n(r["디젤%"]),
+                     "하이브리드": _n(r["하이브리드%"]), "전기": _n(r["전기%"]), "LPG": _n(r["LPG%"])},
+        })
+
 trend = {
     "asOf": ASOF,
-    "axis": "엔카등록월",
-    "note": "별도 '크롤일' 컬럼이 데이터에 없어 매물 등록월을 시간축으로 사용. 단일 스냅샷이라 과거월은 이미 판매되어 적게 남는 생존편향이 있으며, 최근 구간일수록 신규 유입에 가깝다.",
+    "axis": "크롤일",
+    "crawlSnapshots": crawl_snaps,            # 진짜 크롤일별 시장 추세(주 누적)
+    "note": "크롤일별 스냅샷이 누적될수록 추세가 풍부해집니다. 아래 '등록월'은 단일 스냅샷에서도 보이는 보조 지표(생존편향 있음).",
+    "monthsAxis": "엔카등록월",
     "months": tr_rows,
 }
 dump("trend.json", trend)
@@ -608,6 +636,10 @@ meta = {
 }
 dump("meta.json", meta)
 
+# 다운로드 CSV는 엑셀(한국어)에서 한글이 안 깨지도록 CP949(ANSI) 인코딩으로 저장
+def to_excel_csv(df, name):
+    df.to_csv(os.path.join(OUT_DL, name), index=False, encoding="cp949", errors="replace")
+
 # 다운로드 CSV 1: 모델 시세 요약
 rows = []
 for mk, mv in tree.items():
@@ -618,26 +650,34 @@ for mk, mv in tree.items():
             "P75": nd["p75"], "최고(P90)": nd["p90"],
             "중앙주행km": nd["medMileage"], "중앙연식": nd["medYear"], "평균잔존율": nd["avgResidual"],
         })
-pd.DataFrame(rows).sort_values("매물수", ascending=False).to_csv(
-    os.path.join(OUT_DL, "model_price_summary.csv"), index=False, encoding="utf-8-sig")
+to_excel_csv(pd.DataFrame(rows).sort_values("매물수", ascending=False), "model_price_summary.csv")
 
 # 다운로드 CSV 2: 지역 요약
-pd.DataFrame(insights["region"]).rename(columns={
+to_excel_csv(pd.DataFrame(insights["region"]).rename(columns={
     "key":"시도","count":"매물수","medPrice":"중앙시세","medResidual":"중앙잔존율","medMileage":"중앙주행km"
-}).to_csv(os.path.join(OUT_DL, "region_summary.csv"), index=False, encoding="utf-8-sig")
+}), "region_summary.csv")
 
 # 다운로드 CSV 3: 제조사 요약
-pd.DataFrame(pricing["byManufacturer"]).rename(columns={
+to_excel_csv(pd.DataFrame(pricing["byManufacturer"]).rename(columns={
     "key":"제조사","count":"매물수","medPrice":"중앙시세","medResidual":"중앙잔존율","avgMileage":"평균주행km"
-}).to_csv(os.path.join(OUT_DL, "manufacturer_summary.csv"), index=False, encoding="utf-8-sig")
+}), "manufacturer_summary.csv")
 
-# 다운로드 CSV 4: 컴팩트 매물 (핵심 컬럼)
-# ※ Cloudflare Workers 자산 파일당 25MiB 제한 → 핵심 11개 컬럼만 유지(용량 < 25MB)
+# 다운로드 CSV 4: 현재 매물 (컴팩트, 핵심 11컬럼) — 현재 엔카 매물만
 comp = l2[["vehicle_id","manufacturer","model","grade","form_year",
            "mileage","fuel","body_type","sido","sale_price","residual"]].copy()
 comp["residual"] = comp["residual"].round(1)
 comp.columns = ["매물ID","제조사","모델","등급","연식","주행km","연료","차체","시도","판매가","잔존율"]
-comp.to_csv(os.path.join(OUT_DL, "listings_compact.csv"), index=False, encoding="utf-8-sig")
+to_excel_csv(comp, "listings_compact.csv")
+
+# 다운로드 CSV 5: 누적 이력 (전체 크롤 스냅샷) — 판매완료 포함, 가격변동 추적용
+_hist = os.path.join(SRC, "history.csv")
+if os.path.exists(_hist):
+    hist_df = pd.read_csv(_hist, encoding="utf-8-sig", dtype=str)
+    to_excel_csv(hist_df, "history_accumulated.csv")
+# 다운로드 CSV 6: 크롤일별 시장 추세 집계
+_ts = os.path.join(SRC, "trend_snapshots.csv")
+if os.path.exists(_ts):
+    to_excel_csv(pd.read_csv(_ts, encoding="utf-8-sig"), "trend_snapshots.csv")
 
 for fn in os.listdir(OUT_DL):
     print(f"  [dl] {fn}  ({os.path.getsize(os.path.join(OUT_DL, fn))/1024:.0f} KB)")
