@@ -340,12 +340,17 @@ def _parse_list_item(car: dict, category: str) -> dict:
 
 MAX_OFFSET = 28000   # 안전한 최대 offset (API 한계 약 30k)
 
+# 1단계 실패 서브쿼리 재시도 라운드 간 대기(초). 테더링 끊김·일시 차단(약 10여 분) 회복용
+STAGE1_RETRY_WAITS = [120, 300, 600]
+
 
 async def collect_subquery(session: aiohttp.ClientSession,
-                           sub: dict) -> List[dict]:
+                           sub: dict) -> Optional[List[dict]]:
     """
     단일 서브쿼리에 대한 ID 수집.
     MAX_OFFSET 초과 시 경고 로그 출력 (누락 가능성).
+    API 실패(첫 페이지 또는 중간 페이지)면 None 반환 + 캐시 저장 안 함
+    → 부분 수집분이 '완료'로 남아 재고가 과소집계되는 것을 막는다.
     """
     label = sub["label"]
     query = sub["q"]
@@ -360,8 +365,8 @@ async def collect_subquery(session: aiohttp.ClientSession,
     # 총 개수 확인
     first = await fetch_list_page(session, query, 0)
     if not first:
-        log.warning(f"[{label}] API 실패, 건너뜀")
-        return []
+        log.warning(f"[{label}] API 실패")
+        return None
 
     total = first.get("Count", 0)
     if total == 0:
@@ -379,18 +384,21 @@ async def collect_subquery(session: aiohttp.ClientSession,
     seen_ids: set = set()
     sem = asyncio.Semaphore(CONCURRENCY_LIST)
 
-    async def fetch_page(offset: int) -> List[dict]:
+    async def fetch_page(offset: int) -> Optional[List[dict]]:
         async with sem:
             await asyncio.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
             data = await fetch_list_page(session, query, offset)
             if not data:
-                return []
+                return None
             return [_parse_list_item(c, tab) for c in data.get("SearchResults", [])]
 
     # 순차 처리로 중복 조기 감지
     consecutive_dupe_pages = 0
     for offset in offsets:
         page_items = await fetch_page(offset)
+        if page_items is None:
+            log.warning(f"[{label}] offset={offset:,} 페이지 API 실패 → 부분 수집 폐기")
+            return None
         new_items = []
         for item in page_items:
             if item["id"] not in seen_ids:
@@ -424,10 +432,36 @@ async def stage1_collect_ids(fresh: bool = False) -> List[dict]:
     connector = aiohttp.TCPConnector(limit=10)
     async with aiohttp.ClientSession(connector=connector) as session:
         all_items: List[dict] = []
+        failed: List[dict] = []
         for sub in SUB_QUERIES:
             items = await collect_subquery(session, sub)
-            all_items.extend(items)
+            if items is None:
+                failed.append(sub)
+            else:
+                all_items.extend(items)
             await asyncio.sleep(1.0)  # 서브쿼리 사이 휴식
+
+        # 실패분만 대기 후 재시도 (성공분은 캐시돼 있어 재조회 안 함)
+        for wait in STAGE1_RETRY_WAITS:
+            if not failed:
+                break
+            log.warning(f"1단계 실패 서브쿼리 {len(failed)}개 → {wait}초 대기 후 재시도")
+            await asyncio.sleep(wait)
+            retry, failed = failed, []
+            for sub in retry:
+                items = await collect_subquery(session, sub)
+                if items is None:
+                    failed.append(sub)
+                else:
+                    all_items.extend(items)
+                await asyncio.sleep(1.0)
+
+    if failed:
+        # ids_all.json을 만들지 않고 비정상 종료 → run.py/auto_update가 이후 단계(이력·빌드·배포)를 중단.
+        # 성공한 서브쿼리는 캐시돼 있으므로 'python auto_update.py --resume' 로 실패분만 다시 조회된다.
+        log.error(f"1단계 실패: 서브쿼리 {len(failed)}개 미수집 → 파이프라인 중단 "
+                  f"({', '.join(s['label'] for s in failed[:10])}{' ...' if len(failed) > 10 else ''})")
+        raise SystemExit(2)
 
     # 전체 중복 제거 (동일 ID가 여러 서브쿼리에 중복 가능)
     seen: Dict[str, dict] = {}
