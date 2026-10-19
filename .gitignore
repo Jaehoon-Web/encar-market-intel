@@ -1,6 +1,8 @@
 # ── 원천 대용량 데이터 (절대 커밋 금지: 250MB CSV ×5 ≈ 1GB) ──
 encar_output/
 *.zip
+# 배포용 압축 다운로드(누적 이력)는 커밋
+!web/downloads/*.zip
 
 # ── 파이썬 캐시/임시 ──
 __pycache__/

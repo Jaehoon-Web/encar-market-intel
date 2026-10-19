@@ -984,7 +984,7 @@
       ['model_price_summary.csv', '모델별 시세 요약', `${nf(meta.modelCount)}개 모델 · 분위수(P10~P90)·중앙주행·잔존율`, 'L2'],
       ['manufacturer_summary.csv', '제조사별 요약', '제조사별 재고·중앙시세·잔존율·평균주행', 'L2'],
       ['region_summary.csv', '지역별 요약', '시도별 매물수·중앙시세·잔존율·중앙주행', 'L2'],
-      ['history_accumulated.csv', '누적 이력 (전체 크롤)', '판매완료 포함 · 차량별 가격변동/판매상태 이력 · 크롤일 태깅', 'HIST'],
+      ['history_accumulated.zip', '누적 이력 (전체 크롤)', '판매완료 포함 · 차량별 가격변동/판매상태 이력 · 크롤일 태깅 · zip 압축(풀면 CSV)', 'HIST'],
       ['trend_snapshots.csv', '크롤일별 시장 추세 집계', '재고·평균/중앙시세·신규유입·판매소진·평균체류일·연료믹스 (주간 누적)', 'HIST'],
     ];
     mount(`
@@ -994,7 +994,7 @@
         <div class="space-y-3">
           ${files.map(([fn,t,d,src]) => `
             <div class="dl-card">
-              <div class="dl-ic">CSV</div>
+              <div class="dl-ic">${fn.endsWith('.zip') ? 'ZIP' : 'CSV'}</div>
               <div class="dl-meta"><div class="t">${t} ${srcBadge(src)}</div><div class="d">${d}</div></div>
               <a class="dl-btn" href="downloads/${fn}" download>다운로드</a>
             </div>`).join('')}

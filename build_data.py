@@ -11,7 +11,7 @@ build_data.py — 엔카 크롤링 데이터를 웹 대시보드용 집계 JSON/
   web/data/*.json       대시보드 집계
   web/downloads/*.csv    다운로드용 집계/요약
 """
-import json, csv, math, os
+import json, csv, math, os, zipfile
 from collections import Counter, defaultdict
 from datetime import datetime
 import pandas as pd
@@ -686,10 +686,17 @@ comp.columns = ["매물ID","제조사","모델","등급","연식","주행km","�
 to_excel_csv(comp, "listings_compact.csv")
 
 # 다운로드 CSV 5: 누적 이력 (전체 크롤 스냅샷) — 판매완료 포함, 가격변동 추적용
+#   주간 누적으로 계속 커져 Cloudflare 정적 자산 한도(파일당 25MiB)를 넘으므로 zip 압축으로 제공
 _hist = os.path.join(SRC, "history.csv")
 if os.path.exists(_hist):
     hist_df = pd.read_csv(_hist, encoding="utf-8-sig", dtype=str)
-    to_excel_csv(hist_df, "history_accumulated.csv")
+    with zipfile.ZipFile(os.path.join(OUT_DL, "history_accumulated.zip"), "w",
+                         zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+        zf.writestr("history_accumulated.csv",
+                    hist_df.to_csv(index=False).encode("cp949", errors="replace"))
+    _old = os.path.join(OUT_DL, "history_accumulated.csv")   # 압축 전환 이전 산출물 제거
+    if os.path.exists(_old):
+        os.remove(_old)
 # 다운로드 CSV 6: 크롤일별 시장 추세 집계
 _ts = os.path.join(SRC, "trend_snapshots.csv")
 if os.path.exists(_ts):

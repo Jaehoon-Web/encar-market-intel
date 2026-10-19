@@ -26,7 +26,7 @@
 
 ## 1회 설정 — 작업 스케줄러 등록 (관리자 명령 프롬프트)
 ```cmd
-schtasks /Create /TN "EncarWeeklyUpdate" /TR "D:\기타작업\encar_crawler\weekly_update.bat" /SC WEEKLY /D WED /ST 09:00 /RL HIGHEST /F
+schtasks /Create /TN "EncarWeeklyUpdate" /TR "\"C:\개발작업\기타작업\encar_crawler\weekly_update.bat\"" /SC WEEKLY /D WED /ST 09:00 /F
 ```
 - `/D WED` = 매주 수요일, `/ST 09:00` = 오전 9시
 - 등록 확인: `schtasks /Query /TN "EncarWeeklyUpdate" /V /FO LIST`

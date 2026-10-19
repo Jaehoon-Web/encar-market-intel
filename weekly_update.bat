@@ -1,7 +1,10 @@
 @echo off
+chcp 65001 >nul
 REM ============================================================
 REM  엔카 주간 자동 갱신 런처 (작업 스케줄러: 매주 수요일 09:00)
 REM  크롤링 -> 정제 -> 사이트 빌드 -> Git 자동 배포
+REM  chcp 65001: 이 파일(UTF-8)의 한글 주석이 cp949로 잘못 읽히지 않도록
+REM  %~dp0 = 이 bat 파일이 있는 폴더 (한글 경로를 직접 쓰지 않기 위해)
 REM ============================================================
-cd /d D:\기타작업\encar_crawler
-"C:\Users\f\AppData\Local\Programs\Python\Python312\python.exe" auto_update.py %*
+cd /d "%~dp0"
+"%LOCALAPPDATA%\Programs\Python\Python312\python.exe" auto_update.py %*
