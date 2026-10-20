@@ -64,9 +64,11 @@ CONCURRENCY_INSPECT = 20   # aiohttp 동시 요청 수
 DELAY_MIN  = 0.5
 DELAY_MAX  = 1.2
 MAX_RETRY  = 3
-# 2단계: 한 배치(1000대)에서 네트워크 실패가 이 비율 이상이면 잠시 대기 후 계속
+# 2단계: 한 배치(1000대)에서 네트워크 실패가 이 비율 이상이면 세션(연결)을 새로 만들고 잠시 대기 후 계속
 NET_FAIL_PAUSE_RATIO = 0.5
 NET_FAIL_PAUSE_SEC   = 300
+# 위 상황이 이 횟수만큼 연속되면 2단계 중단(exit 3) → 이후 단계(이력·빌드·배포) 진행 안 함, --resume 으로 재개
+NET_FAIL_MAX_CONSEC  = 3
 
 # ─────────────────────────────────────────────────────
 #  API 페이지네이션 실제 한계: ~10,000 unique/쿼리
@@ -275,12 +277,16 @@ async def async_progress(coros, **kwargs):
     return await asyncio.gather(*coros)
 
 
+_last_net_error = ""   # 마지막 네트워크 오류 요약 (실패율 높은 배치의 원인 로그용)
+
+
 async def _fetch_raw(session: aiohttp.ClientSession, url: str,
                      params: dict = None, headers: dict = None,
                      as_json: bool = False) -> tuple:
     """재시도 포함 HTTP GET → (결과, 일시적실패여부)
     일시적실패=True : 타임아웃·연결오류 재시도 소진, 429 소진, 5xx/403/408 → 다음에 다시 시도할 대상
     일시적실패=False: 성공, 또는 삭제 리다이렉트·404 등 영구적인 응답"""
+    global _last_net_error
     h = headers or HEADERS
     for attempt in range(MAX_RETRY):
         try:
@@ -291,6 +297,7 @@ async def _fetch_raw(session: aiohttp.ClientSession, url: str,
                 if resp.status == 429:
                     wait = 60 * (attempt + 1)
                     log.warning(f"Rate limit → {wait}s 대기")
+                    _last_net_error = "HTTP 429"
                     await asyncio.sleep(wait)
                     continue
                 if resp.status in (301, 302, 307, 308):
@@ -300,14 +307,18 @@ async def _fetch_raw(session: aiohttp.ClientSession, url: str,
                         return None, False  # 차량 삭제됨
                 if resp.status != 200:
                     transient = resp.status >= 500 or resp.status in (403, 408)
+                    if transient:
+                        _last_net_error = f"HTTP {resp.status}"
                     return None, transient
                 if as_json:
                     return await resp.json(content_type=None), False
                 return await resp.text(encoding="utf-8"), False
         except asyncio.TimeoutError:
             log.debug(f"Timeout (시도 {attempt+1}): {url}")
+            _last_net_error = "Timeout(30s)"
         except aiohttp.ClientError as e:
             log.debug(f"ClientError (시도 {attempt+1}): {e}")
+            _last_net_error = f"{type(e).__name__}: {e}"[:200]
         await asyncio.sleep(1.5 ** attempt)
     return None, True
 
@@ -646,10 +657,15 @@ async def stage2_collect_details(car_list: List[dict],
         return list(existing.values())
 
     sem = asyncio.Semaphore(CONCURRENCY_DETAIL)
-    connector = aiohttp.TCPConnector(limit=30, force_close=False)
+
+    def new_session() -> aiohttp.ClientSession:
+        return aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(limit=30, force_close=False))
 
     net_fail_total = 0
-    async with aiohttp.ClientSession(connector=connector) as session:
+    consec_bad = 0
+    session = new_session()
+    try:
         BATCH = 1000
         for batch_start in range(0, len(pending), BATCH):
             batch = pending[batch_start: batch_start + BATCH]
@@ -686,12 +702,27 @@ async def stage2_collect_details(car_list: List[dict],
             save_csv(all_rows, OUTPUT_DIR / "encar_details.csv")
             log.info(f"중간 저장: {len(all_rows):,}대  (이번 배치 네트워크 실패: {batch_net_fail:,}대)")
 
-            # 실패율이 높으면(테더링 끊김 등) 잠시 쉬었다가 다음 배치 계속
+            # 실패율이 높으면(테더링 끊김·IP 변경 등) 연결을 새로 만들고 잠시 쉬었다가 계속.
+            # 2026-10-20: 테더링 중 세션이 망가져 1시간 넘게 100% 실패한 사례 → 새 연결이면 정상이었음
             has_next = batch_start + BATCH < len(pending)
-            if has_next and batch_net_fail >= len(batch) * NET_FAIL_PAUSE_RATIO:
+            if batch_net_fail >= len(batch) * NET_FAIL_PAUSE_RATIO:
+                consec_bad += 1
                 log.warning(f"네트워크 실패율 {batch_net_fail/len(batch):.0%} "
-                            f"→ {NET_FAIL_PAUSE_SEC}s 대기 후 계속")
-                await asyncio.sleep(NET_FAIL_PAUSE_SEC)
+                            f"(연속 {consec_bad}/{NET_FAIL_MAX_CONSEC}회, 마지막 오류: {_last_net_error or '-'})")
+                if consec_bad >= NET_FAIL_MAX_CONSEC:
+                    # 체크포인트는 저장됨. 미완료분을 실패 상태로 배포하지 않도록 파이프라인 중단
+                    log.error(f"상세 수집 네트워크 실패 {consec_bad}회 연속 → 2단계 중단 "
+                              f"(남은 {len(pending) - batch_start - len(batch):,}대 + 실패분은 --resume 으로 재개)")
+                    raise SystemExit(3)
+                if has_next:
+                    await session.close()
+                    log.warning(f"→ 연결(세션) 새로 만들고 {NET_FAIL_PAUSE_SEC}s 대기 후 계속")
+                    await asyncio.sleep(NET_FAIL_PAUSE_SEC)
+                    session = new_session()
+            else:
+                consec_bad = 0
+    finally:
+        await session.close()
 
     if net_fail_total:
         log.warning(f"상세 네트워크 실패 {net_fail_total:,}대 → done 미기록, 다음 실행 때 재수집")
