@@ -64,6 +64,9 @@ CONCURRENCY_INSPECT = 20   # aiohttp 동시 요청 수
 DELAY_MIN  = 0.5
 DELAY_MAX  = 1.2
 MAX_RETRY  = 3
+# 2단계: 한 배치(1000대)에서 네트워크 실패가 이 비율 이상이면 잠시 대기 후 계속
+NET_FAIL_PAUSE_RATIO = 0.5
+NET_FAIL_PAUSE_SEC   = 300
 
 # ─────────────────────────────────────────────────────
 #  API 페이지네이션 실제 한계: ~10,000 unique/쿼리
@@ -272,10 +275,12 @@ async def async_progress(coros, **kwargs):
     return await asyncio.gather(*coros)
 
 
-async def fetch(session: aiohttp.ClientSession, url: str,
-                params: dict = None, headers: dict = None,
-                as_json: bool = False) -> Optional[Any]:
-    """재시도 포함 HTTP GET"""
+async def _fetch_raw(session: aiohttp.ClientSession, url: str,
+                     params: dict = None, headers: dict = None,
+                     as_json: bool = False) -> tuple:
+    """재시도 포함 HTTP GET → (결과, 일시적실패여부)
+    일시적실패=True : 타임아웃·연결오류 재시도 소진, 429 소진, 5xx/403/408 → 다음에 다시 시도할 대상
+    일시적실패=False: 성공, 또는 삭제 리다이렉트·404 등 영구적인 응답"""
     h = headers or HEADERS
     for attempt in range(MAX_RETRY):
         try:
@@ -292,18 +297,28 @@ async def fetch(session: aiohttp.ClientSession, url: str,
                     # 리다이렉트 추적 (fem → encar 메인으로 가는 경우)
                     loc = resp.headers.get("Location", "")
                     if "encar.com/index" in loc:
-                        return None  # 차량 삭제됨
+                        return None, False  # 차량 삭제됨
                 if resp.status != 200:
-                    return None
+                    transient = resp.status >= 500 or resp.status in (403, 408)
+                    return None, transient
                 if as_json:
-                    return await resp.json(content_type=None)
-                return await resp.text(encoding="utf-8")
+                    return await resp.json(content_type=None), False
+                return await resp.text(encoding="utf-8"), False
         except asyncio.TimeoutError:
             log.debug(f"Timeout (시도 {attempt+1}): {url}")
         except aiohttp.ClientError as e:
             log.debug(f"ClientError (시도 {attempt+1}): {e}")
         await asyncio.sleep(1.5 ** attempt)
-    return None
+    return None, True
+
+
+async def fetch(session: aiohttp.ClientSession, url: str,
+                params: dict = None, headers: dict = None,
+                as_json: bool = False) -> Optional[Any]:
+    """재시도 포함 HTTP GET (실패 시 None)"""
+    data, _ = await _fetch_raw(session, url, params=params,
+                               headers=headers, as_json=as_json)
+    return data
 
 
 # ─────────────────────────────────────────────────────
@@ -578,30 +593,39 @@ def _extract_from_state(car_id: str, state: dict, base_info: dict) -> dict:
 
 async def fetch_detail_one(session: aiohttp.ClientSession,
                            car_info: dict,
-                           sem: asyncio.Semaphore) -> dict:
+                           sem: asyncio.Semaphore) -> tuple:
+    """→ (car id, 레코드). 네트워크 실패면 레코드=None (done 처리하지 않고 다음 실행 때 재수집)"""
     cid = car_info["id"]
-    async with sem:
-        await asyncio.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
-        html = await fetch(session, DETAIL_BASE.format(cid),
-                           headers={**HEADERS, "Accept": "text/html"})
+    try:
+        async with sem:
+            await asyncio.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
+            html, transient = await _fetch_raw(
+                session, DETAIL_BASE.format(cid),
+                headers={**HEADERS, "Accept": "text/html"})
+    except Exception as e:
+        log.debug(f"상세 요청 예외: {cid} {e!r}")
+        return cid, None
+    if transient:
+        return cid, None
 
+    # 여기부터는 판매완료/삭제(리다이렉트·404)·파싱실패 → 빈 레코드로 done 처리
     if not html:
-        return {**car_info, "detail_crawled": False,
-                "first_reg_date": "", "simple_repair": "",
-                "outer_panel": "", "main_frame": "",
-                "detail_condition": "", "inspector_note": "",
-                "inspect_crawled": False}
+        return cid, {**car_info, "detail_crawled": False,
+                     "first_reg_date": "", "simple_repair": "",
+                     "outer_panel": "", "main_frame": "",
+                     "detail_condition": "", "inspector_note": "",
+                     "inspect_crawled": False}
 
     state = _parse_preloaded_state(html)
     if not state:
         log.debug(f"PRELOADED_STATE 파싱 실패: {cid}")
-        return {**car_info, "detail_crawled": False,
-                "first_reg_date": "", "simple_repair": "",
-                "outer_panel": "", "main_frame": "",
-                "detail_condition": "", "inspector_note": "",
-                "inspect_crawled": False}
+        return cid, {**car_info, "detail_crawled": False,
+                     "first_reg_date": "", "simple_repair": "",
+                     "outer_panel": "", "main_frame": "",
+                     "detail_condition": "", "inspector_note": "",
+                     "inspect_crawled": False}
 
-    return _extract_from_state(cid, state, car_info)
+    return cid, _extract_from_state(cid, state, car_info)
 
 
 async def stage2_collect_details(car_list: List[dict],
@@ -624,6 +648,7 @@ async def stage2_collect_details(car_list: List[dict],
     sem = asyncio.Semaphore(CONCURRENCY_DETAIL)
     connector = aiohttp.TCPConnector(limit=30, force_close=False)
 
+    net_fail_total = 0
     async with aiohttp.ClientSession(connector=connector) as session:
         BATCH = 1000
         for batch_start in range(0, len(pending), BATCH):
@@ -640,22 +665,36 @@ async def stage2_collect_details(car_list: List[dict],
             else:
                 results = await asyncio.gather(*tasks)
 
-            for r in results:
+            batch_net_fail = 0
+            for cid, r in results:
+                if r is None:
+                    # 네트워크 실패 → 저장·done 기록 안 함 (다음 실행 때 재수집)
+                    batch_net_fail += 1
+                    continue
                 vid = r.get("vehicle_id", r.get("id"))
                 if vid:                          # 유효 파싱분만 저장(빈 vehicle_id 제외)
                     existing[str(vid)] = r
-                done_ids.add(r.get("id", vid))
-            # 처리 시도한 모든 매물을 done 기록 → 판매완료/파싱실패분 무한 재처리 방지
-            for c in batch:
-                done_ids.add(c["id"])
+                    done_ids.add(r.get("id", vid))
+                # 판매완료/파싱실패분도 done 기록 → 무한 재처리 방지
+                done_ids.add(cid)
+            net_fail_total += batch_net_fail
 
             # 배치마다 중간 저장
             all_rows = list(existing.values())
             save_json(all_rows, result_path)
             save_json(list(done_ids), done_path)
             save_csv(all_rows, OUTPUT_DIR / "encar_details.csv")
-            log.info(f"중간 저장: {len(all_rows):,}대")
+            log.info(f"중간 저장: {len(all_rows):,}대  (이번 배치 네트워크 실패: {batch_net_fail:,}대)")
 
+            # 실패율이 높으면(테더링 끊김 등) 잠시 쉬었다가 다음 배치 계속
+            has_next = batch_start + BATCH < len(pending)
+            if has_next and batch_net_fail >= len(batch) * NET_FAIL_PAUSE_RATIO:
+                log.warning(f"네트워크 실패율 {batch_net_fail/len(batch):.0%} "
+                            f"→ {NET_FAIL_PAUSE_SEC}s 대기 후 계속")
+                await asyncio.sleep(NET_FAIL_PAUSE_SEC)
+
+    if net_fail_total:
+        log.warning(f"상세 네트워크 실패 {net_fail_total:,}대 → done 미기록, 다음 실행 때 재수집")
     return list(existing.values())
 
 
