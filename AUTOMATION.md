@@ -22,6 +22,8 @@
 | `auto_update.py` | 오케스트레이터(락·로깅·에러처리·단계 실행) |
 | `weekly_update.bat` | 작업 스케줄러용 런처(Python 경로 고정 호출) |
 | `cleanup_old.py` | 오래된 로그·캐시 정리(크롤 완료 후 1회/수시) |
+| `watchdog.py` | 30분마다(작업 `EncarWatchdog`) 직전 실행이 중단 상태면 `EncarResumeOnce`(--resume)로 자동 재개. 진척 없이 6회 연속이면 보류 → `logs/watchdog.log` 확인 |
+| `status_server.py` / `status_dashboard.bat` | 진행 상황 대시보드(http://127.0.0.1:8790, 로그 읽기 전용) |
 | `logs/` | 실행 로그(자동 생성, git 제외) |
 
 ## 1회 설정 — 작업 스케줄러 등록 (관리자 명령 프롬프트)

@@ -1,26 +1,40 @@
 # -*- coding: utf-8 -*-
 """
-watchdog.py — 크롤이 죽어 있으면 자동으로 이어받아 재개하는 감시자.
+watchdog.py — 크롤이 중간에 멈춰 있으면 자동으로 이어받아 재개하는 감시자.
 
-Windows 작업 스케줄러가 30분마다 실행. OOM 등으로 크롤이 죽어도
-체크포인트부터 --resume 로 다시 이어받아 결국 완주하게 한다.
+Windows 작업 스케줄러(EncarWatchdog)가 30분마다 pythonw 로 실행(창 안 뜸).
+테더링 인증서 가로채기·창 닫힘·PC 꺼짐 등으로 실행이 중단돼도 체크포인트부터
+--resume 으로 다시 이어받아 결국 완주하게 한다.
 
-판단 순서 (메모리 충돌 방지를 위해 '실행중'이면 무거운 검사 안 함):
+판단 순서
   1) 크롤(auto_update/run.py/crawler) 프로세스가 살아있나? → 있으면 건너뜀
-  2) 남은 작업(pending = ids_all − done) 계산
-  3) pending 이 임계치 이하면 → 완료로 보고 재개 안 함
-  4) 그 외(죽었고 할 일 남음) → stale lock 제거 후 auto_update.py --resume 백그라운드 실행
+  2) 직전 실행(logs/auto_*.log, lock 때문에 건너뛴 회차 로그는 제외)이 '완료'로 끝났나?
+     → 완료면 재개 안 함 (네트워크 실패로 남은 소수 매물은 다음 주간 실행이 수집)
+  3) 중단된 채 끝났으면 → stale lock 제거 후 EncarResumeOnce 작업(--resume) 실행
+     단, 진척 없이 연속 MAX_NO_PROGRESS 회 재개했으면 멈추고 수동 확인을 기다림
+     (진척 = 상세 완료 대수(details_done_ids.json)가 직전 자동 재개 때보다 늘었음.
+      파일은 전부 실패한 배치에서도 다시 저장되므로 수정시각이 아니라 대수로 판단)
+
+    python watchdog.py --dry-run   # 판단만 출력, 실행 안 함
 """
-import os, sys, json, subprocess, datetime
+import os, sys, json, glob, subprocess, datetime, argparse
+
+try:
+    import psutil
+except ImportError:
+    psutil = None
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(ROOT, "encar_output")
 LOGDIR = os.path.join(ROOT, "logs")
 os.makedirs(LOGDIR, exist_ok=True)
 LOG = os.path.join(LOGDIR, "watchdog.log")
+STATE = os.path.join(LOGDIR, "watchdog_state.json")
 LOCK = os.path.join(ROOT, "auto_update.lock")
-PY = sys.executable
-DONE_THRESHOLD = 200   # 남은 작업이 이 이하면 완료로 간주(영구 실패 매물 여유분)
+DONE_IDS = os.path.join(OUT, "details_done_ids.json")
+RESUME_TASK = "EncarResumeOnce"
+MAX_NO_PROGRESS = 6        # 진척 없는 자동 재개 연속 한도 (약 6시간분)
+NO_WINDOW = 0x08000000     # CREATE_NO_WINDOW: pythonw 에서 콘솔 창 안 띄움
 
 def log(m):
     line = "[%s] %s" % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), m)
@@ -31,66 +45,109 @@ def log(m):
 def crawl_running():
     """python 프로세스 명령행에 크롤 관련 스크립트가 있으면 실행중으로 판단."""
     try:
-        out = subprocess.check_output(
-            ["powershell", "-NoProfile", "-Command",
-             "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
-             "ForEach-Object { $_.CommandLine }"],
-            text=True, stderr=subprocess.DEVNULL, timeout=90)
+        if psutil:
+            cmds = []
+            for p in psutil.process_iter(["name", "cmdline"]):
+                try:
+                    if "python" in (p.info["name"] or "").lower():
+                        cmds.append(" ".join(p.info["cmdline"] or []))
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+        else:
+            cmds = subprocess.check_output(
+                ["powershell", "-NoProfile", "-Command",
+                 "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
+                 "ForEach-Object { $_.CommandLine }"],
+                text=True, stderr=subprocess.DEVNULL, timeout=90,
+                creationflags=NO_WINDOW).splitlines()
     except Exception as e:
         log("프로세스 확인 실패(%s) → 안전하게 실행중으로 간주" % e)
         return True   # 불확실하면 건드리지 않음
-    for line in out.splitlines():
-        if ("auto_update.py" in line) or ("run.py" in line) or ("crawler.py" in line):
-            return True
-    return False
+    return any(("auto_update.py" in c) or ("run.py" in c) or ("crawler.py" in c) for c in cmds)
 
-def pending_count():
+def last_run():
+    """(상태, 로그명). 상태: 'completed' | 'interrupted' | None(로그 없음).
+       lock 때문에 '이번 회차 건너뜀'으로 끝난 로그는 실제 실행이 아니므로 제외."""
+    for path in sorted(glob.glob(os.path.join(LOGDIR, "auto_*.log")), key=os.path.getmtime, reverse=True):
+        with open(path, "rb") as f:
+            data = f.read()
+        if "이번 회차 건너뜀".encode("utf-8") in data:
+            continue
+        done = "================ 완료 :".encode("utf-8") in data
+        return ("completed" if done else "interrupted"), os.path.basename(path)
+    return None, None
+
+def load_state():
     try:
-        with open(os.path.join(OUT, "details_done_ids.json")) as f:
-            done = set(json.load(f))
-        with open(os.path.join(OUT, "ids_all.json"), encoding="utf-8") as f:
-            allids = set(x["id"] for x in json.load(f))
-        return len(allids - done)
-    except Exception as e:
-        log("pending 계산 실패: %s" % e)
+        with open(STATE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {"attempts": 0, "lastDone": -1}
+
+def done_count():
+    try:
+        with open(DONE_IDS, encoding="utf-8") as f:
+            return len(json.load(f))
+    except (OSError, ValueError):
         return -1
 
-def pipeline_incomplete():
-    """details.json이 encar_cleaned.csv보다 최신이면 정제/빌드/배포가 안 끝난 것 → 재개 필요.
-       (Stage2/3는 됐는데 process/clean/build가 실패한 경우를 잡는다.)"""
-    try:
-        det = os.path.getmtime(os.path.join(OUT, "details.json"))
-        cln = os.path.getmtime(os.path.join(OUT, "encar_cleaned.csv"))
-        return det > cln + 60   # details가 1분 이상 더 최신 → 정제 안 됨
-    except OSError:
-        return False
+def save_state(st):
+    with open(STATE, "w", encoding="utf-8") as f:
+        json.dump(st, f)
+
+def start_resume():
+    """EncarResumeOnce 예약 작업으로 재개(주간 작업과 같은 bat·콘솔). 작업이 없으면 직접 실행."""
+    rc = subprocess.call(["schtasks", "/Run", "/TN", RESUME_TASK],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=NO_WINDOW)
+    if rc == 0:
+        return "작업 스케줄러 %s" % RESUME_TASK
+    DETACHED, NEWGRP = 0x00000008, 0x00000200
+    py = os.path.join(os.path.dirname(sys.executable), "python.exe")
+    subprocess.Popen([py, "auto_update.py", "--resume"], cwd=ROOT,
+                     creationflags=DETACHED | NEWGRP, close_fds=True,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+    return "직접 실행(auto_update.py --resume, 작업 %s 실행 실패 rc=%d)" % (RESUME_TASK, rc)
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--dry-run", action="store_true", help="판단만 출력하고 재개하지 않음")
+    dry = ap.parse_args().dry_run
+    tag = "[dry-run] " if dry else ""
+
     if crawl_running():
-        log("크롤 실행중 → 건너뜀")
+        log(tag + "크롤 실행중 → 건너뜀")
         return
-    pend = pending_count()
-    if pend < 0:
-        log("상태 불명 → 건너뜀(안전)")
+    state, name = last_run()
+    st = load_state()
+    if state is None:
+        log(tag + "실행 로그 없음 → 건너뜀")
         return
-    stale = pipeline_incomplete()
-    if pend <= DONE_THRESHOLD and not stale:
-        log("남은 작업 %d건 + 정제·배포 최신 → 재개 불필요" % pend)
+    if state == "completed":
+        if st.get("attempts") and not dry:
+            save_state({"attempts": 0, "lastDone": -1})
+        log(tag + "직전 실행(%s) 완료 → 재개 불필요" % name)
         return
-    # 죽었고 (할 일 남았거나 정제·배포 미완료) → 재개
+
+    # 중단된 채 끝남 → 재개. 직전 자동 재개 이후 상세 완료 대수가 늘었으면 횟수 초기화
+    done = done_count()
+    progressed = done > st.get("lastDone", -1)
+    attempts = 0 if progressed else st.get("attempts", 0)
+    if attempts >= MAX_NO_PROGRESS:
+        log(tag + "직전 실행(%s) 중단 상태지만 진척 없는 자동 재개가 %d회 연속 → 자동 재개 보류(수동 확인 필요)"
+            % (name, attempts))
+        return
+    if dry:
+        log(tag + "직전 실행(%s) 중단 감지 → 재개할 예정 (진척없는 연속 재개 %d/%d회)" % (name, attempts, MAX_NO_PROGRESS))
+        return
     if os.path.exists(LOCK):
         try:
             os.remove(LOCK); log("stale lock 제거")
         except OSError:
             pass
-    reason = ("남은 %d건" % pend) if pend > DONE_THRESHOLD else "정제·배포 미완료(파이프라인 중단)"
-    log("크롤 중단 감지(%s) → auto_update.py --resume 재개" % reason)
-    DETACHED, NEWGRP = 0x00000008, 0x00000200
-    subprocess.Popen(
-        [PY, "auto_update.py", "--resume"], cwd=ROOT,
-        creationflags=DETACHED | NEWGRP, close_fds=True,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
-    log("재개 프로세스 시작됨")
+    how = start_resume()
+    save_state({"attempts": attempts + 1, "lastDone": done})
+    log("직전 실행(%s) 중단 감지 → --resume 재개 시작: %s (진척없는 연속 재개 %d/%d회)"
+        % (name, how, attempts + 1, MAX_NO_PROGRESS))
 
 if __name__ == "__main__":
     main()
