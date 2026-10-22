@@ -805,17 +805,25 @@ def _parse_inspect_api(car_id: str, data: dict) -> dict:
 
 async def fetch_inspect_one(session: aiohttp.ClientSession,
                              car: dict,
-                             sem: asyncio.Semaphore) -> dict:
-    """단일 차량 성능점검기록부 API 호출"""
+                             sem: asyncio.Semaphore) -> Optional[dict]:
+    """단일 차량 성능점검기록부 API 호출.
+    네트워크 실패(일시적)면 None → done 처리하지 않고 다음 실행 때 재수집.
+    기록부 없음(404 등 영구 응답)·파싱 실패는 빈 레코드로 done 처리."""
     vid = str(car.get("vehicle_id", car.get("id", "")))
     empty = {
         "vehicle_id": vid, "first_reg_date": "", "simple_repair": "",
         "outer_panel": "", "main_frame": "", "detail_condition": "",
         "inspector_note": "", "inspect_crawled": False,
     }
-    async with sem:
-        await asyncio.sleep(random.uniform(0.3, 0.8))
-        data = await fetch(session, INSPECT_API.format(vid), as_json=True)
+    try:
+        async with sem:
+            await asyncio.sleep(random.uniform(0.3, 0.8))
+            data, transient = await _fetch_raw(session, INSPECT_API.format(vid), as_json=True)
+    except Exception as e:
+        log.debug(f"[inspect] 요청 예외 {vid}: {e!r}")
+        return None
+    if transient:
+        return None
     if not data:
         return empty
     try:
@@ -956,9 +964,15 @@ async def stage3_collect_inspect(details: List[dict], limit: Optional[int] = Non
         return
 
     sem = asyncio.Semaphore(CONCURRENCY_INSPECT)
-    connector = aiohttp.TCPConnector(limit=30, force_close=False)
 
-    async with aiohttp.ClientSession(connector=connector) as session:
+    def new_session() -> aiohttp.ClientSession:
+        return aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(limit=30, force_close=False))
+
+    net_fail_total = 0
+    consec_bad = 0
+    session = new_session()
+    try:
         BATCH = 500
         for i in range(0, len(pending), BATCH):
             batch = pending[i: i + BATCH]
@@ -974,16 +988,44 @@ async def stage3_collect_inspect(details: List[dict], limit: Optional[int] = Non
             else:
                 results = await asyncio.gather(*tasks)
 
+            batch_net_fail = 0
             for r in results:
+                if r is None:
+                    # 네트워크 실패 → 저장·done 기록 안 함 (다음 실행 때 재수집)
+                    batch_net_fail += 1
+                    continue
                 vid = str(r.get("vehicle_id", ""))
                 if vid:
                     inspect_map[vid] = r
                     done_ids.add(vid)
+            net_fail_total += batch_net_fail
 
             save_json(inspect_map, inspect_path)
             save_json(list(done_ids), done_path)
-            log.info(f"성능점검 중간저장: {len(inspect_map):,}대")
+            log.info(f"성능점검 중간저장: {len(inspect_map):,}대  (이번 배치 네트워크 실패: {batch_net_fail:,}대)")
 
+            # 2단계와 동일: 실패율 높으면 연결 새로 만들고 대기, 연속 NET_FAIL_MAX_CONSEC 회면 중단(exit 3)
+            has_next = i + BATCH < len(pending)
+            if batch_net_fail >= len(batch) * NET_FAIL_PAUSE_RATIO:
+                consec_bad += 1
+                log.warning(f"성능점검 네트워크 실패율 {batch_net_fail/len(batch):.0%} "
+                            f"(연속 {consec_bad}/{NET_FAIL_MAX_CONSEC}회, 마지막 오류: {_last_net_error or '-'})")
+                if consec_bad >= NET_FAIL_MAX_CONSEC:
+                    log.error(f"성능점검 네트워크 실패 {consec_bad}회 연속 → 3단계 중단 "
+                              f"(남은 {len(pending) - i - len(batch):,}대 + 실패분은 --resume 으로 재개)")
+                    raise SystemExit(3)
+                if has_next:
+                    await session.close()
+                    log.warning(f"→ 연결(세션) 새로 만들고 {NET_FAIL_PAUSE_SEC}s 대기 후 계속")
+                    await asyncio.sleep(NET_FAIL_PAUSE_SEC)
+                    session = new_session()
+            else:
+                consec_bad = 0
+    finally:
+        await session.close()
+
+    if net_fail_total:
+        log.warning(f"성능점검 네트워크 실패 {net_fail_total:,}대 → done 미기록, 다음 실행 때 재수집")
     _merge_inspect(details, inspect_map)
 
 
