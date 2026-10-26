@@ -123,6 +123,12 @@ def main():
         except Exception as e:
             log("이력 누적 실패(무시하고 계속): %s" % e)
 
+        # 2.6) 전처리 (시세 산정·시황용 매물 테이블 + 목록 가격 관측 누적, DATA_전처리_명세.md) — 실패해도 배포는 계속
+        try:
+            run([PY, "prep.py"], "전처리(prep.py)")
+        except Exception as e:
+            log("전처리 실패(무시하고 계속): %s" % e)
+
         # 3) 사이트 데이터 빌드
         run([PY, "build_data.py"], "사이트 빌드(build_data.py)")
 
