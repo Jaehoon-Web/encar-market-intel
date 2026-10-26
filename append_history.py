@@ -11,6 +11,7 @@ append_history.py — 매 크롤마다 '그 시점 스냅샷'을 이력으로 �
                              평균체류일,평균연식,중앙주행,가솔린%,디젤%,하이브리드%,전기%,LPG%
 
 원칙
+  - 크롤일 = 목록(ids_all.json)을 수집한 날. 상세 수집이 며칠 걸려도 목록 기준으로 남긴다
   - 시세/분석은 '현재 매물'(ids_all)만 → build_data가 담당
   - 이력/트렌드/누적다운로드는 여기서 누적
   - 같은 차의 주간 가격 변동 추적, 사라지면 '판매완료' 태깅(더는 시세에 안 들어감)
@@ -42,11 +43,15 @@ def norm_fuel(f):
     if "가솔린" in f: return "가솔린"
     return "기타"
 
+def list_date():
+    """목록(ids_all.json)을 수집한 날 — 2026-10 회차는 목록 10/21·상세 완료 10/26이라 크롤일이 10/26으로 남았다"""
+    return datetime.date.fromtimestamp(os.path.getmtime(IDS_ALL)).isoformat()
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--date", help="크롤일 YYYY-MM-DD (기본: 오늘)")
+    ap.add_argument("--date", help="크롤일 YYYY-MM-DD (기본: 목록을 수집한 날)")
     args = ap.parse_args()
-    crawl_date = args.date or datetime.datetime.now().strftime("%Y-%m-%d")
+    crawl_date = args.date or list_date()
     print(f"[history] 크롤일: {crawl_date}")
 
     # 현재 매물 id
@@ -69,6 +74,9 @@ def main():
         done_dates = set(pd.read_csv(TREND, encoding="utf-8-sig", usecols=["크롤일"], dtype=str)["크롤일"])
         if crawl_date in done_dates:
             print(f"[history] {crawl_date} 이미 처리됨 → 건너뜀")
+            return
+        if not args.date and done_dates and crawl_date < max(done_dates):
+            print(f"[history] 목록 관측일 {crawl_date}이 마지막 크롤일 {max(done_dates)}보다 이름(새 목록 없음) → 건너뜀")
             return
 
     new_rows = []          # history.csv 에 추가할 행

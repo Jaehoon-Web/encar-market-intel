@@ -274,8 +274,10 @@
 ## 7. 파이프라인 통합
 
 ```
-crawler(1→2→3) → process → clean → append_history → [prep.py] → build_data → 배포
+crawler(1→2→3) → process → clean → append_history → [prep.py] → [adjust_coef.py] → [market_index.py] → build_data → 배포
 ```
+
+- `append_history.py`는 크롤일을 **목록(`ids_all.json`)을 수집한 날**로 남긴다(2026-10-26 변경, 전에는 실행한 날). 상세 수집이 며칠 걸린 10월 회차가 목록 10/21인데 10/26으로 기록돼 바꿨다. 목록이 마지막 크롤일보다 오래됐으면(새 목록 없음) 건너뛴다. 이미 남은 10/26 기록은 그대로 두고, 지수 계산(`market_index.py`)에서 10/21로 읽는다.
 
 - `prep.py`는 `append_history.py` 다음에 실행한다. 실패해도 배포를 막지 않는다(append_history와 같은 방식). **2026-10-26 `auto_update.py`에 반영 완료** — 10/28 정기 실행부터 매주 돈다.
 - `prep.py`는 `inspection_score.py`(규칙·계산)와 `inspection_score_weights.json`(학습된 가중치)을 함께 쓴다. 가중치 파일이 없으면 점수 컬럼만 빼고 나머지는 정상 생성한다.
@@ -284,6 +286,9 @@ crawler(1→2→3) → process → clean → append_history → [prep.py] → bu
   - **추정**: 판매중·비교사용·성능점검 매물의 로그 호가에서 성능감가율 몫을 뺀다. 그리고 같은 (모델·등급·세부등급) 칸 안의 차이로 차령(개월)·주행(만km, 25만 상한)·렌트·색상 계수를 구한다.
   - **계층**: 시장 → 차급(국산·수입) → 모델 순서로, 모델 표본이 적을수록 차급 값 쪽으로 당긴다(경험적 베이즈). 등급·세부등급 차이는 모델마다 구하고, 대수 n이면 n/(n+5)만큼만 반영한다.
   - **검증(2026-10-26)**: 매물 20%를 떼어 두고 나머지로 그 차의 호가를 추정했다. 추정 오차 중위가 보정 없음 7.8%에서 성능+보정 5.6%로 줄었다.
+- 그다음 `market_index.py`(2.8단계)가 시황판 지수(기획안 D4, 5.2.1)를 처음부터 다시 계산한다. 결과는 `web/data/market_index.json`(세그먼트별 시세·판매속도·재고·시황 + 크롤 로그)과 `encar_output/prep/market_index_report.txt`. 실패해도 배포는 계속된다.
+  - 이번 목록(`ids_all.json`)의 국산·수입 × 차급 대수를 `encar_output/prep/list_counts.csv`에 회차별로 쌓는다. 재고지수의 세그먼트 구성비가 여기서 나온다. **이 파일은 다시 만들 수 없으니 지우지 않는다.**
+  - 시세는 D3 계수를 쓰므로 계수가 바뀌면 과거 값도 조금 움직인다(매주 전체 재계산).
 - 현재 사이트(`build_data.py`)는 당분간 기존 `encar_cleaned`를 쓴다. 새 사이트를 만들 때 `listings.parquet`으로 옮긴다.
 - **`price_obs.parquet`는 이번 주부터 쌓는다.** 가격 인하·3개월 추세 지표의 원천이라, 사이트 개편과 상관없이 먼저 시작한다.
 

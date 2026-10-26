@@ -135,6 +135,12 @@ def main():
         except Exception as e:
             log("보정 계수 실패(무시하고 계속): %s" % e)
 
+        # 2.8) 시황 지수(D4: 시세·판매속도·재고·시황 → web/data/market_index.json) — 실패해도 배포는 계속
+        try:
+            run([PY, "market_index.py"], "시황 지수(market_index.py)")
+        except Exception as e:
+            log("시황 지수 실패(무시하고 계속): %s" % e)
+
         # 3) 사이트 데이터 빌드
         run([PY, "build_data.py"], "사이트 빌드(build_data.py)")
 
