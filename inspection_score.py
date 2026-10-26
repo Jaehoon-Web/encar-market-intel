@@ -5,19 +5,22 @@ inspection_score.py — 성능점검 기반 평가 컬럼
   (2) 자체 성능점검점수: 부위×손상 상태가 '같은 모델·차령·주행 대비 가격(잔가)'을 얼마나 낮추는지
       실제 매물로 학습한 가중치로 산출 → 성능감가율(%), 성능점검점수(0~100), 성능등급(9~1)
 
-    python inspection_score.py --fit     # 가중치 재학습 → inspection_score_weights.json (+ 검증 출력)
-    (prep.py 가 저장된 가중치로 매주 컬럼을 계산한다)
+    python inspection_score.py --fit     # 가중치 재학습 → inspection_score_weights.json (+ 검증 출력, 사이트 모델 갱신)
+    python inspection_score.py --export  # 사이트 계산기용 규칙·가중치 → web/data/inspection_model.json
+    (prep.py 가 저장된 가중치로 매주 컬럼을 계산하고, 사이트 모델도 함께 내보낸다)
 """
-import os, sys, json, argparse, datetime, zlib
+import os, re, sys, json, argparse, datetime, zlib
 import numpy as np
 import pandas as pd
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WEIGHTS_PATH = os.path.join(ROOT, "inspection_score_weights.json")
+MODEL_PATH = os.path.join(ROOT, "web", "data", "inspection_model.json")   # 사이트 계산기(web/lib/inspection_score.js)가 읽음
 
 # ─────────────────────────────────────────────────────
 #  글로비스 평가부위별 감점 적용표 (원본 이미지 전사, 빈칸=None)
-#  기호: XX/X 교환 · P 판금 · w 용접 · f 수정 · pp · Q · A · C  (주요=주요골격 여부)
+#  기호(사용자 확인 2026-10-26): X 교환 · P 판금 · w 용접 · Q 요철·손상 · C 부식 · A 흠집
+#  XX·pp·f·m 열은 쓰지 않는다  (주요=주요골격 여부)
 # ─────────────────────────────────────────────────────
 def _r(XX=None, pp=None, f=None, w=None, m=None, X=None, P=None, Q=None, A=None, C=None, 주요=False):
     return dict(XX=XX, pp=pp, f=f, w=w, m=m, X=X, P=P, Q=Q, A=A, C=C, 주요=주요)
@@ -81,6 +84,29 @@ ACC_C = {"인사이드패널", "리어인사이드패널", "트렁크플로어�
 ACC_D = {"휠하우스", "리어휠하우스"}
 ACC_F = {"대쉬패널", "플로어패널", "프레임1", "프레임2", "루프"}
 GRADE_BINS = [(10, 9), (25, 8), (40, 7), (55, 6), (70, 5), (85, 4), (100, 3), (115, 2)]   # 감점합 상한 → 종합평가점
+# 상태 → 감점표 열 (앞 열이 비어 있으면 다음 열)
+GLOVIS_STATUS = {"교환": ["X"], "용접절단": ["X"], "판금": ["P", "w"], "요철": ["Q", "w"], "손상": ["Q", "w"],
+                 "부식": ["C"], "흠집": ["A"]}
+
+# ─────────────────────────────────────────────────────
+#  사고 단계 분류 (명세 3.1) — prep.py 와 사이트 계산기가 함께 쓰는 규칙
+# ─────────────────────────────────────────────────────
+PART_RANK = {   # 성능·상태점검 기준 부위 등급 (좌·우·앞·뒤 표기 제거 후 이름)
+    "후드": "외판1", "프론트 휀더": "외판1", "프론트 도어": "외판1", "리어 도어": "외판1",
+    "트렁크 리드": "외판1", "라디에이터 서포트": "외판1",
+    "쿼터 패널": "외판2", "루프 패널": "외판2", "사이드실 패널": "외판2",
+    "프론트 패널": "골격", "크로스 멤버": "골격", "인사이드 패널": "골격", "트렁크 플로어": "골격",
+    "리어 패널": "골격", "프론트 사이드 멤버": "골격", "리어 사이드 멤버": "골격",
+    "프론트 휠하우스": "골격", "리어 휠하우스": "골격", "필러 패널": "골격", "대쉬 패널": "골격",
+    "플로어 패널": "골격", "패키지 트레이": "골격",
+}
+RANK_LEVEL = {"외판1": 1, "외판2": 2, "골격": 3}
+LEVEL_NAME = {0: "무사고", 1: "외판1", 2: "외판2", 3: "골격"}
+# 성능점검 상태 원문 → 상태. 앞 규칙이 우선이라 복합 상태("교환(교체),판금/용접")는 가장 심한 것이 된다
+RAW_STATUS_RULES = [("교환", "교환"), ("절단", "용접절단"), ("판금|용접", "판금"), ("요철", "요철"),
+                    ("손상", "손상"), ("부식", "부식"), ("흠집", "흠집")]
+STATUS_KIND = {"교환": "교환", "용접절단": "용접절단", "판금": "판금",              # 상태 → 사고 단계 분류
+               "요철": "경미", "손상": "경미", "부식": "경미", "흠집": "경미"}
 
 # 자체 점수용 부위 그룹 (표본이 적은 부위는 구조가 비슷한 것끼리 묶음)
 SCORE_GROUP = {
@@ -96,6 +122,8 @@ SCORE_GROUP = {
 SCORE_GROUPS = sorted(set(SCORE_GROUP.values()))
 SCORE_KINDS = ["교환", "판금", "경미"]
 CAP = 3            # 같은 그룹·상태 부위 수 상한 (도어 4짝 등 과대 반영 방지)
+SCORE_K = {"교환": "교환", "용접절단": "판금", "판금": "판금",                    # 상태 → 점수 분류
+           "요철": "경미", "손상": "경미", "부식": "경미", "흠집": "경미"}
 
 
 def parse_items(fin):
@@ -106,10 +134,7 @@ def parse_items(fin):
     it = it[it.str.contains(":", regex=False)]
     part = it.str.split(":", n=1).str[0].str.replace(r"\(.*?\)", "", regex=True).str.strip()
     stat = it.str.split(":", n=1).str[1].fillna("")
-    status = np.select(
-        [stat.str.contains("교환"), stat.str.contains("절단"), stat.str.contains("판금|용접"),
-         stat.str.contains("요철"), stat.str.contains("손상"), stat.str.contains("부식"), stat.str.contains("흠집")],
-        ["교환", "용접절단", "판금", "요철", "손상", "부식", "흠집"], default="기타")
+    status = np.select([stat.str.contains(p) for p, _ in RAW_STATUS_RULES], [s for _, s in RAW_STATUS_RULES], default="기타")
     return pd.DataFrame({"id": it.index, "part": part.values, "status": status})
 
 
@@ -117,20 +142,10 @@ def _glovis_points(row):
     g = GLOVIS.get(row["gpart"])
     if not g:
         return 0
-    s = row["status"]
-    if s in ("교환", "용접절단"):
-        v = g["X"]
-    elif s == "판금":
-        v = g["P"] if g["P"] is not None else g["w"]
-    elif s in ("요철", "손상"):
-        v = g["Q"] if g["Q"] is not None else g["w"]
-    elif s == "부식":
-        v = g["C"]
-    elif s == "흠집":
-        v = g["A"]
-    else:
-        v = None
-    return v or 0
+    for col in GLOVIS_STATUS.get(row["status"], []):
+        if g[col] is not None:
+            return g[col]
+    return 0
 
 
 def glovis_eval(items, index):
@@ -156,8 +171,7 @@ def score_features(items, index, simple_repair, mech_level):
     it = items.copy()
     it["grp"] = it["part"].map(SCORE_GROUP)
     it = it[it["grp"].notna()]
-    it["k"] = np.where(it["status"] == "교환", "교환", np.where(it["status"].isin(["판금", "용접절단"]), "판금",
-                       np.where(it["status"].isin(["요철", "손상", "부식", "흠집"]), "경미", None)))
+    it["k"] = it["status"].map(SCORE_K)
     it = it[it["k"].notna()]
     m = it.groupby(["id", "grp", "k"]).size().clip(upper=CAP).unstack(["grp", "k"], fill_value=0)
     cols = [f"{g}|{k}" for g in SCORE_GROUPS for k in SCORE_KINDS]
@@ -172,8 +186,9 @@ def score_features(items, index, simple_repair, mech_level):
 
 def apply_score(X, weights):
     """가중치(로그 가격 영향, ≤0) → 성능감가율(%)·성능점검점수(0~100)·성능등급(9~1)"""
-    w = pd.Series(weights["coef"]).reindex(X.columns).fillna(0.0)
-    loss_log = X.values @ w.values
+    loss_log = np.zeros(len(X))
+    for c in X.columns:                      # 열 순서대로 더한다 → 사이트 계산기와 소수점까지 같은 값
+        loss_log = loss_log + X[c].values * weights["coef"].get(c, 0.0)
     rate = (1 - np.exp(loss_log)) * 100
     score = np.clip(100 - rate * weights["points_per_pct"], 0, 100)
     grade = np.digitize(rate, weights["grade_cuts"])          # 0 = 가장 좋음
@@ -295,10 +310,135 @@ def validate(c, X, ctrl, test, weights, glv):
     return pd.DataFrame(rows, columns=["지표", "시험셋 R²", "순위상관"]).round(4), sc, yc
 
 
+# ─────────────────────────────────────────────────────
+#  사이트 계산기 모델 (web/data/inspection_model.json → web/lib/inspection_score.js)
+# ─────────────────────────────────────────────────────
+# 성능·상태점검기록부 부위 37곳 — 엔카 원문 표기 그대로, 기록부 순서
+POSITIONS = [
+    ("외판 1랭크", ["후드", "프론트 휀더(좌)", "프론트 휀더(우)", "프론트 도어(좌)", "프론트 도어(우)",
+                  "리어 도어(좌)", "리어 도어(우)", "트렁크 리드", "라디에이터 서포트(볼트체결부품)"]),
+    ("외판 2랭크", ["쿼터 패널(좌)", "쿼터 패널(우)", "루프 패널", "사이드실 패널(좌)", "사이드실 패널(우)"]),
+    ("주요골격 A랭크", ["프론트 패널", "크로스 멤버", "인사이드 패널(좌)", "인사이드 패널(우)", "트렁크 플로어", "리어 패널"]),
+    ("주요골격 B랭크", ["프론트 사이드 멤버(좌)", "프론트 사이드 멤버(우)", "리어 사이드 멤버(좌)", "리어 사이드 멤버(우)",
+                      "프론트 휠하우스(좌)", "프론트 휠하우스(우)", "리어 휠하우스(좌)", "리어 휠하우스(우)",
+                      "필러 패널(앞)(좌)", "필러 패널(앞)(우)", "필러 패널(중간)(좌)", "필러 패널(중간)(우)",
+                      "필러 패널(뒤)(좌)", "필러 패널(뒤)(우)", "패키지 트레이"]),
+    ("주요골격 C랭크", ["대쉬 패널", "플로어 패널"]),
+]
+STATUS_CODES = [("X", "교환"), ("W", "판금"), ("절단", "용접절단"), ("U", "요철"), ("T", "손상"), ("C", "부식"), ("A", "흠집")]
+PART_DIR = {"프론트 휀더": "앞", "프론트 도어": "앞", "리어 도어": "뒤", "프론트 패널": "앞", "리어 패널": "뒤",
+            "프론트 사이드 멤버": "앞", "리어 사이드 멤버": "뒤", "프론트 휠하우스": "앞", "리어 휠하우스": "뒤"}
+# 앞뒤를 적지 않은 부위 → 계산(등급·점수 그룹·글로비스 감점·사고평가 그룹)이 같은 대표 부위
+GENERIC_PARTS = {"도어": "프론트 도어", "사이드 멤버": "프론트 사이드 멤버", "휠하우스": "프론트 휠하우스"}
+GENERIC_DIR = {"도어": {"앞": "프론트 도어", "뒤": "리어 도어"},
+               "사이드 멤버": {"앞": "프론트 사이드 멤버", "뒤": "리어 사이드 멤버"},
+               "휠하우스": {"앞": "프론트 휠하우스", "뒤": "리어 휠하우스"}}
+# 엑셀 '성능 상태' 칸 읽기 — 띄어쓰기·대소문자는 무시하고 가장 긴 표기부터 찾는다
+PART_ALIASES = {
+    "후드": ["후드", "본넷", "보닛", "본네트"],
+    "프론트 휀더": ["프론트 휀더", "프론트 펜더", "프런트 휀더", "프런트 펜더", "앞 휀더", "앞 펜더", "휀더", "펜더"],
+    "프론트 도어": ["프론트 도어", "프런트 도어", "앞 도어", "앞문", "전도어"],
+    "리어 도어": ["리어 도어", "뒷 도어", "뒤 도어", "뒷문", "후도어"],
+    "트렁크 리드": ["트렁크 리드", "트렁크", "트렁크 도어", "테일게이트", "백도어"],
+    "라디에이터 서포트": ["라디에이터 서포트", "라디에타 서포트", "라지에이터 서포트", "라지에타 서포트", "라디에이터", "코어 서포트"],
+    "쿼터 패널": ["쿼터 패널", "쿼터", "리어 휀더", "리어 펜더", "뒷 휀더", "뒷 펜더", "뒤 휀더", "뒤 펜더"],
+    "루프 패널": ["루프 패널", "루프", "지붕"],
+    "사이드실 패널": ["사이드실 패널", "사이드실", "사이드씰", "사이드 스텝", "스텝", "로커 패널"],
+    "프론트 패널": ["프론트 패널", "프런트 패널", "앞 패널"],
+    "크로스 멤버": ["크로스 멤버", "크로스 맴버", "크로스멤바"],
+    "인사이드 패널": ["인사이드 패널", "인사이드"],
+    "트렁크 플로어": ["트렁크 플로어", "트렁크 플로워", "트렁크 바닥"],
+    "리어 패널": ["리어 패널", "뒷 패널", "백 패널"],
+    "프론트 사이드 멤버": ["프론트 사이드 멤버", "프런트 사이드 멤버", "앞 사이드 멤버", "프론트 멤버", "앞 멤버", "앞 프레임", "프론트 프레임"],
+    "리어 사이드 멤버": ["리어 사이드 멤버", "뒷 사이드 멤버", "뒤 사이드 멤버", "리어 멤버", "뒷 멤버", "뒷 프레임", "리어 프레임"],
+    "프론트 휠하우스": ["프론트 휠하우스", "프런트 휠하우스", "앞 휠하우스"],
+    "리어 휠하우스": ["리어 휠하우스", "뒷 휠하우스", "뒤 휠하우스"],
+    "필러 패널": ["필러 패널", "필러", "기둥"],
+    "패키지 트레이": ["패키지 트레이", "패키지"],
+    "대쉬 패널": ["대쉬 패널", "대시 패널", "대쉬", "대시"],
+    "플로어 패널": ["플로어 패널", "플로워 패널", "플로어", "플로워", "바닥"],
+    "도어": ["도어"],                                   # 앞뒤 미상 (GENERIC_PARTS)
+    "사이드 멤버": ["사이드 멤버", "멤버", "프레임"],
+    "휠하우스": ["휠하우스"],
+}
+PILLAR_ALIASES = {"A필러": "앞", "B필러": "중간", "C필러": "뒤", "A필러 패널": "앞", "B필러 패널": "중간", "C필러 패널": "뒤",
+                  "필러A": "앞", "필러B": "중간", "필러C": "뒤",
+                  "앞 필러": "앞", "중간 필러": "중간", "센터 필러": "중간", "뒤 필러": "뒤", "뒷 필러": "뒤"}
+PARSE_WORDS = {
+    "status_words": {"교환": "교환", "교체": "교환", "용접절단": "용접절단", "절단": "용접절단", "판금": "판금", "용접": "판금",
+                     "요철": "요철", "찌그러짐": "요철", "손상": "손상", "파손": "손상", "경미": "손상",
+                     "부식": "부식", "흠집": "흠집", "스크래치": "흠집", "긁힘": "흠집"},
+    "status_symbols": {"X": "교환", "W": "판금", "U": "요철", "T": "손상", "C": "부식", "A": "흠집"},
+    "side_words": {"좌": "좌", "좌측": "좌", "왼쪽": "좌", "운전석": "좌", "LH": "좌", "L": "좌",
+                   "우": "우", "우측": "우", "오른쪽": "우", "조수석": "우", "RH": "우", "R": "우"},
+    "both_words": ["좌우", "양쪽", "양측", "LR"],
+    "direction_words": {"앞": "앞", "프론트": "앞", "프런트": "앞", "중간": "중간", "센터": "중간",
+                        "뒤": "뒤", "뒷": "뒤", "리어": "뒤"},
+    "ignore_words": ["볼트체결부품", "볼트체결", "패널", "부위"],
+    "unknown_cell": ["미상", "모름", "확인불가", "-", "?", "N/A", "NA"],
+    "no_damage_cell": ["무사고", "무사고차", "완전무사고", "무", "이상없음", "사고없음", "없음", "정상"],
+}
+
+
+def build_model():
+    """사이트 계산기용 모델 — prep.py 와 같은 규칙 + 학습 가중치를 한 덩어리로"""
+    w = json.load(open(WEIGHTS_PATH, encoding="utf-8"))
+    acc = {"B": ACC_B, "C": ACC_C, "D": ACC_D, "F": ACC_F}
+    acc_of = lambda gp: tuple(k for k, s in acc.items() if gp in s)
+    for g, alt in GENERIC_DIR.items():          # 앞뒤 미상 부위는 앞·뒤 어느 쪽이든 계산이 같아야 한다
+        a, b = alt["앞"], alt["뒤"]
+        assert (PART_RANK[a], SCORE_GROUP[a], GLOVIS[TO_GLOVIS[a]], acc_of(TO_GLOVIS[a])) == \
+               (PART_RANK[b], SCORE_GROUP[b], GLOVIS[TO_GLOVIS[b]], acc_of(TO_GLOVIS[b])), g
+    positions = []
+    for board, labels in POSITIONS:
+        for lab in labels:
+            tags = re.findall(r"\((.*?)\)", lab)
+            positions.append({"board": board, "label": lab, "part": re.sub(r"\(.*?\)", "", lab).strip(),
+                              "side": next((t for t in tags if t in ("좌", "우")), None),
+                              "pillar": next((t for t in tags if t in ("앞", "중간", "뒤")), None)})
+    assert len(positions) == 37 and {p["part"] for p in positions} == set(PART_RANK)
+    sided = {p["part"] for p in positions if p["side"]}
+    return {
+        "version": w["fitted"],
+        "note": "inspection_score.py 가 만든 파일(직접 고치지 말 것) — prep.py 와 같은 규칙 + 학습 가중치",
+        "parts": {p: {"rank": r, "group": SCORE_GROUP.get(p), "glovis": TO_GLOVIS.get(p), "sides": p in sided,
+                      "dir": PART_DIR.get(p)} for p, r in PART_RANK.items()},
+        "generic_parts": GENERIC_PARTS,
+        "positions": positions,
+        "statuses": [{"code": c, "name": n} for c, n in STATUS_CODES],
+        "rank_level": RANK_LEVEL,
+        "level_name": {str(k): v for k, v in LEVEL_NAME.items()},
+        "raw_status_rules": RAW_STATUS_RULES,
+        "status_kind": STATUS_KIND,
+        "glovis": {"table": GLOVIS, "status_cols": GLOVIS_STATUS,
+                   "acc": {k: sorted(s) for k, s in acc.items()}, "grade_bins": GRADE_BINS},
+        "score": {"columns": [f"{g}|{k}" for g in SCORE_GROUPS for k in SCORE_KINDS] + EXTRAS,
+                  "status_k": SCORE_K, "cap": CAP, "coef": w["coef"], "points_per_pct": w["points_per_pct"],
+                  "grade_cuts": w["grade_cuts"], "fitted": w["fitted"], "ridge_lambda": w["ridge_lambda"],
+                  "test_r2_full": w["test_r2_full"]},
+        "simple_repair_rule": "외판(1·2랭크)에 교환·판금·용접절단이 있으면 '있음' — 2026-10-26 판매중 데이터와 99.0% 일치",
+        "mech_levels": {"0": "없음", "1": "경미(미세누유·미세누수)", "2": "결함(누유·누수·불량·부족·과다 등)"},
+        "parser": {"part_aliases": PART_ALIASES, "pillar_aliases": PILLAR_ALIASES, "generic_dir": GENERIC_DIR, **PARSE_WORDS},
+    }
+
+
+def export_model(path=MODEL_PATH):
+    """build_model() → JSON 파일 (내용이 같으면 같은 바이트라 커밋 변경이 생기지 않는다)"""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(build_model(), f, ensure_ascii=False, indent=1)
+        f.write("\n")
+    return path
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fit", action="store_true")
+    ap.add_argument("--export", action="store_true")
     args = ap.parse_args()
+    if args.export and not args.fit:
+        sys.stdout.reconfigure(encoding="utf-8")
+        print("사이트 계산기 모델 →", export_model()); return
     if not args.fit:
         print(__doc__); return
     src = os.path.join(ROOT, "encar_output")
@@ -310,7 +450,9 @@ def main():
     weights, c, X, ctrl, test = fit(L, items, flags)
     glv = glovis_eval(items, c.index)
     table, sc, yc = validate(c, X, ctrl, test, weights, glv)
-    json.dump(weights, open(WEIGHTS_PATH, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    with open(WEIGHTS_PATH, "w", encoding="utf-8") as f:
+        json.dump(weights, f, ensure_ascii=False, indent=1)
+    export_model()                                     # 사이트 계산기도 새 가중치로
     sys.stdout.reconfigure(encoding="utf-8")
     print(f"학습 {weights['n_train']:,} / 시험 {weights['n_test']:,} · 선택 λ={weights['ridge_lambda']} · 글로비스 1점당 {((np.exp(weights['glovis_theta_per_point'])-1)*100):.2f}% · 저장 {WEIGHTS_PATH}")
     co = pd.Series(weights["coef"]); pr = pd.Series(weights["glovis_prior"])
