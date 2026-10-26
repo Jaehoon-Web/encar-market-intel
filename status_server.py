@@ -30,7 +30,7 @@ TS = re.compile(r"^\[?(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)")
 PROG = re.compile(r"(상세|성능점검) \[(\d+)~(\d+)\]:\s+\d+%.*?\|\s*(\d+)/(\d+) \[")
 
 STEPS = [("s1", "1단계 · 매물 ID 수집"), ("s2", "2단계 · 상세 정보"), ("s3", "3단계 · 성능점검"),
-         ("proc", "정제 (process·clean)"), ("hist", "이력 누적"), ("prep", "전처리"), ("build", "사이트 빌드"),
+         ("proc", "정제 (process·clean)"), ("hist", "이력 누적"), ("prep", "전처리"), ("coef", "보정 계수"), ("build", "사이트 빌드"),
          ("deploy", "GitHub 배포")]
 
 
@@ -148,12 +148,14 @@ def status():
         "proc": has(r"✔ 크롤링\+정제"),
         "hist": has(r"✔ 이력 스냅샷"),
         "prep": has(r"✔ 전처리"),
+        "coef": has(r"✔ 보정 계수"),
         "build": has(r"✔ 사이트 빌드"),
         "deploy": has(r"✔ git push") or has(r"커밋할 변경 없음"),
     }
     started_flags = {
         "s1": has(r"stage=1"), "s2": has(r"stage=2"), "s3": has(r"stage=3"),
-        "proc": done["s3"], "hist": has(r"▶ 이력 스냅샷"), "prep": has(r"▶ 전처리"), "build": has(r"▶ 사이트 빌드"),
+        "proc": done["s3"], "hist": has(r"▶ 이력 스냅샷"), "prep": has(r"▶ 전처리"), "coef": has(r"▶ 보정 계수"),
+        "build": has(r"▶ 사이트 빌드"),
         "deploy": has(r"▶ git add"),
     }
     steps = []

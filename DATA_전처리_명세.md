@@ -280,6 +280,10 @@ crawler(1→2→3) → process → clean → append_history → [prep.py] → bu
 - `prep.py`는 `append_history.py` 다음에 실행한다. 실패해도 배포를 막지 않는다(append_history와 같은 방식). **2026-10-26 `auto_update.py`에 반영 완료** — 10/28 정기 실행부터 매주 돈다.
 - `prep.py`는 `inspection_score.py`(규칙·계산)와 `inspection_score_weights.json`(학습된 가중치)을 함께 쓴다. 가중치 파일이 없으면 점수 컬럼만 빼고 나머지는 정상 생성한다.
 - `prep.py`는 사이트 계산기 모델(`web/data/inspection_model.json`)도 내보낸다. `auto_update.py`가 `web/data`를 커밋하므로, 규칙이나 가중치가 바뀌면 다음 정기 실행 때 사이트에 반영된다.
+- 전처리 다음에 `adjust_coef.py --validate`(2.7단계)가 시세 보정 계수(기획안 D3)를 다시 추정해 `web/data/adj_coef.json`과 `encar_output/prep/adj_coef_report.txt`(계수·검증 요약)를 쓴다. 실패해도 배포는 계속된다.
+  - **추정**: 판매중·비교사용·성능점검 매물의 로그 호가에서 성능감가율 몫을 뺀다. 그리고 같은 (모델·등급·세부등급) 칸 안의 차이로 차령(개월)·주행(만km, 25만 상한)·렌트·색상 계수를 구한다.
+  - **계층**: 시장 → 차급(국산·수입) → 모델 순서로, 모델 표본이 적을수록 차급 값 쪽으로 당긴다(경험적 베이즈). 등급·세부등급 차이는 모델마다 구하고, 대수 n이면 n/(n+5)만큼만 반영한다.
+  - **검증(2026-10-26)**: 매물 20%를 떼어 두고 나머지로 그 차의 호가를 추정했다. 추정 오차 중위가 보정 없음 7.8%에서 성능+보정 5.6%로 줄었다.
 - 현재 사이트(`build_data.py`)는 당분간 기존 `encar_cleaned`를 쓴다. 새 사이트를 만들 때 `listings.parquet`으로 옮긴다.
 - **`price_obs.parquet`는 이번 주부터 쌓는다.** 가격 인하·3개월 추세 지표의 원천이라, 사이트 개편과 상관없이 먼저 시작한다.
 

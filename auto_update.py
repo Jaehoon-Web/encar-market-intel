@@ -129,6 +129,12 @@ def main():
         except Exception as e:
             log("전처리 실패(무시하고 계속): %s" % e)
 
+        # 2.7) 시세 보정 계수(D3: 차령·주행·렌트·색상·등급 → web/data/adj_coef.json, 검증 포함) — 실패해도 배포는 계속
+        try:
+            run([PY, "adjust_coef.py", "--validate"], "보정 계수(adjust_coef.py)")
+        except Exception as e:
+            log("보정 계수 실패(무시하고 계속): %s" % e)
+
         # 3) 사이트 데이터 빌드
         run([PY, "build_data.py"], "사이트 빌드(build_data.py)")
 
