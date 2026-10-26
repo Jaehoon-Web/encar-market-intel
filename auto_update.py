@@ -18,7 +18,7 @@ auto_update.py — 엔카 크롤링 → 사이트 빌드 → 자동 배포 무�
   --full   전체 초기화 후 풀 재크롤(체크포인트·상세까지 삭제, 수일 소요·주말 권장).
            누적된 '판매 완료' 매물을 비우고 완전히 새로 수집.
 """
-import sys, os, subprocess, glob, datetime, argparse, time, ctypes
+import sys, os, subprocess, glob, datetime, argparse, time, ctypes, json
 
 # 크롤 중 PC 절전 방지 (런타임 요청 — 시스템 설정 변경 아님, 프로세스 종료 시 자동 해제)
 ES_CONTINUOUS = 0x80000000
@@ -36,6 +36,7 @@ LOGDIR = os.path.join(ROOT, "logs")
 LOCK = os.path.join(ROOT, "auto_update.lock")
 LOCK_STALE_HOURS = 36          # 이 시간 지난 lock은 비정상 종료로 보고 무시
 PY = sys.executable            # 현재 파이썬 인터프리터 재사용
+LOCAL_STEPS = os.path.join(OUT, "local_steps.json")   # 이 PC에만 있는 추가 단계(저장소 밖): [{"label", "script", "args"}]
 
 os.makedirs(LOGDIR, exist_ok=True)
 _logfile = os.path.join(LOGDIR, "auto_%s.log" % datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
@@ -54,6 +55,17 @@ def run(cmd, step):
     if rc != 0:
         raise RuntimeError("%s 실패 (exit=%d)" % (step, rc))
     log("✔ %s 완료" % step)
+
+def local_steps():
+    """encar_output/local_steps.json의 추가 단계 목록. 없거나 읽지 못하면 빈 목록"""
+    if not os.path.exists(LOCAL_STEPS):
+        return []
+    try:
+        with open(LOCAL_STEPS, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        log("local_steps.json 읽기 실패(무시): %s" % e)
+        return []
 
 def acquire_lock():
     if os.path.exists(LOCK):
@@ -128,6 +140,13 @@ def main():
             run([PY, "prep.py"], "전처리(prep.py)")
         except Exception as e:
             log("전처리 실패(무시하고 계속): %s" % e)
+
+        # 2.65) 이 PC에만 있는 추가 단계(encar_output/local_steps.json, 저장소 밖 — 예: 비공개 매칭표로 표준 모델명 붙이기) — 실패해도 계속
+        for st in local_steps():
+            try:
+                run([PY, st["script"]] + st.get("args", []), st.get("label", "로컬 단계"))
+            except Exception as e:
+                log("로컬 단계 실패(무시하고 계속): %s" % e)
 
         # 2.7) 시세 보정 계수(D3: 차령·주행·렌트·색상·등급 → web/data/adj_coef.json, 검증 포함) — 실패해도 배포는 계속
         try:
