@@ -5,6 +5,8 @@ price_engine.py — 시세 산정 엔진 (기획안 WP1, 5.1.2): "가장 비슷�
     python price_engine.py --validate     # 판매중 매물 하나씩을 나머지 매물로 추정해 정확도를 잰다
                                           # → encar_output/prep/price_engine_report.txt
     python price_engine.py --demo         # 판매중 매물 몇 대로 한 대 산정 결과(비교 매물·보정 근거·환산가)를 보여 준다
+    python price_engine.py --export       # 사이트용 모델그룹별 비교 매물 파일 + index.json → encar_output/site/comps
+    python price_engine.py --parity       # --export 후, 사이트 엔진(web/lib/price_engine.js)이 같은 값을 내는지 판매중 전체로 검증
 
 산정 순서 (대상 차 1대)
   1 후보: 같은 모델(엔카 '모델' = 기획안의 세부모델)의 비교 가능 매물 중 성능점검이 있는 것.
@@ -20,7 +22,7 @@ price_engine.py — 시세 산정 엔진 (기획안 WP1, 5.1.2): "가장 비슷�
   6 신뢰도: A 10대 이상·2단계 이내·범위가 대표값 ±8% 안 / B 4단계 이내 / C 5단계(참고용)
   7 환산가: 대표값 × (1 − 환산 비율: 팀 수정 → 모델 예외 → 호가대×차령 기준표). 수리비는 시세·환산가에서 전액 뺀다
 """
-import os, sys, json, zlib, argparse, datetime
+import os, sys, json, zlib, glob, argparse, datetime, subprocess
 import numpy as np
 import pandas as pd
 import adjust_coef as AC
@@ -29,6 +31,9 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 PREP = os.path.join(ROOT, "encar_output", "prep")
 DATA = os.path.join(ROOT, "web", "data")
 REPORT = os.path.join(PREP, "price_engine_report.txt")
+SITE = os.path.join(ROOT, "encar_output", "site", "comps")      # 사이트용 비교 매물 파일(공개 방식을 정하기 전까지 저장소 밖)
+PARITY = os.path.join(PREP, "_engine_parity.json")
+RUNNER = os.path.join(ROOT, "tools", "price_engine_parity.js")
 
 STEPS = AC.STEPS                      # (이름, 등급 일치, 차령 ±개월, 주행 ±만km, 성능등급 ±)
 COLORS, FEATS, KM_CAP = AC.COLORS, AC.FEATS, AC.KM_CAP
@@ -38,15 +43,19 @@ A_WIDTH = 0.08                        # 신뢰도 A: 범위(25~75%)가 대표값
 SIM = {"age": 12.0, "km": 4.0, "grade": 0.5, "trim": 0.25, "perf": 0.25, "sold": 1.0}    # 유사도 거리(차령 12개월·주행 4만km = 1)
 # 판매 매물 감점 1.0: 0.25 대비 오차 5.6→5.5%, 편향 +0.8→+0.4%(1겹 시험). 판매 매물은 마지막 호가라 조금 높게 남는다
 OPTS = {"sold": True, "time": True, "weight": True, "outlier": True, "adjust": True}
+ENGINE = {"steps": [list(s) for s in STEPS], "colors": COLORS, "km_cap": KM_CAP, "min_comps": MIN_COMPS, "good_comps": GOOD_COMPS,
+          "out_mad": OUT_MAD, "out_floor": OUT_FLOOR, "a_width": A_WIDTH, "sim": SIM}       # 사이트 엔진이 읽는 설정(한곳에서 관리)
+ROW_FIELDS = ["id", "m", "g", "t", "reg", "age", "km", "rent", "col", "perf", "dep", "price", "sold", "tf",
+              "acc", "gv", "gp", "dwell", "p0", "sd"]
 
 
 # ───────── 데이터 ─────────
 def load_pool():
     """비교 후보: 비교사용(판매중 + 최근 3개월 판매, 품질 플래그·중복 제외) 중 성능점검이 있는 매물"""
     L = pd.read_parquet(os.path.join(PREP, "listings.parquet"),
-                        columns=["상태", "비교사용", "점검여부", "제조사", "모델", "등급", "세부등급", "차급", "국산", "연료", "연식",
-                                 "등록연월", "주행km", "현재가", "마지막가", "마지막관측일", "번호판유형", "색상계열", "성능감가율",
-                                 "성능등급", "사고라벨", "글로비스_종합평가점", "글로비스_감점합", "차키"])
+                        columns=["상태", "비교사용", "점검여부", "제조사", "모델그룹", "모델", "등급", "세부등급", "차급", "국산", "연료",
+                                 "연식", "등록연월", "주행km", "현재가", "첫가격", "마지막가", "마지막관측일", "판매추정일", "체류일",
+                                 "번호판유형", "색상계열", "성능감가율", "성능등급", "사고라벨", "글로비스_종합평가점", "글로비스_감점합", "차키"])
     sold = L["상태"] != "판매중"
     price = L["현재가"].where(~sold, L["마지막가"])
     ok = (L["비교사용"].eq(True) & L["점검여부"].eq(True) & L["성능감가율"].notna() & price.gt(0) & L["주행km"].gt(0)
@@ -165,7 +174,10 @@ def estimate_one(G, t, opts=None, detail=False):
         b[3:] = 0.0                                                                  # 색상을 모르면 색상 보정 안 함
     tfe = G.grade.get(t["등급"], 0.0) + G.trim.get(t["등급"], {}).get(t["세부"], 0.0)
     parts = (tx - G.x[idx]) * b                                                      # 항목별 로그 보정(차령·주행·렌트·색상)
-    lin = parts.sum(axis=1) + tfe - G.fe[idx]
+    lin = parts[:, 0].copy()
+    for j in range(1, parts.shape[1]):                                               # 사이트 JS와 같은 순서로 더한다
+        lin += parts[:, j]
+    lin = lin + tfe - G.fe[idx]
     tf = G.tf[idx] if o["time"] else np.ones(len(idx))
     if not o["adjust"]:
         lin, tf = np.zeros(len(idx)), np.ones(len(idx))
@@ -340,10 +352,126 @@ def demo(pool, n=3):
             print()
 
 
+# ───────── 사이트용 파일 · 일치 검증 ─────────
+def _num(v):
+    """JSON 숫자: 정수 값이면 int, 결측이면 None. 실수는 그대로 둔다(사이트에서 같은 값으로 읽힌다)"""
+    if v is None or v is pd.NA:
+        return None
+    if hasattr(v, "item"):
+        v = v.item()
+    if isinstance(v, float):
+        if v != v:
+            return None
+        if v.is_integer():
+            return int(v)
+    return v
+
+
+def site_groups(pool):
+    """파일을 나누는 모델그룹. 비어 있으면 같은 모델의 가장 흔한 모델그룹, 그것도 없으면 모델 이름"""
+    grp = pool["모델그룹"].fillna("").astype(str)
+    known = pool[grp != ""].groupby(["제조사", "모델"])["모델그룹"].agg(lambda s: s.mode().iat[0])
+    fill = pd.Series([known.get((a, b), b) for a, b in zip(pool["제조사"], pool["모델"])], index=pool.index)
+    return grp.where(grp != "", fill)
+
+
+def export(pool):
+    """모델그룹별 비교 매물 파일 + index.json(선택 목록·엔진 설정). 차대번호·번호판·표준 모델명은 넣지 않는다
+    파일 안 행 순서 = 비교 후보 순서(같은 세부모델끼리의 순서가 파이썬 엔진과 같아야 동률 처리가 같다)"""
+    os.makedirs(SITE, exist_ok=True)
+    for f in glob.glob(os.path.join(SITE, "*.json")):
+        os.remove(f)
+    pool = pool.assign(grp=site_groups(pool))
+    labels = sorted(pool["사고라벨"].fillna("미상").unique())
+    colors = ["흰색·진주"] + COLORS
+    ci, li = {v: i for i, v in enumerate(colors)}, {v: i for i, v in enumerate(labels)}
+    version = datetime.date.today().isoformat()
+    makers, file_of, sizes = {}, {}, []
+    for (mk, gname), g in pool.groupby(["제조사", "grp"], sort=True):
+        fname = f"g{zlib.crc32(f'{mk}|{gname}'.encode()):08x}.json"
+        models = list(dict.fromkeys(g["모델"]))
+        mi = {v: i for i, v in enumerate(models)}
+        gi = {v: i for i, v in enumerate(sorted(g["등급"].unique()))}
+        ti = {v: i for i, v in enumerate(sorted(g["세부"].unique()))}
+        rows = [[int(r.Index), mi[r.모델], gi[r.등급], ti[r.세부], int(r.등록연월), _num(r.age), _num(r.주행km), int(r.rent),
+                 ci.get(r.색상계열, 0), _num(r.성능등급), _num(r.성능감가율), _num(r.price), int(r.sold), _num(r.tf),
+                 li[r.사고라벨 if isinstance(r.사고라벨, str) else "미상"], _num(r.글로비스_종합평가점), _num(r.글로비스_감점합),
+                 _num(r.체류일), _num(r.첫가격), str(r.판매추정일) if r.sold else None] for r in g.itertuples()]
+        minfo = [{"name": m, "seg": s["seg"].mode().iat[0], "n": len(s), "onsale": int((~s["sold"]).sum())}
+                 for m, s in ((m, g[g["모델"] == m]) for m in models)]
+        doc = {"version": version, "maker": mk, "group": gname, "fields": ROW_FIELDS, "models": minfo,
+               "grades": list(gi), "trims": list(ti), "colors": colors, "labels": labels, "rows": rows}
+        path = os.path.join(SITE, fname)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(doc, f, ensure_ascii=False, separators=(",", ":"))
+        sizes.append(os.path.getsize(path))
+        makers.setdefault(mk, {"name": mk, "origin": g["origin"].mode().iat[0], "groups": []})["groups"].append(
+            {"name": gname, "file": fname, "n": len(g), "onsale": int((~g["sold"]).sum()),
+             "models": [{k: v for k, v in m.items() if k != "seg"} for m in minfo]})
+        for m in models:
+            file_of[(mk, m)] = fname
+    index = {"version": version, "engine": ENGINE, "makers": sorted(makers.values(), key=lambda x: -sum(g["n"] for g in x["groups"]))}
+    with open(os.path.join(SITE, "index.json"), "w", encoding="utf-8", newline="\n") as f:
+        json.dump(index, f, ensure_ascii=False, separators=(",", ":"))
+    sz = np.array(sizes) / 1024
+    print(f"[내보내기] {SITE} — 모델그룹 파일 {len(sizes):,}개 · 합계 {sz.sum() / 1024:.1f}MB · 중위 {np.median(sz):.0f}KB · "
+          f"최대 {sz.max() / 1024:.2f}MB · index.json {os.path.getsize(os.path.join(SITE, 'index.json')) / 1024:.0f}KB")
+    return file_of
+
+
+def parity(pool):
+    """사이트 엔진(web/lib/price_engine.js)이 이 엔진과 같은 값을 내는지: 판매중 매물 전체 × (상태 입력 · 상태 미상)
+    같은 입력 = 내보낸 파일 + web/data/adj_coef.json + conversion_rates.json. 다르면 종료 코드 1"""
+    file_of = export(pool)
+    with open(os.path.join(DATA, "adj_coef.json"), encoding="utf-8") as f:
+        C = coef_from_json(json.load(f))
+    with open(os.path.join(DATA, "conversion_rates.json"), encoding="utf-8") as f:
+        R = json.load(f)
+    groups = {k: Group(g, C) for k, g in pool.groupby("key")}
+    year = datetime.date.today().year
+    cases = []
+    for r in pool[~pool["sold"]].itertuples():
+        color = r.색상계열 if r.색상계열 in COLORS or r.색상계열 == "흰색·진주" else None
+        yrs = year - int(r.연식 if r.연식 == r.연식 and r.연식 else r.등록연월 // 100)
+        for unknown in (False, True):
+            t = {"등급": r.등급, "세부": r.세부, "age": r.age, "km": r.km, "rent": r.rent, "color": color,
+                 "dep": None if unknown else r.dep, "perf": None if unknown else float(r.성능등급), "exclude_id": r.Index}
+            res = estimate_one(groups[r.key], t)
+            exp = None
+            if res is not None:
+                exp = {k: res[k] for k in ["est", "lo", "hi", "n", "out", "step", "grade"] + (["est0"] if unknown else [])}
+                exp["rate"], exp["src"] = conversion_rate(R, res["est"], yrs, r.제조사, r.모델, r.연료)
+            cases.append({"f": file_of[(r.제조사, r.모델)], "m": r.모델, "id": int(r.Index), "grade": r.등급, "trim": r.세부,
+                          "age": _num(r.age), "km": _num(r.주행km), "rent": int(r.rent), "color": color,
+                          "dep": None if unknown else _num(r.성능감가율), "perf": None if unknown else int(r.성능등급),
+                          "yrs": yrs, "maker": r.제조사, "fuel": r.연료 if isinstance(r.연료, str) else None, "exp": exp})
+    cars = []                                                                        # 사이트 입력 형태(환산가·수리비 포함)
+    cur = pool[~pool["sold"]]
+    for r in [cur[cur["모델"] == "그랜저 IG"].iloc[100], cur[cur["모델"] == "5시리즈 (G30)"].iloc[50]] + \
+             [x for _, x in cur.sample(6, random_state=11).iterrows()]:
+        for unknown in (False, True):
+            car = {"제조사": r["제조사"], "모델": r["모델"], "등급": r["등급"], "세부등급": r["세부"], "등록연월": int(r["등록연월"]),
+                   "주행km": _num(r["주행km"]), "색상계열": r["색상계열"], "렌트": bool(r["rent"] > 0),
+                   "연료": r["연료"] if isinstance(r["연료"], str) else None, "연식": _num(r["연식"]),
+                   "성능": None if unknown else {"감가율": _num(r["성능감가율"]), "등급": int(r["성능등급"])},
+                   "수리비": 30, "기준연월": 202610, "exclude_id": r.name}
+            x = estimate_car(groups, R, car)
+            exp = None if x is None else {k: x[k] for k in ["est", "lo", "hi", "n", "step", "grade", "시세", "환산가", "환산비율", "환산출처"]
+                                          + (["est0"] if unknown else [])}
+            cars.append({"f": file_of[(r["제조사"], r["모델"])], "car": dict(car, exclude_id=None, excludeId=int(r.name)), "exp": exp})
+    with open(PARITY, "w", encoding="utf-8") as f:
+        json.dump({"cases": cases, "cars": cars}, f, ensure_ascii=False, separators=(",", ":"))
+    print(f"[일치 검증] 사례 {len(cases):,}건(판매중 {len(cases) // 2:,}대 × 상태 입력·미상) + 사이트 입력 {len(cars)}건 → "
+          f"node {os.path.relpath(RUNNER, ROOT)}", flush=True)
+    return subprocess.call(["node", RUNNER, PARITY, SITE, os.path.join(DATA, "adj_coef.json"), os.path.join(DATA, "conversion_rates.json")])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--validate", action="store_true")
     ap.add_argument("--demo", action="store_true")
+    ap.add_argument("--export", action="store_true")
+    ap.add_argument("--parity", action="store_true")
     a = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
     t0 = datetime.datetime.now()
@@ -355,6 +483,10 @@ def main():
         P = validate(pool)
         P.to_parquet(os.path.join(PREP, "price_engine_validation.parquet"))
         print(report(P, (datetime.datetime.now() - t0).seconds))
+    if a.export and not a.parity:
+        export(pool)
+    if a.parity:
+        sys.exit(parity(pool))
 
 
 if __name__ == "__main__":
