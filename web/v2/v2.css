@@ -198,3 +198,43 @@ select.filter-select:disabled, .v2-in:disabled { color: var(--tx-4); cursor: def
 .v2-log { font-size: 13px; line-height: 1.7; }
 .v2-log li { padding: 6px 0; border-bottom: 1px solid var(--line-soft); }
 .v2-log li:last-child { border-bottom: 0; }
+
+.card-title { word-break: keep-all; }                    /* 좁은 화면에서 제목이 글자 단위로 끊기지 않게 */
+
+/* 시장 시황(5.2) — 계열 색(검증한 범주 팔레트 1~3번 + 시황은 먹색). 같은 대상은 차트가 달라도 같은 색 */
+.v2-mk { --s-price: #2a78d6; --s-speed: #eb6834; --s-stock: #1baf7a; --s-cond: var(--tx-1); --s-new: #2a78d6; --s-sold: #eb6834; }
+.v2-mfilter { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+.v2-board { min-width: 720px; }
+.v2-board th, .v2-board td { padding: 8px 10px; vertical-align: top; }
+.v2-board td b { font-variant-numeric: tabular-nums; color: var(--tx-1); }
+.v2-board td small { display: block; font-size: 11px; font-weight: 500; color: var(--tx-3); line-height: 1.4; }
+.v2-board td.v2-dim b { color: var(--tx-3); font-weight: 600; }
+.v2-mrow { cursor: pointer; }
+.v2-mrow:hover td { background: var(--bg-2); }
+.v2-mrow.on td { background: var(--accent-wash); }
+.v2-mrow.on td:first-child { box-shadow: inset 3px 0 0 var(--accent); font-weight: 700; }
+.v2-mrow.sub td:first-child { color: var(--tx-2); padding-left: 16px; }
+.v2-mrow:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.v2-mlab { display: inline-block; font-size: 11px; font-weight: 700; padding: 0 6px; border-radius: 4px; background: var(--bg-2); color: var(--tx-2); margin-left: 4px; }
+.v2-mlab.up { background: var(--up-wash); color: var(--up); }
+.v2-mlab.down { background: var(--down-wash); color: var(--down); }
+.v2-mtag { font-size: 11px; font-weight: 500; color: #8A6A1E; border: 1px solid var(--warn); border-radius: 4px; padding: 0 4px; margin-left: 4px; white-space: nowrap; }
+.v2-spark { width: 96px; height: 26px; display: block; }
+.v2-spark polyline { fill: none; stroke: var(--tx-3); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.v2-spark circle { fill: var(--accent); }
+.v2-spark line.gap { stroke: var(--tx-4); stroke-width: 1; opacity: 0.6; }
+.v2-legend i.v2-lkey { width: 14px; height: 3px; border-radius: 2px; vertical-align: 3px; }
+.v2-subchart { margin-top: 18px; }
+.v2-xhair { stroke: var(--tx-3); stroke-width: 1; pointer-events: none; }
+.v2-chart .v2-hit { cursor: crosshair; }
+.v2-chart:focus { outline: none; }
+.v2-chart:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.v2-trow { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.v2-trow i { display: inline-block; width: 12px; height: 3px; border-radius: 2px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5); }
+.v2-trow b { font-variant-numeric: tabular-nums; }
+.v2-tdate { font-weight: 700; margin-bottom: 2px; }
+.v2-tnote { color: rgba(255, 255, 255, 0.72); font-size: 11px; margin-top: 3px; white-space: normal; }
+.v2-mdl { min-width: 980px; }
+.v2-sorth { font: inherit; font-size: 11px; font-weight: 700; color: var(--tx-2); background: none; border: 0; padding: 0; cursor: pointer; white-space: nowrap; }
+.v2-sorth.on { color: var(--accent); }
+.v2-msearch { width: 220px; padding: 6px 10px; }
