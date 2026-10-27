@@ -16,8 +16,9 @@
   var COEF_LEVEL = { '모델': '이 세부모델 자체 값', '차급': '같은 차급 평균 값(이 모델 표본이 없어서)', '시장': '시장 평균 값' };
   var SHOW = 30;                                            // 비교 매물 표 기본 행 수
   var KM_BANDS = [[0, 3e4, '3만 미만'], [3e4, 6e4, '3~6만'], [6e4, 1e5, '6~10만'], [1e5, 1.5e5, '10~15만'], [1.5e5, Infinity, '15만 이상']];
-  var X = {}, ENG = null, ISC = null, GROUPS = {}, R = null, LAST = null, timer = 0, B = null;
-  var VIEW = { sort: 'sim', all: false, mode: 'one' };      // mode: one(한 대 산정) · model(모델 요약) · batch(묶음 산정)
+  var X = {}, ENG = null, ISC = null, GROUPS = {}, R = null, LAST = null, timer = 0, B = null, RV = null;
+  var VIEW = { sort: 'sim', all: false, mode: 'one' };      // mode: one(한 대 산정) · model(모델 요약) · batch(묶음 산정) · rates(⚙ 환산 비율)
+  var MODES = ['model', 'batch', 'rates'];                  // 주소 view= 로 남는 화면
   var S = blank();
 
   function blank() {
@@ -156,7 +157,7 @@
     s.fixes = (q.get('fx') || '').split(',').filter(Boolean);
     s.sold = q.get('sold') !== '0';
     s.ex = (q.get('ex') || '').split(',').filter(Boolean);
-    VIEW.mode = ['model', 'batch'].indexOf(q.get('view')) >= 0 ? q.get('view') : 'one';
+    VIEW.mode = MODES.indexOf(q.get('view')) >= 0 ? q.get('view') : 'one';
     return s;
   }
 
@@ -640,7 +641,7 @@
     ['차령', '주행', '성능', '색상', '렌트', '등급', '시점'].forEach(function (k) { rows.push([k, R.basis[k]]); });
     rows.push(['보정 계수 수준', R.coefLevel], sec('산정 기준'),
       ['데이터 기준', '엔카 목록 ' + ((X.mi.crawls || []).length ? X.mi.crawls[X.mi.crawls.length - 1].date : F.now_date)],
-      ['비교 매물 파일', F.version], ['보정 계수', X.coef.version], ['환산 비율', X.rates.version],
+      ['비교 매물 파일', F.version], ['보정 계수', X.coef.version], ['환산 비율', RatesStore.label(X.rates)],
       ['비교 범위', S.sold ? '판매중 + 최근 3개월 판매' : '판매중만'], ['산정 화면 주소', location.href],
       ['참고', '추정 시세는 엔카 호가 기준. 환산가는 팀 환산 비율(도·소매 갭 요약치)을 적용한 값']);
     var cr = [['유사도', '매물ID', '상태', '판매 확인일', '최초등록', '주행(km)', '색상', '등급', '세부등급', '연료', '성능등급', '사고 라벨',
@@ -700,23 +701,30 @@
   function markMode(v) {
     document.querySelectorAll('button[data-seg="mode"]').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-v') === v); });
   }
-  function applyMode() {                                     // 묶음 산정은 입력·결과 대신 붙여넣기 화면
-    var batch = VIEW.mode === 'batch';
-    $('grid').hidden = batch;
-    $('batch').hidden = !batch;
-    if (!batch) { compute(); return; }
-    markMode('batch');
-    if (!B) {
-      B = V2Batch.create({ X: X, ENG: ENG, ISC: ISC, GROUPS: GROUPS, getJSON: getJSON, esc: esc, man: man, pad: pad, today: today,
-        fileSafe: fileSafe, tile: tile, href: function (s) { return query(Object.assign(blank(), s), 'one'); } });
-    }
-    B.show($('batch'));
+  function applyMode() {                                     // 묶음 산정·환산 비율은 입력·결과 대신 각자의 화면
+    var m = VIEW.mode;
+    $('grid').hidden = m === 'batch' || m === 'rates';
+    $('batch').hidden = m !== 'batch';
+    $('ratesView').hidden = m !== 'rates';
+    if (m === 'batch') {
+      markMode('batch');
+      if (!B) {
+        B = V2Batch.create({ X: X, ENG: ENG, ISC: ISC, GROUPS: GROUPS, getJSON: getJSON, esc: esc, man: man, pad: pad, today: today,
+          fileSafe: fileSafe, tile: tile, href: function (s) { return query(Object.assign(blank(), s), 'one'); } });
+      }
+      B.show($('batch'));
+    } else if (m === 'rates') {
+      markMode('rates');
+      if (!RV) RV = V2Rates.create({ X: X, ENG: ENG, esc: esc, man: man, store: X.store, changed: function () {} });   // 한 대 산정은 돌아갈 때 다시 계산
+      RV.show($('ratesView'));
+    } else compute();
   }
 
   function layout() {
-    $('app').innerHTML = '<div class="v2-mode">' + seg('mode', [['one', '한 대 산정'], ['model', '모델 요약'], ['batch', '묶음 산정']], VIEW.mode, '산정 방식') + '</div>' +
+    $('app').innerHTML = '<div class="v2-mode">' + seg('mode', [['one', '한 대 산정'], ['model', '모델 요약'], ['batch', '묶음 산정'], ['rates', '⚙ 환산 비율']], VIEW.mode, '산정 방식') + '</div>' +
       '<div class="v2-grid" id="grid"><aside class="card v2-input" id="inp" aria-label="대상 차 조건"></aside><section class="v2-result" id="res" aria-live="polite"></section></div>' +
-      '<section class="v2-batch" id="batch" aria-label="묶음 산정" hidden></section>';
+      '<section class="v2-batch" id="batch" aria-label="묶음 산정" hidden></section>' +
+      '<section class="v2-batch v2-rates" id="ratesView" aria-label="환산 비율 설정" hidden></section>';
     var inp = $('inp'), res = $('res'), tip = $('tip');
     inp.addEventListener('change', function (e) {
       var t = e.target, k = t.getAttribute('data-k');
@@ -797,9 +805,11 @@
   }
 
   function boot() {
-    Promise.all(['comps/index.json', 'adj_coef.json', 'conversion_rates.json', 'inspection_model.json', 'market_index.json'].map(getJSON))
+    Promise.all(['comps/index.json', 'adj_coef.json', 'conversion_rates.json', 'inspection_model.json', 'market_index.json'].map(getJSON)
+      .concat([RatesStore.load('/api/rates')]))                // 환산 비율 팀 수정(저장소가 없으면 초기값만)
       .then(function (a) {
-        X.idx = a[0]; X.coef = a[1]; X.rates = a[2]; X.model = a[3]; X.mi = a[4];
+        X.idx = a[0]; X.coef = a[1]; X.rates = a[2]; X.model = a[3]; X.mi = a[4]; X.store = a[5];
+        RatesStore.apply(X.rates, X.store.team);
         ENG = PriceEngine.create({ config: X.idx.engine, coef: X.coef, rates: X.rates });
         ISC = InspectionScore.create(X.model);
         S = fromHash();

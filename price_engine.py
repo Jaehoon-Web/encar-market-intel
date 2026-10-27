@@ -20,7 +20,7 @@ price_engine.py — 시세 산정 엔진 (기획안 WP1, 5.1.2): "가장 비슷�
   4 이상치: 로그 보정가가 가중 중앙값에서 3×MAD(최소 15%)보다 멀면 뺀다. 남는 매물이 5대 미만이면 빼지 않는다
   5 대표값: 유사도 가중 중앙값. 범위는 가중 25~75%
   6 신뢰도: A 10대 이상·2단계 이내·범위가 대표값 ±8% 안 / B 4단계 이내 / C 5단계(참고용)
-  7 환산가: 대표값 × (1 − 환산 비율: 팀 수정 → 모델 예외 → 호가대×차령 기준표). 수리비는 시세·환산가에서 전액 뺀다
+  7 환산가: 대표값 × (1 − 환산 비율: 직접 입력 → 팀 수정(모델) → 모델 예외 → 호가대×차령 기준표). 수리비는 시세·환산가에서 전액 뺀다
 """
 import os, re, sys, json, zlib, glob, argparse, datetime, subprocess
 import numpy as np
@@ -217,16 +217,22 @@ def estimate_one(G, t, opts=None, detail=False):
 
 
 def conversion_rate(R, est, age_years, maker=None, model=None, fuel=None, team=None):
-    """환산 비율(%)과 출처 — 팀 수정 → 모델 예외(기준표 + 가감) → 호가대×차령 기준표"""
+    """환산 비율(%)과 출처 — 직접 입력 → 팀 수정(모델) → 모델 예외(기준표 + 가감) → 호가대×차령 기준표
+    팀 수정(team_models: 모델별 비율, team_cells: 팀이 고친 기준표 칸)은 사이트 저장소(D6)에서 R에 합쳐 넣는다. 파일 R에는 없다"""
     if team is not None:
-        return float(team), "팀 수정"
+        return float(team), "직접 입력"
+    for e in R.get("team_models") or []:
+        if e["제조사"] == maker and e["모델"] == model and (not e.get("연료") or e["연료"] == fuel):
+            return float(e["비율"]), "팀 수정(모델)"
     pi = next(i for i, b in enumerate(R["price_bands"]) if b["max_manwon"] is None or est <= b["max_manwon"])
     ai = next(i for i, b in enumerate(R["age_bands"]) if b["max_years"] is None or age_years <= b["max_years"])
-    base = R["rates"][pi][ai]
+    cells = R.get("team_cells")
+    cell = cells[pi][ai] if cells and pi < len(cells) and ai < len(cells[pi]) else None
+    base = R["rates"][pi][ai] if cell is None else cell
     for e in R.get("model_exceptions", []):
         if e["제조사"] == maker and e["모델"] == model and (not e.get("연료") or e["연료"] == fuel):
             return round(base + e["가감"], 1), "모델 예외"
-    return float(base), "호가대×차령 기준표"
+    return float(base), "호가대×차령 기준표" if cell is None else "기준표(팀 수정)"
 
 
 def estimate_car(groups, R, car, opts=None):

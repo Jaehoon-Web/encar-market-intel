@@ -201,17 +201,20 @@
       return r;
     }
 
-    // 환산 비율(%)과 출처 — 팀 수정 → 모델 예외(기준표 + 가감) → 호가대×차령 기준표 (파이썬 conversion_rate 와 같음)
+    // 환산 비율(%)과 출처 — 직접 입력 → 팀 수정(모델) → 모델 예외(기준표 + 가감) → 호가대×차령 기준표 (파이썬 conversion_rate 와 같음)
+    //   팀 수정(R.team_models · R.team_cells = 팀이 고친 기준표 칸)은 rates_store.js 가 사이트 저장소(D6)에서 읽어 R에 합친다
     function conversionRate(est, ageYears, maker, model, fuel, team) {
-      if (team != null) return { rate: +team, source: '팀 수정' };
+      if (team != null) return { rate: +team, source: '직접 입력' };
+      function hit(e) { return e['제조사'] === maker && e['모델'] === model && (!e['연료'] || e['연료'] === fuel); }
+      var tm = (R.team_models || []).find(hit);
+      if (tm) return { rate: +tm['비율'], source: '팀 수정(모델)' };
       var pi = R.price_bands.findIndex(function (b) { return b.max_manwon == null || est <= b.max_manwon; });
       var ai = R.age_bands.findIndex(function (b) { return b.max_years == null || ageYears <= b.max_years; });
-      var base = R.rates[pi][ai];
-      var ex = (R.model_exceptions || []).find(function (e) {
-        return e['제조사'] === maker && e['모델'] === model && (!e['연료'] || e['연료'] === fuel);
-      });
+      var cell = R.team_cells && R.team_cells[pi] ? R.team_cells[pi][ai] : null;
+      var base = cell == null ? R.rates[pi][ai] : cell;
+      var ex = (R.model_exceptions || []).find(hit);
       if (ex) return { rate: rint((base + ex['가감']) * 10) / 10, source: '모델 예외' };
-      return { rate: base, source: '호가대×차령 기준표' };
+      return { rate: base, source: cell == null ? '호가대×차령 기준표' : '기준표(팀 수정)' };
     }
 
     /* 사이트 입력 형태: 모델, 등급, 세부등급, 등록연월(yyyymm), 주행km, 색상계열, 렌트, 성능({감가율, 등급} | null=상태 미상),

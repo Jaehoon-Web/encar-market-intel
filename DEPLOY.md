@@ -58,6 +58,49 @@ git commit -m "데이터 갱신: <날짜>"
 git push                      # → Cloudflare 자동 재배포
 ```
 
+## 환산 비율 저장소 연결 (기획안 D6 · 5.1.6) — 처음 1회
+
+새 사이트의 ⚙ 환산 비율 화면은 팀이 고친 비율을 Cloudflare **Workers KV**에 저장한다.
+- 코드: Worker `worker/index.js`(`/api/rates`), 사이트 `web/lib/rates_store.js` · `web/v2/rates.js`.
+- 연결 전에는 초기값(`web/data/conversion_rates.json`)만 쓰고 [수정하기]가 막혀 있다.
+- 사이트는 연결 전에도 그대로 동작한다.
+
+**사용자가 Cloudflare 대시보드에서 할 일**(로그인 필요)
+1. **Storage & Databases → Workers KV → Create**로 이름 `encar-rates` 저장소를 만든다. **Namespace ID**를 복사한다.
+2. **Workers & Pages → encar-market-intel → Settings → Variables and Secrets → Add**에서 수정 비밀번호를 넣는다.
+   - Type `Secret`, Name `RATES_PASSWORD`, Value = 팀이 쓸 비밀번호.
+   - 비밀값은 배포해도 지워지지 않는다.
+   - 메뉴가 안 보이면 3단계 배포 뒤에 넣는다. 그동안 저장은 "비밀번호 미설정" 안내가 뜬다.
+
+**그다음(코드)** — Namespace ID를 받아 `wrangler.toml`을 아래처럼 바꾸고 커밋·push하면 Workers Builds가 배포한다.
+```toml
+name = "encar-market-intel"
+main = "worker/index.js"
+compatibility_date = "2025-01-01"
+
+[assets]
+directory = "./web"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]      # /api 는 Worker가 먼저 받는다(나머지는 지금처럼 정적 자산)
+
+[[kv_namespaces]]
+binding = "RATES"
+id = "<1단계 Namespace ID>"
+```
+
+**확인**:
+```bash
+curl -s https://encar-market-intel.fullsoup.workers.dev/api/rates
+```
+- `{"ok":true,"store":true,"writable":true,"team":null}`가 나오면 연결된 것이다.
+- `/v2/#/price?view=rates`에서 [수정하기]가 열린다.
+- 문제가 생기면 `wrangler.toml`을 이전 판으로 되돌려 push한다(정적 사이트로 돌아감).
+
+**로컬 시험**:
+- `node tools/worker_check.mjs`: API 시험(가짜 KV).
+- `node tools/dev_server.mjs`: 미리보기 `http://127.0.0.1:8792/v2/`. Worker 코드를 그대로 쓰고, 가짜 KV는 `encar_output/dev_kv.json`, 비밀번호는 `dev`다.
+
 ## (선택) 커스텀 도메인
 Cloudflare → Workers & Pages → 해당 Worker → Settings → **Domains & Routes** 에서 보유 도메인 연결(무료). 도메인 자체 구매 비용만 발생.
 

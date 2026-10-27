@@ -525,7 +525,7 @@
       var info = [['항목', '값'], ['붙여넣은 차', rows.length + T.over], ['산정한 차', done.length], ['계산 안 된 차', rows.length + T.over - done.length],
         ['추정 시세 합계(만원)', { v: sum(function (R) { return R.price; }), money: true }], ['환산가 합계(만원)', { v: sum(function (R) { return R.converted; }), money: true }],
         ['신뢰도 C(대)', done.filter(function (r) { return r.R.grade === 'C'; }).length],
-        ['데이터 기준', '엔카 목록 ' + (mi.length ? mi[mi.length - 1].date : '')], ['비교 매물 파일', X.idx.version], ['보정 계수', X.coef.version], ['환산 비율', X.rates.version],
+        ['데이터 기준', '엔카 목록 ' + (mi.length ? mi[mi.length - 1].date : '')], ['비교 매물 파일', X.idx.version], ['보정 계수', X.coef.version], ['환산 비율', RatesStore.label(X.rates)],
         ['비교 범위', '판매중 + 최근 3개월 판매'],
         ['열 지정', T.roles.map(function (role, c) { return role ? colName(c) + '=' + ROLE_NAME[role] : null; }).filter(Boolean).join(', ')],
         ['차명 확신', '확실 · 확인 권장 · 확인 필요 · 직접 고름 · 못 찾음 — 확인 권장·필요는 결과 시트에서 산정_세부모델을 확인하세요'],

@@ -175,3 +175,26 @@ select.filter-select:disabled, .v2-in:disabled { color: var(--tx-4); cursor: def
 .v2-notes b { color: var(--tx-1); }
 .v2-spin { display: inline-block; width: 14px; height: 14px; border-width: 2px; vertical-align: -2px; margin: 0 8px 0 0; }
 .v2-btn[disabled] { color: var(--tx-4); cursor: default; }
+
+/* 환산 비율 설정(5.1.6) */
+.v2-rtbl { min-width: 600px; }
+.v2-rtbl th, .v2-rtbl td { padding: 8px 10px; text-align: center; white-space: nowrap; font-size: 13px; vertical-align: top; }
+.v2-rtbl th { font-size: 11px; position: static; }
+.v2-rtbl th:first-child, .v2-rtbl td:first-child { text-align: left; }
+.v2-rtbl td b { display: block; font-size: 17px; font-variant-numeric: tabular-nums; color: var(--tx-1); }
+.v2-rtbl td small { display: block; font-size: 11px; color: var(--tx-3); margin-top: 2px; }
+.v2-rtbl td.is-team { background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent-line); }
+.v2-rin { width: 76px; padding: 5px 8px; text-align: right; }
+.v2-rtbl .v2-rin { margin: 0 auto; display: block; }
+.v2-mtbl { min-width: 560px; }
+.v2-mtbl .v2-in { min-width: 140px; padding: 4px 8px; }
+.v2-radd { display: grid; grid-template-columns: minmax(200px, 2fr) 120px 90px minmax(120px, 1fr) auto; gap: 8px; margin-top: 12px; align-items: center; }
+@media (max-width: 640px) {
+  .v2-radd { grid-template-columns: 1fr 1fr; }
+  .v2-radd #rAddModel, .v2-radd #rAddMemo { grid-column: 1 / -1; }
+}
+.v2-rform { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.v2-rtry { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.v2-log { font-size: 13px; line-height: 1.7; }
+.v2-log li { padding: 6px 0; border-bottom: 1px solid var(--line-soft); }
+.v2-log li:last-child { border-bottom: 0; }
