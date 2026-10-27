@@ -59,12 +59,7 @@
   function getJSON(p) {
     return fetch(DATA + p).then(function (r) { if (!r.ok) throw new Error(p + ' ' + r.status); return r.json(); });
   }
-  function kmNum(s) {                                       // "4.2만" · "42,000" · "42000km" → 42000
-    s = String(s || '').replace(/[,\s]|km/gi, '');
-    if (!s) return null;
-    var m = s.match(/^(\d+(?:\.\d+)?)만$/), v = m ? parseFloat(m[1]) * 1e4 : Number(s);
-    return isFinite(v) && v >= 0 ? v : null;
-  }
+  function kmNum(s) { return V2Batch.kmOf(s); }            // "4.2만" · "42,000" · "6만키로" → 42000 (묶음 산정과 같은 읽기)
   function manNum(s) {                                      // 만원 단위: "30" · "30만" · "30만원"
     s = String(s || '').replace(/[,\s]|만|원/g, '');
     var v = s === '' ? null : Number(s);
@@ -184,7 +179,7 @@
 
   function renderInputs() {
     var mk = makerOf(), g = groupOf(), G = grp(), rows = G && S.model ? modelRows(G, S.model) : [], fi = G && G.fi;
-    var h = '<div class="v2-sect">대상 차</div>';
+    var h = '<p class="v2-auto">조건을 넣는 즉시 결과가 다시 계산됩니다 — 따로 누를 조회 버튼은 없습니다.</p><div class="v2-sect">대상 차</div>';
     h += field('제조사', sel('mk', [['', '제조사 선택']].concat(X.idx.makers.map(function (m) {
       return [m.name, m.name + ' · ' + total(m).toLocaleString() + '대'];
     })), S.mk));
@@ -237,6 +232,7 @@
       (S.model ? '' : '<button type="button" class="v2-btn primary" data-act="example">예시로 채워 보기</button>') + '</div>';
     $('inp').innerHTML = h;
     updateCond();
+    markNeed(missing());
   }
 
   function condPanel() {
@@ -322,16 +318,37 @@
     timer = setTimeout(compute, 120);
   }
 
+  // 꼭 필요한데 빈 칸 — 오른쪽 '남은 칸' 안내와 왼쪽 테두리에 같이 쓴다. 모델 요약은 세부모델까지만 있으면 된다
+  function missing() {
+    var out = [], open = !!S.model, km = String(S.km || '').trim();   // 등급·최초등록은 세부모델을 골라야 열린다
+    function add(name, keys, on) { out.push({ name: name, keys: keys.trim().split(' '), on: on }); }
+    if (!S.model) add(!S.mk ? '제조사 · 모델 · 세부모델' : !S.grp ? '모델 · 세부모델' : '세부모델', !S.mk ? 'mk' : !S.grp ? 'grp' : 'model', true);
+    if (VIEW.mode === 'model') return out;
+    if (!S.grade) add('등급', 'grade', open);
+    if (!S.y || !S.m) add(!S.y && !S.m ? '최초등록 연·월' : !S.y ? '최초등록 연도' : '최초등록 월', (S.y ? '' : 'y ') + (S.m ? '' : 'm'), open);
+    if (kmNum(km) == null) add(km ? '주행거리 — "' + km + '"를 못 읽음(예: 42000, 4.2만)' : '주행거리', 'km', true);
+    return out;
+  }
+  function markNeed(miss) {                                  // 지금 채울 수 있는 빈 칸에 테두리
+    var on = {};
+    miss.forEach(function (x) { if (x.on) x.keys.forEach(function (k) { on[k] = 1; }); });
+    $('inp').querySelectorAll('[data-k]').forEach(function (el) { el.classList.toggle('v2-need', !!on[el.getAttribute('data-k')]); });
+    $('inp').querySelectorAll('.v2-f').forEach(function (f) { f.classList.toggle('v2-needf', !!f.querySelector('.v2-need')); });   // 칸 이름 옆 '입력 필요'
+  }
+  function focusNeed(k) {                                    // 남은 칸 안내를 누르면 그 입력 칸으로(아직 못 여는 칸이면 지금 채울 칸으로)
+    var el = $('inp').querySelector('[data-k="' + k + '"]');
+    if (!el || el.disabled) el = $('inp').querySelector('.v2-need');
+    if (!el) return;
+    el.scrollIntoView({ block: 'center' });                 // 바로 이동(부드러운 스크롤은 포커스와 겹치면 멈출 수 있다)
+    el.focus({ preventScroll: true });
+  }
+
   function compute() {
-    var G = grp(), need = [], km = kmNum(S.km);
-    if (!S.model) need.push('세부모델');
-    if (!S.grade) need.push('등급');
-    if (!S.y || !S.m) need.push('최초등록 연·월');
-    if (km == null) need.push('주행거리');
-    var model = G && S.model && G.models[S.model] && (VIEW.mode === 'model' || need.length);   // 모델만 골랐으면 모델 요약
-    markMode(model ? 'model' : 'one');
-    if (model) { R = null; summary(G, need); return; }
-    if (need.length || !G) { R = null; guide(need); return; }
+    var G = grp(), miss = missing(), km = kmNum(S.km), M = G && S.model && G.models[S.model];
+    markMode(VIEW.mode);                                     // 탭은 고른 그대로 — 빈 칸이 있다고 모델 요약 탭으로 넘기지 않는다
+    markNeed(miss);
+    if (M && (VIEW.mode === 'model' || miss.length)) { R = null; summary(G, miss); return; }   // 빈 칸이 남았으면 안내 + 모델 요약(참고)
+    if (miss.length || !G) { R = null; guide(miss); return; }
     var c = condResult(), rate = S.rate === '' ? null : Number(S.rate);
     var car = {
       '모델': S.model, '등급': S.grade, '세부등급': S.trim, '등록연월': +S.y * 100 + +S.m, '주행km': km,
@@ -349,12 +366,15 @@
     renderResult(G, car, c);
   }
 
-  function guide(need) {
-    var all = ['세부모델', '등급', '최초등록 연·월', '주행거리'];
-    $('res').innerHTML = '<div class="card"><div class="card-title">대상 차 조건을 넣어 주세요</div>' +
-      '<ol class="v2-guide" style="margin:10px 0 0 18px;list-style:decimal">' + all.map(function (n) {
-        return '<li class="' + (need.indexOf(n) < 0 ? 'ok' : '') + '">' + n + (need.indexOf(n) < 0 ? ' ✓' : '') + '</li>';
-      }).join('') + '</ol><p class="v2-help">성능 상태·색상·수리비는 넣지 않아도 계산됩니다. 성능 상태를 넣지 않으면 "상태 미상"으로, 무사고 기준 값을 함께 보여 줍니다.</p>' +
+  function guide(miss) {
+    $('res').innerHTML = miss.length ? needCard(miss) : '<div class="card"><div class="card-title">비교 매물을 불러오는 중…</div></div>';
+  }
+  function needCard(miss) {                                  // 남은 칸만 이름으로(누르면 그 칸으로 간다)
+    return '<div class="card v2-needcard"><div class="card-title">' + (VIEW.mode === 'model' ? '모델 요약' : '한 대 산정') + '까지 남은 칸 ' +
+      '<span class="hint">채우는 즉시 계산됩니다</span></div><div class="v2-needs">' + miss.map(function (x) {
+        return '<button type="button" class="v2-needchip" data-need="' + x.keys[0] + '">' + esc(x.name) + '</button>';
+      }).join('') + '</div>' +
+      (VIEW.mode === 'model' ? '' : '<p class="v2-help">성능 상태·색상·수리비는 넣지 않아도 계산됩니다. 성능 상태를 넣지 않으면 "상태 미상"으로, 무사고 기준 값을 함께 보여 줍니다.</p>') +
       (S.model ? '' : '<div class="v2-actions"><button type="button" class="v2-btn primary" data-act="example">예시로 채워 보기</button></div>') + '</div>';
   }
 
@@ -603,11 +623,11 @@
       (unit ? '<small>' + esc(unit) + '</small>' : '') + '</div><div class="v2-kv">' + esc(sub || '') + '</div></div>';
   }
 
-  function summary(G, need) {
+  function summary(G, miss) {
     var st = modelStats(G), M = st.M, F = G.F;
-    var h = '<div class="card v2-headcard"><div class="v2-head">' + esc(F.maker + ' ' + S.model) + ' · 모델 요약<br><span class="sub">' +
-      (need.length && VIEW.mode !== 'model' ? '등급·최초등록·주행을 넣으면 한 대 산정으로 바뀝니다' : '비교 가능 매물 기준 · 기준 ' + mmdd(F.now_date) + ' 목록') +
-      '</span></div><button type="button" class="v2-btn" data-act="xlsxModel">엑셀 내려받기</button></div>';
+    var h = (miss.length ? needCard(miss) : '') +
+      '<div class="card v2-headcard"><div class="v2-head">' + esc(F.maker + ' ' + S.model) + ' · 모델 요약' + (miss.length ? ' <span class="v2-ref">참고</span>' : '') +
+      '<br><span class="sub">비교 가능 매물 기준 · 기준 ' + mmdd(F.now_date) + ' 목록</span></div><button type="button" class="v2-btn" data-act="xlsxModel">엑셀 내려받기</button></div>';
     h += '<div class="v2-cards">' +
       tile('판매중', (M.onsale_all != null ? M.onsale_all : st.on.length).toLocaleString(), '대', '비교 가능(성능점검 있음) ' + st.on.length.toLocaleString() + '대') +
       tile('최근 3개월 판매', st.sold.length.toLocaleString(), '대', '목록에서 사라진 매물(재등록 제외)') +
@@ -841,6 +861,7 @@
     function clicks(e) {
       var b = e.target.closest('button');
       if (!b) return;
+      if (b.hasAttribute('data-need')) { focusNeed(b.getAttribute('data-need')); return; }
       var k = b.getAttribute('data-seg'), chipK = b.getAttribute('data-chip'), act = b.getAttribute('data-act'), v = b.getAttribute('data-v');
       if (k === 'sort') { VIEW.sort = v; compute(); return; }
       if (k === 'mode') { VIEW.mode = v; toHash(); applyMode(); return; }

@@ -44,6 +44,16 @@ select.filter-select:disabled, .v2-in:disabled { color: var(--tx-4); cursor: def
 .v2-chk { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--tx-1); margin: 6px 0; cursor: pointer; }
 .v2-chk input { width: 16px; height: 16px; accent-color: var(--accent); }
 .v2-help { font-size: 12px; color: var(--tx-3); margin: 8px 0 0; line-height: 1.6; }
+/* 한 대 산정 — 자동 계산 안내 · 남은 칸(안내 칩 + 입력 칸 테두리) */
+.v2-auto { font-size: 12px; color: var(--tx-2); background: var(--bg-2); border-radius: var(--r-md); padding: 8px 10px; margin: 0 0 14px; line-height: 1.5; }
+.v2-auto + .v2-sect { margin-top: 0; }
+select.filter-select.v2-need, .v2-in.v2-need { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-line); }
+.v2-needf > .v2-l::after { content: '입력 필요'; font-size: 11px; font-weight: 600; color: var(--tx-1); background: var(--accent-wash); border: 1px solid var(--accent-line); border-radius: 999px; padding: 0 7px; margin-left: 6px; }
+.v2-needcard { border-color: var(--accent-line); }
+.v2-needs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.v2-needchip { font-size: 14px; font-weight: 600; color: var(--tx-1); background: var(--accent-wash); border: 1px solid var(--accent-line); border-radius: 999px; padding: 6px 14px; cursor: pointer; text-align: left; }
+.v2-needchip:hover { border-color: var(--accent); }
+.v2-ref { font-size: 11px; font-weight: 600; color: var(--tx-3); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; margin-left: 4px; vertical-align: 2px; }
 .v2-btn {
   padding: 7px 14px; border-radius: var(--r-pill); border: 1px solid var(--line-hard); background: var(--bg-1);
   font-size: 12px; font-weight: 600; color: var(--tx-1); white-space: nowrap;
