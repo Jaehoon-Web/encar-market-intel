@@ -46,10 +46,10 @@ OPTS = {"sold": True, "time": True, "weight": True, "outlier": True, "adjust": T
 ENGINE = {"steps": [list(s) for s in STEPS], "colors": COLORS, "km_cap": KM_CAP, "min_comps": MIN_COMPS, "good_comps": GOOD_COMPS,
           "out_mad": OUT_MAD, "out_floor": OUT_FLOOR, "a_width": A_WIDTH, "sim": SIM}       # 사이트 엔진이 읽는 설정(한곳에서 관리)
 ROW_FIELDS = ["id", "m", "g", "t", "reg", "om", "km", "rent", "col", "perf", "dep", "price", "sold", "tk",
-              "acc", "gv", "gp", "ds", "p0", "sd"]
+              "acc", "gv", "gp", "ds", "p0", "sd", "fu"]
 # 행에는 매물이 바뀌지 않으면 그대로인 값만 둔다 — 매주 바뀌는 값(현재 월·시점 보정 배수)은 파일 머리말(now_ym·tf)에.
 #   om: 가격을 본 달(yyyymm, 판매중은 null → now_ym) · tk: 시점 보정 키('국산|크롤일', 판매중은 null → 1)
-#   ds: 체류 시작일(yyyymmdd, 체류일 = 판매일 또는 now_date − ds) · sd: 판매 추정일 · p0: 첫 호가
+#   ds: 체류 시작일(yyyymmdd, 체류일 = 판매일 또는 now_date − ds) · sd: 판매 추정일 · p0: 첫 호가 · fu: 연료(환산 비율 모델 예외용)
 
 
 # ───────── 데이터 ─────────
@@ -395,8 +395,9 @@ def export(pool):
                        tk=np.where(pool["sold"], pool["origin"] + "|" + seen, ""),
                        ds=start.dt.strftime("%Y%m%d").where(start.notna(), ""))
     labels = sorted(pool["사고라벨"].fillna("미상").unique())
+    fuels = sorted(pool["연료"].fillna("기타").unique())
     colors = ["흰색·진주"] + COLORS
-    ci, li = {v: i for i, v in enumerate(colors)}, {v: i for i, v in enumerate(labels)}
+    ci, li, fi_ = {v: i for i, v in enumerate(colors)}, {v: i for i, v in enumerate(labels)}, {v: i for i, v in enumerate(fuels)}
     version = datetime.date.today().isoformat()
     makers, file_of, sizes = {}, {}, []
     for (mk, gname), g in pool.groupby(["제조사", "grp"], sort=True):
@@ -408,13 +409,14 @@ def export(pool):
         rows = [[int(r.Index), mi[r.모델], gi[r.등급], ti[r.세부], int(r.등록연월), int(r.om) or None, _num(r.주행km), int(r.rent),
                  ci.get(r.색상계열, 0), _num(r.성능등급), _num(r.성능감가율), _num(r.price), int(r.sold), r.tk or None,
                  li[r.사고라벨 if isinstance(r.사고라벨, str) else "미상"], _num(r.글로비스_종합평가점), _num(r.글로비스_감점합),
-                 int(r.ds) if r.ds else None, _num(r.첫가격), str(r.판매추정일) if r.sold else None] for r in g.itertuples()]
+                 int(r.ds) if r.ds else None, _num(r.첫가격), str(r.판매추정일) if r.sold else None,
+                 fi_[r.연료 if isinstance(r.연료, str) else "기타"]] for r in g.itertuples()]
         tf = {k: float(v) for k, v in g[g["sold"]].groupby("tk")["tf"].first().items()}   # 같은 키는 같은 배수
         minfo = [{"name": m, "seg": s["seg"].mode().iat[0], "n": len(s), "onsale": int((~s["sold"]).sum())}
                  for m, s in ((m, g[g["모델"] == m]) for m in models)]
         head = json.dumps({"version": version, "maker": mk, "group": gname, "now_ym": now_ym, "now_date": now_date, "tf": tf,
                            "fields": ROW_FIELDS, "models": minfo, "grades": list(gi), "trims": list(ti), "colors": colors,
-                           "labels": labels}, ensure_ascii=False, separators=(",", ":"))
+                           "labels": labels, "fuels": fuels}, ensure_ascii=False, separators=(",", ":"))
         body = ",\n".join(json.dumps(r, ensure_ascii=False, separators=(",", ":")) for r in rows)
         path = os.path.join(SITE, fname)
         with open(path, "w", encoding="utf-8", newline="\n") as f:

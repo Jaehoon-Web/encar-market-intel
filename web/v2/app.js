@@ -1,0 +1,631 @@
+/*
+ * app.js — 새 사이트(v2) 시세 산정 · 한 대 산정 화면 (기획안 5.1.1 · 5.1.1-1 · 5.1.3)
+ *
+ * 데이터(../data): comps/index.json(선택 목록·엔진 설정) · comps/g????????.json(모델그룹별 비교 매물) · adj_coef.json(보정 계수)
+ *                 · conversion_rates.json(환산 비율) · inspection_model.json(성능 계산) · market_index.json(시황 지수)
+ * 계산: ../lib/price_engine.js(파이썬 price_engine.py 와 같은 계산) · ../lib/inspection_score.js(파이프라인과 같은 성능 계산)
+ * 입력은 주소(#/price?…)에 남는다 — 같은 차를 팀원과 공유하거나 다시 열 수 있다.
+ */
+(function () {
+  'use strict';
+
+  var DATA = '../data/';
+  var COLORS = ['흰색·진주', '검정', '회색·은색', '청색', '기타'];
+  var FIXES = ['외장', '내장', '광택', '룸클리닝', '휠', '타이어', '유리'];
+  var STATUS_LABEL = { X: 'X 교환', W: 'W 판금', '절단': '용접·절단', U: 'U 요철', T: 'T 손상', C: 'C 부식', A: 'A 흠집' };
+  var COEF_LEVEL = { '모델': '이 세부모델 자체 값', '차급': '같은 차급 평균 값(이 모델 표본이 없어서)', '시장': '시장 평균 값' };
+  var SHOW = 30;                                            // 비교 매물 표 기본 행 수
+  var X = {}, ENG = null, ISC = null, GROUPS = {}, R = null, timer = 0;
+  var VIEW = { sort: 'sim', all: false };
+  var S = blank();
+
+  function blank() {
+    return { mk: '', grp: '', model: '', grade: '', trim: '', y: '', m: '', km: '', color: '', rent: false,
+      cond: '미상', items: [], sr: 'auto', mech: '0', fixes: [], cost: '', sold: true, rate: '', ex: [] };
+  }
+
+  // ───── 도우미 ─────
+  function $(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function man(v) { return Math.round(v).toLocaleString('ko-KR'); }
+  function signed(v) { return (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(Math.round(v)).toLocaleString('ko-KR'); }
+  function pct(v) { return (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(1) + '%'; }
+  function pad(m) { return ('0' + m).slice(-2); }
+  function ym(v) { v = String(v); return v.slice(2, 4) + '-' + v.slice(4, 6); }
+  function mmdd(s) { return s ? s.slice(5, 7) + '/' + s.slice(8, 10) : ''; }
+  function byN(a, b) { return b.n - a.n; }
+  function total(mk) { return mk.groups.reduce(function (s, g) { return s + g.n; }, 0); }
+  function toggle(list, v) { var i = list.indexOf(v); if (i >= 0) list.splice(i, 1); else list.push(v); }
+  function median(a) {
+    if (!a.length) return null;
+    var s = a.slice().sort(function (x, y) { return x - y; }), h = s.length >> 1;
+    return s.length % 2 ? s[h] : (s[h - 1] + s[h]) / 2;
+  }
+  function middle(a) { var s = a.slice().sort(function (x, y) { return x - y; }); return s[s.length >> 1]; }
+  function mean(a) { return a.length ? a.reduce(function (s, v) { return s + v; }, 0) / a.length : null; }
+  function getJSON(p) {
+    return fetch(DATA + p).then(function (r) { if (!r.ok) throw new Error(p + ' ' + r.status); return r.json(); });
+  }
+  function kmNum(s) {                                       // "4.2만" · "42,000" · "42000km" → 42000
+    s = String(s || '').replace(/[,\s]|km/gi, '');
+    if (!s) return null;
+    var m = s.match(/^(\d+(?:\.\d+)?)만$/), v = m ? parseFloat(m[1]) * 1e4 : Number(s);
+    return isFinite(v) && v >= 0 ? v : null;
+  }
+  function manNum(s) {                                      // 만원 단위: "30" · "30만" · "30만원"
+    s = String(s || '').replace(/[,\s]|만|원/g, '');
+    var v = s === '' ? null : Number(s);
+    return v != null && isFinite(v) && v >= 0 ? v : null;
+  }
+
+  // ───── 데이터 찾기 ─────
+  function makerOf() { return X.idx.makers.find(function (m) { return m.name === S.mk; }) || null; }
+  function groupOf() { var m = makerOf(); return m ? m.groups.find(function (g) { return g.name === S.grp; }) || null : null; }
+  function grp() { var g = groupOf(); return g ? GROUPS[g.file] || null : null; }
+  function loadGroup() {
+    var g = groupOf();
+    if (!g || GROUPS[g.file]) return Promise.resolve();
+    return getJSON('comps/' + g.file).then(function (F) { GROUPS[g.file] = ENG.group(F); });
+  }
+  function modelRows(G, model) {
+    var M = G.models[model], fi = G.fi;
+    return M ? G.F.rows.filter(function (r) { return r[fi.m] === M.idx; }) : [];
+  }
+  function countBy(rows, f, names) {
+    var c = {};
+    rows.forEach(function (r) { c[r[f]] = (c[r[f]] || 0) + 1; });
+    return Object.keys(c).map(function (k) { return [names[k], c[k]]; }).sort(function (a, b) { return b[1] - a[1]; });
+  }
+  function fuelOf(G) {                                      // 환산 비율 모델 예외용: 이 세부모델·등급에서 가장 흔한 연료
+    var rows = modelRows(G, S.model), fi = G.fi, same = rows.filter(function (r) { return G.F.grades[r[fi.g]] === S.grade; });
+    var c = countBy(same.length ? same : rows, fi.fu, G.F.fuels);
+    return c.length ? c[0][0] : null;
+  }
+
+  // ───── 성능 상태(기록부) ─────
+  function key(it) { return it.part + '|' + (it.side || '') + '|' + (it.pillar || ''); }
+  function posIndex(it) {
+    var k = key(it);
+    for (var i = 0; i < ISC.positions.length; i++) if (key(ISC.positions[i]) === k) return i + 1;
+    return 0;
+  }
+  function statusAt(p) { var k = key(p), it = S.items.find(function (x) { return key(x) === k; }); return it ? it.status : ''; }
+  function setPos(i, status) {
+    var p = ISC.positions[i], k = key(p);
+    S.items = S.items.filter(function (x) { return key(x) !== k; });
+    if (status) S.items.push({ part: p.part, side: p.side, pillar: p.pillar, status: status });
+  }
+  function condResult() {
+    if (S.cond === '미상') return ISC.evaluate({ state: '미상' });
+    var input = { state: S.cond === '무사고' ? '무사고' : '입력', items: S.cond === '입력' ? S.items : [], mechLevel: +S.mech };
+    if (S.sr === 'yes') input.simpleRepair = true;
+    if (S.sr === 'no') input.simpleRepair = false;
+    return ISC.evaluate(input);
+  }
+
+  // ───── 주소 ↔ 입력 ─────
+  var KEYS = ['mk', 'grp', 'model', 'grade', 'trim', 'y', 'm', 'km', 'color', 'cost', 'rate'];
+  function itemsCode(items) {
+    var code = {};
+    ISC.statuses.forEach(function (s) { code[s.name] = s.code; });
+    return items.map(function (it) { return [it.part, it.side || '', it.pillar || '', code[it.status] || it.status].join('|'); }).join(';');
+  }
+  function itemsDecode(str) {
+    var name = {};
+    ISC.statuses.forEach(function (s) { name[s.code] = s.name; name[s.name] = s.name; });
+    return String(str || '').split(';').filter(Boolean).map(function (x) {
+      var p = x.split('|');
+      return { part: p[0], side: p[1] || null, pillar: p[2] || null, status: name[p[3]] || p[3] };
+    });
+  }
+  function toHash() {
+    var q = new URLSearchParams();
+    KEYS.forEach(function (k) { if (S[k] !== '' && S[k] != null) q.set(k, S[k]); });
+    if (S.rent) q.set('rent', '1');
+    if (S.cond !== '미상') q.set('cond', S.cond);
+    if (S.cond === '입력' && S.items.length) q.set('it', itemsCode(S.items));
+    if (S.sr !== 'auto') q.set('sr', S.sr);
+    if (S.mech !== '0') q.set('mech', S.mech);
+    if (S.fixes.length) q.set('fx', S.fixes.join(','));
+    if (!S.sold) q.set('sold', '0');
+    if (S.ex.length) q.set('ex', S.ex.join(','));
+    var s = q.toString();
+    history.replaceState(null, '', '#/price' + (s ? '?' + s : ''));
+  }
+  function fromHash() {
+    var h = location.hash, i = h.indexOf('?'), q = new URLSearchParams(i >= 0 ? h.slice(i + 1) : ''), s = blank();
+    KEYS.forEach(function (k) { if (q.has(k)) s[k] = q.get(k); });
+    s.rent = q.get('rent') === '1';
+    s.cond = ['무사고', '입력'].indexOf(q.get('cond')) >= 0 ? q.get('cond') : '미상';
+    s.items = itemsDecode(q.get('it'));
+    s.sr = ['yes', 'no'].indexOf(q.get('sr')) >= 0 ? q.get('sr') : 'auto';
+    s.mech = ['1', '2'].indexOf(q.get('mech')) >= 0 ? q.get('mech') : '0';
+    s.fixes = (q.get('fx') || '').split(',').filter(Boolean);
+    s.sold = q.get('sold') !== '0';
+    s.ex = (q.get('ex') || '').split(',').filter(Boolean);
+    return s;
+  }
+
+  // ───── 입력 패널 ─────
+  function opt(v, label, cur) { return '<option value="' + esc(v) + '"' + (String(v) === String(cur) ? ' selected' : '') + '>' + esc(label) + '</option>'; }
+  function sel(k, opts, cur, off) {
+    return '<select class="filter-select" data-k="' + k + '"' + (off ? ' disabled' : '') + '>' +
+      opts.map(function (o) { return opt(o[0], o[1], cur); }).join('') + '</select>';
+  }
+  function field(label, html) { return '<div class="v2-f"><span class="v2-l">' + label + '</span>' + html + '</div>'; }
+  function seg(k, opts, cur, aria) {
+    return '<div class="segmented" role="group" aria-label="' + aria + '">' + opts.map(function (o) {
+      return '<button type="button" data-seg="' + k + '" data-v="' + esc(o[0]) + '" class="' + (String(cur) === String(o[0]) ? 'on' : '') + '">' + esc(o[1]) + '</button>';
+    }).join('') + '</div>';
+  }
+  function chip(k, v, label, on) {
+    return '<button type="button" class="seg-chip' + (on ? ' on' : '') + '" data-chip="' + k + '" data-v="' + esc(v) + '">' + esc(label) + '</button>';
+  }
+
+  function renderInputs() {
+    var mk = makerOf(), g = groupOf(), G = grp(), rows = G && S.model ? modelRows(G, S.model) : [], fi = G && G.fi;
+    var h = '<div class="v2-sect">대상 차</div>';
+    h += field('제조사', sel('mk', [['', '제조사 선택']].concat(X.idx.makers.map(function (m) {
+      return [m.name, m.name + ' · ' + total(m).toLocaleString() + '대'];
+    })), S.mk));
+    h += field('모델', sel('grp', [['', mk ? '모델 선택' : '—']].concat((mk ? mk.groups.slice().sort(byN) : []).map(function (x) {
+      return [x.name, x.name + ' · ' + x.n.toLocaleString() + '대'];
+    })), S.grp, !mk));
+    h += field('세부모델', sel('model', [['', G ? '세부모델 선택' : (g ? '불러오는 중…' : '—')]].concat((G ? G.F.models.slice().sort(byN) : []).map(function (x) {
+      return [x.name, x.name + ' · ' + x.n.toLocaleString() + '대'];
+    })), S.model, !G));
+    var grades = rows.length ? countBy(rows, fi.g, G.F.grades) : [];
+    h += field('등급', sel('grade', [['', S.model ? '등급 선택' : '—']].concat(grades.map(function (x) {
+      return [x[0], x[0] + ' · ' + x[1].toLocaleString() + '대'];
+    })), S.grade, !S.model));
+    var trims = S.grade && rows.length ? countBy(rows.filter(function (r) { return G.F.grades[r[fi.g]] === S.grade; }), fi.t, G.F.trims)
+      .filter(function (x) { return x[0]; }) : [];                // 주소로 열 때는 모델그룹 파일을 받기 전에도 그린다
+    h += field('세부등급<em>선택</em>', sel('trim', [['', trims.length ? '상관없음' : '—']].concat(trims.map(function (x) {
+      return [x[0], x[0] + ' · ' + x[1].toLocaleString() + '대'];
+    })), S.trim, !trims.length));
+    var years = [];
+    rows.forEach(function (r) { var y = Math.floor(r[fi.reg] / 100); if (years.indexOf(y) < 0) years.push(y); });
+    if (S.y && years.indexOf(+S.y) < 0) years.push(+S.y);
+    years.sort(function (a, b) { return b - a; });
+    h += field('최초등록', '<div class="v2-two">' +
+      sel('y', [['', '연도']].concat(years.map(function (y) { return [y, y + '년']; })), S.y, !S.model) +
+      sel('m', [['', '월']].concat([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(function (m) { return [m, m + '월']; })), S.m, !S.model) + '</div>');
+    h += field('주행거리', '<div class="v2-unit"><input class="v2-in" data-k="km" inputmode="numeric" autocomplete="off" placeholder="예: 42000 또는 4.2만" value="' + esc(S.km) + '"><span>km</span></div>');
+    h += field('색상', '<div class="v2-chips">' + [['', '상관없음']].concat(COLORS.map(function (c) { return [c, c]; })).map(function (c) {
+      return chip('color', c[0], c[1], S.color === c[0]);
+    }).join('') + '</div>');
+    h += '<label class="v2-chk"><input type="checkbox" data-k="rent"' + (S.rent ? ' checked' : '') + '> 렌트 번호판(하·허·호)</label>';
+
+    h += '<div class="v2-sect">성능 상태</div>';
+    h += seg('cond', [['미상', '미상'], ['무사고', '무사고'], ['입력', '기록부 입력']], S.cond, '성능 상태');
+    h += '<p class="v2-help">' + (S.cond === '입력' ? '성능·상태점검기록부의 부위 37곳을 그대로 옮겨 적습니다. 한 부위에 여러 상태면 가장 심한 것을 고릅니다.'
+      : S.cond === '무사고' ? '이상 없음을 직접 고른 상태입니다.' : '입력하지 않은 상태입니다. 무사고로 치지 않습니다.') + '</p>';
+    if (S.cond === '입력') h += condPanel();
+    h += '<div class="notebox v2-condout" id="condOut"></div>';
+
+    h += '<div class="v2-sect">수리 상태</div>';
+    h += field('단순수리', seg('sr', [['auto', '자동'], ['yes', '있음'], ['no', '없음']], S.sr, '단순수리'));
+    h += field('기계 결함<em>표시만 — 호가 영향이 거의 없음</em>', seg('mech', [['0', '없음'], ['1', '경미'], ['2', '결함']], S.mech, '기계 결함'));
+    h += field('수리 필요', '<div class="v2-chips">' + FIXES.map(function (f) { return chip('fix', f, f, S.fixes.indexOf(f) >= 0); }).join('') + '</div>');
+    h += field('예상 수리비<em>시세·환산가에서 그대로 뺍니다</em>', '<div class="v2-unit"><input class="v2-in" data-k="cost" inputmode="numeric" autocomplete="off" placeholder="0" value="' + esc(S.cost) + '"><span>만원</span></div>');
+
+    h += '<div class="v2-sect">비교 범위 · 환산</div>';
+    h += '<label class="v2-chk"><input type="checkbox" data-k="sold"' + (S.sold ? ' checked' : '') + '> 최근 3개월 판매 매물 포함</label>';
+    h += field('환산 비율<em>비우면 자동</em>', '<div class="v2-unit"><input class="v2-in" data-k="rate" inputmode="decimal" autocomplete="off" placeholder="자동" value="' + esc(S.rate) + '"><span>%</span></div><p class="v2-help" id="rateNote"></p>');
+    h += '<div class="v2-actions"><button type="button" class="v2-btn" data-act="share">링크 복사</button>' +
+      '<button type="button" class="v2-btn" data-act="reset">조건 초기화</button>' +
+      (S.model ? '' : '<button type="button" class="v2-btn primary" data-act="example">예시로 채워 보기</button>') + '</div>';
+    $('inp').innerHTML = h;
+    updateCond();
+  }
+
+  function condPanel() {
+    var stat = '<option value="">—</option>' + ISC.statuses.map(function (s) {
+      return '<option value="' + esc(s.name) + '">' + esc(STATUS_LABEL[s.code] || s.name) + '</option>';
+    }).join('');
+    var boards = [];
+    ISC.positions.forEach(function (p, i) {
+      var b = boards[boards.length - 1];
+      if (!b || b.name !== p.board) boards.push(b = { name: p.board, list: [] });
+      b.list.push(i);
+    });
+    var h = '<div class="v2-cond"><div class="v2-text"><input class="v2-in" id="condText" autocomplete="off" placeholder="텍스트로: 좌프론트휀더 X, 우쿼터 W">' +
+      '<button type="button" class="v2-btn" data-act="parse">읽기</button></div><div class="v2-msg" id="condMsg"></div>';
+    boards.forEach(function (b) {
+      h += '<div class="v2-board"><div class="v2-board-t">' + esc(b.name) + '</div><div class="v2-pos">';
+      b.list.forEach(function (i) {
+        var p = ISC.positions[i], cur = statusAt(p);
+        h += '<label class="v2-p' + (cur ? ' set' : '') + '"><span title="' + esc(p.label) + '">' + esc(p.label) + '</span>' +
+          '<select data-k="pos" data-i="' + i + '" aria-label="' + esc(p.label) + '">' +
+          stat.replace('value="' + esc(cur) + '"', 'value="' + esc(cur) + '" selected') + '</select></label>';
+      });
+      h += '</div></div>';
+    });
+    var extra = S.items.filter(function (it) { return !posIndex(it); });
+    if (extra.length) {
+      h += '<p class="v2-help">목록 밖 부위(텍스트로 읽음): ' + esc(ISC.summary(extra)) +
+        ' <button type="button" class="v2-btn" data-act="clearExtra">지우기</button></p>';
+    }
+    return h + '</div>';
+  }
+
+  function updateCond() {
+    var el = $('condOut');
+    if (!el) return;
+    var c = condResult();
+    if (c['상태'] === '미상') {
+      el.innerHTML = '상태 미상 — 성능 보정 없이 비교 매물의 평균 상태로 계산하고, <b>무사고라면</b> 값을 함께 보여 줍니다.';
+      return;
+    }
+    var h = '<b>' + esc(c['사고라벨']) + '</b> · 성능 <b>' + c['성능등급'] + '등급</b> · 감가율 <b>' + c['성능감가율'] + '%</b> · 점수 <b>' + c['성능점검점수'] + '</b>' +
+      '<br>글로비스 감점 <b>' + c['글로비스_감점합'] + '</b> → 종합 <b>' + c['글로비스_종합평가점'] + '점</b> · 사고평가 <b>' + esc(c['글로비스_사고평가점']) + '</b>';
+    if (S.cond === '입력') h += '<br>입력 확인: ' + (S.items.length ? esc(ISC.summary(S.items)) : '입력한 부위가 없습니다(무사고로 계산)');
+    h += '<br>단순수리 ' + (c['단순수리'] ? '있음' : '없음') + (c['단순수리_자동'] ? ' (자동 판정)' : '');
+    el.innerHTML = h;
+  }
+
+  function parseCond() {
+    var r = ISC.parseText($('condText').value), msg = $('condMsg');
+    if (r.unknown && r.unknown.length) { msg.textContent = '못 읽은 표기: ' + r.unknown.join(', ') + ' — 고쳐서 다시 읽어 주세요'; return; }
+    if (r.state === '미상') { msg.textContent = '읽을 내용이 없습니다'; return; }
+    S.cond = r.state === '무사고' ? '무사고' : '입력';
+    S.items = r.state === '무사고' ? [] : r.items;
+    renderInputs();
+    changed();
+  }
+
+  function example() {                                      // 매물이 가장 많은 모델의 흔한 조건으로 채운다
+    var mk = X.idx.makers[0], g = mk.groups.slice().sort(byN)[0];
+    S = blank();
+    S.mk = mk.name;
+    S.grp = g.name;
+    loadGroup().then(function () {
+      var G = grp(), fi = G.fi, M = G.F.models.slice().sort(byN)[0], rows = modelRows(G, M.name);
+      S.model = M.name;
+      S.grade = countBy(rows, fi.g, G.F.grades)[0][0];
+      var on = rows.filter(function (r) { return G.F.grades[r[fi.g]] === S.grade && r[fi.sold] === 0; });
+      var reg = middle(on.map(function (r) { return r[fi.reg]; }));
+      S.y = String(Math.floor(reg / 100));
+      S.m = String(reg % 100);
+      S.km = String(Math.round(median(on.map(function (r) { return r[fi.km]; })) / 1000) * 1000);
+      S.color = '흰색·진주';
+      S.cond = '무사고';
+      renderInputs();
+      changed();
+    }).catch(fail);
+  }
+
+  // ───── 산정 ─────
+  function changed() {
+    toHash();
+    clearTimeout(timer);
+    timer = setTimeout(compute, 120);
+  }
+
+  function compute() {
+    var G = grp(), need = [], km = kmNum(S.km);
+    if (!S.model) need.push('세부모델');
+    if (!S.grade) need.push('등급');
+    if (!S.y || !S.m) need.push('최초등록 연·월');
+    if (km == null) need.push('주행거리');
+    if (need.length || !G) { R = null; guide(need); return; }
+    var c = condResult(), rate = S.rate === '' ? null : Number(S.rate);
+    var car = {
+      '모델': S.model, '등급': S.grade, '세부등급': S.trim, '등록연월': +S.y * 100 + +S.m, '주행km': km,
+      '색상계열': S.color || null, '렌트': S.rent, '성능': c['상태'] === '미상' ? null : { '감가율': c['성능감가율'], '등급': c['성능등급'] },
+      '수리비': manNum(S.cost) || 0, '연료': fuelOf(G), '팀환산': rate != null && isFinite(rate) ? rate : undefined,
+      excludeIds: S.ex.map(Number)
+    };
+    R = ENG.estimateCar(G, car, { sold: S.sold });
+    if (!R) { noComps(G); return; }
+    var yrs = Math.floor(G.F.now_ym / 100) - Math.floor(car['등록연월'] / 100);
+    var auto = ENG.conversionRate(R.est, yrs, G.F.maker, S.model, car['연료']);
+    var note = $('rateNote');
+    if (note) note.textContent = '자동: ' + auto.rate + '% (' + auto.source + (car['연료'] ? ' · ' + car['연료'] : '') + ')';
+    renderResult(G, car, c);
+  }
+
+  function guide(need) {
+    var all = ['세부모델', '등급', '최초등록 연·월', '주행거리'];
+    $('res').innerHTML = '<div class="card"><div class="card-title">대상 차 조건을 넣어 주세요</div>' +
+      '<ol class="v2-guide" style="margin:10px 0 0 18px;list-style:decimal">' + all.map(function (n) {
+        return '<li class="' + (need.indexOf(n) < 0 ? 'ok' : '') + '">' + n + (need.indexOf(n) < 0 ? ' ✓' : '') + '</li>';
+      }).join('') + '</ol><p class="v2-help">성능 상태·색상·수리비는 넣지 않아도 계산됩니다. 성능 상태를 넣지 않으면 "상태 미상"으로, 무사고 기준 값을 함께 보여 줍니다.</p>' +
+      (S.model ? '' : '<div class="v2-actions"><button type="button" class="v2-btn primary" data-act="example">예시로 채워 보기</button></div>') + '</div>';
+  }
+
+  function noComps(G) {
+    var M = G.models[S.model];
+    $('res').innerHTML = '<div class="card"><div class="card-title">비교 매물이 5대 미만이라 산정할 수 없습니다</div>' +
+      '<p class="v2-kv">' + esc(S.model) + ' 비교 매물 ' + (M ? M.n + '대(판매중 ' + M.onsale + '대)' : '없음') +
+      (S.sold ? '' : ' · 최근 판매 매물을 포함하면 늘어날 수 있습니다') + (S.ex.length ? ' · 직접 뺀 매물 ' + S.ex.length + '대' : '') + '</p></div>';
+  }
+
+  // ───── 결과 ─────
+  function renderResult(G, car, c) {
+    var r = R, F = G.F;
+    var stepNo = r.stepName.split(' ')[0], stepName = r.stepName.slice(stepNo.length + 1);
+    var h = '<div class="card"><div class="v2-head">' + esc(F.maker + ' ' + S.model) + ' · ' + esc(S.grade + (S.trim ? ' ' + S.trim : '')) +
+      '<br><span class="sub">' + S.y + '-' + pad(S.m) + ' 등록 · ' + car['주행km'].toLocaleString('ko-KR') + 'km · ' + esc(S.color || '색상 상관없음') +
+      (S.rent ? ' · 렌트' : '') + ' · ' + (c['상태'] === '미상' ? '상태 미상' : esc(c['사고라벨']) + ' · 성능 ' + c['성능등급'] + '등급 · 글로비스 ' +
+        c['글로비스_종합평가점'] + '점·' + esc(c['글로비스_사고평가점'])) + '</span></div></div>';
+
+    h += '<div class="v2-cards">';
+    h += '<div class="card"><div class="eyebrow">추정 시세 · 엔카 호가 기준</div><div class="v2-big" style="margin-top:12px">' + man(r.price) + '<small>만원</small></div>' +
+      '<div class="v2-kv">범위 <b>' + man(r.range[0]) + ' ~ ' + man(r.range[1]) + '</b>만 (25~75%)' +
+      (r.repair ? '<br>수리비 −' + man(r.repair) + '만 반영' : '') +
+      (r.est0 != null ? '<br>상태 미상 · 무사고라면 <b>' + man(r.est0 - r.repair) + '</b>만' : '') + '</div></div>';
+    h += '<div class="card"><div class="eyebrow">환산가</div><div class="v2-big" style="margin-top:12px">' + man(r.converted) + '<small>만원</small></div>' +
+      '<div class="v2-kv">환산 비율 <b>' + r.rate + '%</b> · ' + esc(r.rateSource) + (r.repair ? '<br>수리비 −' + man(r.repair) + '만 반영' : '') + '</div></div>';
+    h += '<div class="card"><div class="eyebrow">신뢰도</div><div style="display:flex;gap:14px;align-items:center;margin-top:12px">' +
+      '<span class="v2-grade ' + r.grade + '">' + r.grade + '</span><div class="v2-kv" style="margin:0">비교 매물 <b>' + r.n + '대</b> · ' +
+      stepNo + '단계(' + esc(stepName) + ')<br>이상치 제외 ' + r.out + '대' + (S.ex.length ? ' · 직접 제외 ' + S.ex.length + '대' : '') + '</div></div>' +
+      (r.grade === 'C' ? '<div class="v2-kv">참고용 — 같은 세부모델 전체로 넓혀 찾은 값입니다</div>' : '') + '</div>';
+    h += '</div>';
+
+    h += compsTable(G);
+    h += '<div class="v2-two-col">' + basisCard(G, car, c) + distCard(G) + '</div>';
+    h += '<div class="v2-two-col">' + signalCard() + trendCard(G) + '</div>';
+    $('res').innerHTML = h;
+  }
+
+  function compsTable(G) {
+    var F = G.F, fi = G.fi, list = R.comps.slice();
+    if (VIEW.sort === 'adj') list.sort(function (a, b) { return a.adj - b.adj; });
+    if (VIEW.sort === 'price') list.sort(function (a, b) { return a.row[fi.price] - b.row[fi.price]; });
+    var exRows = modelRows(G, S.model).filter(function (r) { return S.ex.indexOf(String(r[fi.id])) >= 0; });
+    var shown = VIEW.all ? list : list.slice(0, SHOW);
+    var h = '<div class="card"><div class="v2-tools"><div class="card-title">① 비교 매물 <span class="hint">체크하면 그 매물을 빼고 다시 계산합니다</span></div>' +
+      seg('sort', [['sim', '유사도순'], ['adj', '보정가순'], ['price', '호가순']], VIEW.sort, '정렬') + '</div>';
+    h += '<div class="v2-tablewrap"><table class="t v2-tbl"><thead><tr><th>제외</th><th class="num">유사도</th><th>등록</th><th class="num">주행</th>' +
+      '<th>색상</th><th>등급</th><th>성능 (글로비스)</th><th class="num">호가</th><th class="num">보정 후</th><th>상태</th><th class="num">체류</th>' +
+      '<th class="num">인하</th><th>엔카</th></tr></thead><tbody>';
+    shown.forEach(function (x) { h += rowHtml(G, x.row, x); });
+    exRows.forEach(function (row) { h += rowHtml(G, row, null); });
+    h += '</tbody></table></div>';
+    if (list.length > SHOW) {
+      h += '<div class="v2-actions"><button type="button" class="v2-btn" data-act="more">' + (VIEW.all ? '처음 ' + SHOW + '대만 보기' : '전체 ' + list.length + '대 보기') + '</button></div>';
+    }
+    return h + '</div>';
+  }
+
+  function rowHtml(G, row, x) {
+    var F = G.F, fi = G.fi, id = row[fi.id], sold = row[fi.sold] === 1, ex = !x;
+    var trim = F.trims[row[fi.t]], gv = row[fi.gv], p0 = row[fi.p0], price = row[fi.price];
+    var state = (ex ? '직접 제외 · ' : x.outlier ? '<span class="tag tag-soon">이상치</span> ' : '') + (sold ? '판매 ' + mmdd(row[fi.sd]) : '판매중');
+    return '<tr class="' + (ex ? 'is-ex' : x.outlier ? 'is-out' : '') + '">' +
+      '<td><input type="checkbox" data-ex="' + id + '"' + (ex ? ' checked' : '') + ' aria-label="이 매물 빼기"></td>' +
+      '<td class="num">' + (x ? x.sim : '–') + '</td><td>' + ym(row[fi.reg]) + '</td>' +
+      '<td class="num">' + (row[fi.km] / 1e4).toFixed(1) + '만</td><td>' + esc(F.colors[row[fi.col]]) + '</td>' +
+      '<td>' + esc(F.grades[row[fi.g]] + (trim ? ' ' + trim : '')) + '</td>' +
+      '<td>' + row[fi.perf] + '등급' + (gv != null ? ' (' + gv + '점·감점 ' + row[fi.gp] + ')' : '') + ' · ' + esc(F.labels[row[fi.acc]]) + '</td>' +
+      '<td class="num price">' + man(price) + '</td><td class="num">' + (x ? '<b>' + man(x.adj) + '</b>' : '–') + '</td>' +
+      '<td>' + state + '</td><td class="num">' + (x && x.dwell != null ? x.dwell + '일' : '–') + '</td>' +
+      '<td class="num">' + (p0 != null && p0 > price ? '−' + man(p0 - price) : '–') + '</td>' +
+      '<td><a href="https://fem.encar.com/cars/detail/' + id + '" target="_blank" rel="noopener">보기 ↗</a></td></tr>';
+  }
+
+  function basisCard(G, car, c) {
+    var b = R.basis, fi = G.fi, kept = R.comps.filter(function (x) { return !x.outlier; });
+    var tAge = Math.floor(G.F.now_ym / 100) * 12 + G.F.now_ym % 100 - (+S.y * 12 + +S.m);
+    var dAge = tAge - mean(kept.map(function (x) { return x.age; }));
+    var dKm = car['주행km'] - mean(kept.map(function (x) { return x.row[fi.km]; }));
+    var deps = kept.map(function (x) { return x.row[fi.dep]; });
+    var lines = [
+      ['차령', b['차령'], '대상 차가 평균 ' + Math.abs(dAge).toFixed(1) + '개월 ' + (dAge >= 0 ? '더 오래됨' : '더 새것')],
+      ['주행', b['주행'], '평균 ' + (Math.abs(dKm) / 1e4).toFixed(1) + '만km ' + (dKm >= 0 ? '더 탐' : '덜 탐')],
+      ['성능', b['성능'], c['상태'] === '미상' ? '상태 미상 — 보정 안 함' : '감가율 대상 ' + c['성능감가율'] + '% · 비교 평균 ' + mean(deps).toFixed(1) + '%'],
+      ['색상', b['색상'], S.color ? '흰색·진주 대비 계열 차이' : '색상 상관없음 — 보정 안 함'],
+      ['렌트', b['렌트'], S.rent ? '대상 차가 렌트 번호판' : '렌트 번호판 비교 매물과의 차이'],
+      ['등급', b['등급'], '등급·세부등급 차이'],
+      ['시점', b['시점'], '판매 매물의 마지막 호가를 지금 시세로(시세지수)']
+    ];
+    var h = '<div class="card"><div class="card-title">② 보정 근거 <span class="hint">비교 매물 평균 · 만원</span></div><table class="v2-basis">';
+    lines.forEach(function (l) {
+      if (!l[1] && l[0] !== '차령' && l[0] !== '주행') return;
+      h += '<tr><td>' + l[0] + '</td><td class="v">' + signed(l[1]) + '</td><td class="why">' + esc(l[2]) + '</td></tr>';
+    });
+    if (R.repair) h += '<tr><td>수리비</td><td class="v">−' + man(R.repair) + '</td><td class="why">입력한 예상 수리비</td></tr>';
+    return h + '</table><p class="v2-help">보정 계수: ' + esc(COEF_LEVEL[R.coefLevel] || R.coefLevel) + '(매주 데이터에서 추정)</p></div>';
+  }
+
+  function niceTicks(a, z, n) {
+    var span = z - a, step = Math.pow(10, Math.floor(Math.log(span / n) / Math.LN10)), e = span / n / step;
+    if (e >= 7.5) step *= 10; else if (e >= 3.5) step *= 5; else if (e >= 1.5) step *= 2;
+    var t = [];
+    for (var v = Math.ceil(a / step) * step; v <= z; v += step) t.push(Math.round(v / step) * step);
+    return t;
+  }
+
+  function distCard(G) {
+    var fi = G.fi, W = 640, H = 176, L = 16, RR = 16, T = 34, B = 30, cy = (T + H - B) / 2;
+    var vals = R.comps.map(function (x) { return x.adj; }).concat([R.lo, R.hi, R.est]);
+    var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals), sp = (mx - mn) || mx * 0.1 || 1;
+    var a = mn - sp * 0.05, z = mx + sp * 0.05;
+    function px(v) { return L + (v - a) / (z - a) * (W - L - RR); }
+    var h = '<svg class="v2-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="보정 후 비교 매물 가격 분포">';
+    niceTicks(a, z, 5).forEach(function (t) {
+      h += '<line x1="' + px(t) + '" x2="' + px(t) + '" y1="' + T + '" y2="' + (H - B) + '" stroke="var(--line)" stroke-width="1"/>' +
+        '<text x="' + px(t) + '" y="' + (H - B + 18) + '" text-anchor="middle">' + man(t) + '</text>';
+    });
+    h += '<rect x="' + px(R.lo) + '" y="' + T + '" width="' + Math.max(px(R.hi) - px(R.lo), 1) + '" height="' + (H - B - T) + '" fill="var(--accent-wash)"/>';
+    var placed = [], pts = R.comps.slice().sort(function (p, q) { return p.adj - q.adj; });
+    pts.forEach(function (x) {                              // 겹치지 않게 위아래로 쌓는다(벌집형)
+      var cx = px(x.adj), y = cy;
+      for (var k = 1; k < 40; k++) {
+        var hit = placed.some(function (p) { return Math.abs(p[0] - cx) < 11 && Math.abs(p[1] - y) < 11; });
+        if (!hit) break;
+        y = cy + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 11;
+      }
+      y = Math.max(T + 6, Math.min(H - B - 6, y));
+      placed.push([cx, y]);
+      var fill = x.outlier ? 'var(--tx-4)' : x.sold ? 'var(--bg-1)' : 'var(--accent)';
+      var stroke = x.outlier ? 'var(--bg-1)' : x.sold ? 'var(--accent)' : 'var(--bg-1)';
+      var tip = '보정 후 ' + man(x.adj) + '만\n호가 ' + man(x.row[fi.price]) + '만 · ' + ym(x.row[fi.reg]) + ' 등록 · ' +
+        (x.row[fi.km] / 1e4).toFixed(1) + '만km\n유사도 ' + x.sim + ' · ' + (x.sold ? '최근 판매' : '판매중') + (x.outlier ? ' · 이상치(제외)' : '');
+      h += '<circle cx="' + cx.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="5" fill="' + fill + '" stroke="' + stroke + '" stroke-width="2" data-tip="' + esc(tip) + '"/>';
+    });
+    var ex = px(R.est), anchor = ex < 70 ? 'start' : ex > W - 70 ? 'end' : 'middle';
+    h += '<line x1="' + ex + '" x2="' + ex + '" y1="' + (T - 4) + '" y2="' + (H - B) + '" stroke="var(--tx-1)" stroke-width="2"/>' +
+      '<text class="lbl" x="' + ex + '" y="' + (T - 10) + '" text-anchor="' + anchor + '">추정 ' + man(R.est) + '만' + (R.repair ? '(수리비 전)' : '') + '</text>';
+    h += '</svg>';
+    return '<div class="card"><div class="card-title">③ 가격 분포 <span class="hint">보정 후 가격</span></div>' +
+      '<div class="v2-legend"><span><i style="background:var(--accent)"></i>판매중</span>' +
+      '<span><i style="background:var(--bg-1);box-shadow:inset 0 0 0 2px var(--accent)"></i>최근 판매</span>' +
+      '<span><i style="background:var(--tx-4)"></i>이상치(제외)</span>' +
+      '<span><i style="background:var(--accent-wash);border-radius:2px"></i>범위 ' + man(R.lo) + '~' + man(R.hi) + '만</span></div>' + h + '</div>';
+  }
+
+  function signalCard() {
+    var kept = R.comps.filter(function (x) { return !x.outlier; });
+    var on = kept.filter(function (x) { return !x.sold; }), sold = kept.filter(function (x) { return x.sold; });
+    var dw = median(sold.map(function (x) { return x.dwell; }).filter(function (v) { return v != null; }));
+    var mOn = median(on.map(function (x) { return x.adj; })), mSold = median(sold.map(function (x) { return x.adj; }));
+    var h = '<div class="card"><div class="card-title">④ 시장 신호 <span class="hint">소매 시장 기준 — 경매 수요 참고용</span></div><div class="v2-sig">' +
+      '같은 조건 판매중 <b>' + on.length + '대</b>' + (S.sold ? ' · 최근 3개월 판매 <b>' + sold.length + '대</b>' : ' · 최근 판매 매물은 빼고 보는 중');
+    if (dw != null) h += '<br>판매된 매물의 중위 체류일 <b>' + Math.round(dw) + '일</b>';
+    if (mOn && mSold) h += '<br>판매된 매물의 보정가 중앙값은 판매중보다 <b>' + pct((mSold / mOn - 1) * 100) + '</b>';
+    return h + '<br><span class="v2-help">판매 매물의 가격은 목록에서 사라지기 전 마지막 호가입니다(실제 거래가가 아님).</span></div></div>';
+  }
+
+  function trendCard(G) {
+    var M = G.models[S.model], seg = (M && M.seg || '').split('·'), name = seg[1] + ' ' + seg[0];
+    var pts = (X.mi.series[seg[1] + '|' + seg[0]] || []).filter(function (p) { return p['시세'] != null; });
+    if (pts.length < 2) { name = seg[1] + ' 전체'; pts = (X.mi.series[seg[1] + '|전체'] || []).filter(function (p) { return p['시세'] != null; }); }
+    var h = '<div class="card"><div class="card-title">⑤ 시세 추세 <span class="hint">' + esc(name) + ' 시세지수 · 7월 초 = 100</span></div>';
+    if (pts.length < 2) return h + '<p class="v2-kv">추세 데이터가 아직 부족합니다.</p></div>';
+    var W = 300, H = 110, L = 30, RR = 46, T = 14, B = 22;
+    var vs = pts.map(function (p) { return p['시세']; }).concat([100]);
+    var lo = Math.min.apply(null, vs) - 1, hi = Math.max.apply(null, vs) + 1;
+    function px(i) { return L + i / (pts.length - 1) * (W - L - RR); }
+    function py(v) { return T + (hi - v) / (hi - lo) * (H - T - B); }
+    var s = '<svg class="v2-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(name) + ' 시세지수 추이">' +
+      '<line x1="' + L + '" x2="' + (W - RR) + '" y1="' + py(100) + '" y2="' + py(100) + '" stroke="var(--line-hard)" stroke-width="1"/>' +
+      '<text x="' + (L - 4) + '" y="' + (py(100) + 4) + '" text-anchor="end">100</text>';
+    s += '<polyline fill="none" stroke="var(--accent)" stroke-width="2" points="' + pts.map(function (p, i) { return px(i).toFixed(1) + ',' + py(p['시세']).toFixed(1); }).join(' ') + '"/>';
+    pts.forEach(function (p, i) {
+      s += '<circle cx="' + px(i).toFixed(1) + '" cy="' + py(p['시세']).toFixed(1) + '" r="4" fill="var(--accent)" stroke="var(--bg-1)" stroke-width="2" data-tip="' +
+        esc(p.date + '\n시세지수 ' + p['시세'] + (p.n_price ? ' · 신규 비교 ' + p.n_price.toLocaleString() + '대' : '')) + '"/>';
+    });
+    var last = pts[pts.length - 1];
+    s += '<text class="lbl" x="' + (px(pts.length - 1) + 8) + '" y="' + (py(last['시세']) + 4) + '">' + Number(last['시세']).toFixed(1) + '</text>' +
+      '<text x="' + px(0) + '" y="' + (H - 6) + '" text-anchor="start">' + mmdd(pts[0].date) + '</text>' +
+      '<text x="' + px(pts.length - 1) + '" y="' + (H - 6) + '" text-anchor="end">' + mmdd(last.date) + '</text></svg>';
+    return h + s + '<p class="v2-help">세부모델별 추세는 매주 수집이 더 쌓이면 제공합니다.</p></div>';
+  }
+
+  // ───── 화면 틀 · 이벤트 ─────
+  function marketLine() {
+    var pts = X.mi.series['전체|전체'] || [], last = null, crawls = X.mi.crawls || [];
+    for (var i = pts.length - 1; i >= 0; i--) if (pts[i]['시세'] != null) { last = pts[i]; break; }
+    var asOf = crawls.length ? crawls[crawls.length - 1].date : '';
+    $('asOf').textContent = asOf ? '데이터 기준 ' + asOf + ' 목록' : '—';
+    if (!last) return;
+    var f1 = function (v) { return Number(v).toFixed(1); };
+    var h = '<span class="eyebrow">시장 · 7월 초 = 100</span><span>시세지수 <b>' + f1(last['시세']) + '</b></span>';
+    if (last['재고'] != null) h += '<span>재고지수 <b>' + f1(last['재고']) + '</b></span>';
+    h += last['시황'] != null ? '<span>시황지수 <b>' + f1(last['시황']) + '</b> ' + esc(last.label || '') + '</span>'
+      : '<span>시황지수 — <span style="color:var(--tx-3)">판매속도가 생기는 다음 수집부터</span></span>';
+    h += '<span style="color:var(--tx-3)">기준 ' + mmdd(last.date) + ' 목록</span>';
+    $('marketLine').innerHTML = '<div>' + h + '</div>';
+  }
+
+  function layout() {
+    $('app').innerHTML = '<div class="v2-mode">' + seg('mode', [['one', '한 대 산정']], 'one', '산정 방식') +
+      '<span class="v2-help" style="margin:0">모델 요약 · 묶음 산정은 준비 중</span></div>' +
+      '<div class="v2-grid"><aside class="card v2-input" id="inp" aria-label="대상 차 조건"></aside><section class="v2-result" id="res" aria-live="polite"></section></div>';
+    var inp = $('inp'), res = $('res'), tip = $('tip');
+    inp.addEventListener('change', function (e) {
+      var t = e.target, k = t.getAttribute('data-k');
+      if (!k) return;
+      if (k === 'rent' || k === 'sold') { S[k] = t.checked; changed(); return; }
+      if (k === 'km' || k === 'cost' || k === 'rate') { S[k] = t.value; changed(); return; }
+      if (k === 'pos') { setPos(+t.getAttribute('data-i'), t.value); renderInputs(); changed(); return; }
+      S[k] = t.value;
+      if (k === 'mk') { S.grp = ''; S.model = ''; S.grade = ''; S.trim = ''; S.ex = []; }
+      if (k === 'grp') { S.model = ''; S.grade = ''; S.trim = ''; S.ex = []; }
+      if (k === 'model') { S.grade = ''; S.trim = ''; S.ex = []; }
+      if (k === 'grade') { S.trim = ''; S.ex = []; }
+      renderInputs();
+      if (k === 'grp') { loadGroup().then(function () { renderInputs(); changed(); }).catch(fail); return; }
+      changed();
+    });
+    inp.addEventListener('input', function (e) {
+      var k = e.target.getAttribute('data-k');
+      if (k === 'km' || k === 'cost' || k === 'rate') { S[k] = e.target.value; changed(); }
+    });
+    inp.addEventListener('keydown', function (e) { if (e.key === 'Enter' && e.target.id === 'condText') { e.preventDefault(); parseCond(); } });
+    function clicks(e) {
+      var b = e.target.closest('button');
+      if (!b) return;
+      var k = b.getAttribute('data-seg'), chipK = b.getAttribute('data-chip'), act = b.getAttribute('data-act'), v = b.getAttribute('data-v');
+      if (k === 'sort') { VIEW.sort = v; compute(); return; }
+      if (k === 'mode') return;
+      if (k) { S[k] = v; renderInputs(); changed(); return; }
+      if (chipK === 'color') { S.color = v; renderInputs(); changed(); return; }
+      if (chipK === 'fix') { toggle(S.fixes, v); renderInputs(); changed(); return; }
+      if (act === 'parse') { parseCond(); return; }
+      if (act === 'clearExtra') { S.items = S.items.filter(posIndex); renderInputs(); changed(); return; }
+      if (act === 'reset') { S = blank(); VIEW.all = false; renderInputs(); changed(); return; }
+      if (act === 'example') { example(); return; }
+      if (act === 'more') { VIEW.all = !VIEW.all; compute(); return; }
+      if (act === 'share') {
+        var done = function () { b.textContent = '복사됨'; setTimeout(function () { b.textContent = '링크 복사'; }, 1500); };
+        if (navigator.clipboard) navigator.clipboard.writeText(location.href).then(done, function () { prompt('이 주소를 복사하세요', location.href); });
+        else prompt('이 주소를 복사하세요', location.href);
+      }
+    }
+    inp.addEventListener('click', clicks);
+    res.addEventListener('click', clicks);
+    res.addEventListener('change', function (e) {
+      var id = e.target.getAttribute('data-ex');
+      if (!id) return;
+      toggle(S.ex, id);
+      changed();
+    });
+    res.addEventListener('mouseover', function (e) {
+      var t = e.target.getAttribute && e.target.getAttribute('data-tip');
+      if (!t) return;
+      tip.textContent = t;
+      tip.hidden = false;
+    });
+    res.addEventListener('mousemove', function (e) {
+      if (tip.hidden) return;
+      var x = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
+      tip.style.left = x + 'px';
+      tip.style.top = (e.clientY + 14) + 'px';
+    });
+    res.addEventListener('mouseout', function (e) { if (e.target.getAttribute && e.target.getAttribute('data-tip')) tip.hidden = true; });
+    window.addEventListener('hashchange', function () {
+      S = fromHash();
+      loadGroup().then(function () { renderInputs(); compute(); }).catch(fail);
+    });
+  }
+
+  function fail(err) {
+    console.error(err);
+    $('app').innerHTML = '<div class="alert">데이터를 불러오지 못했습니다: ' + esc(err && err.message || err) + '</div>';
+  }
+
+  function boot() {
+    Promise.all(['comps/index.json', 'adj_coef.json', 'conversion_rates.json', 'inspection_model.json', 'market_index.json'].map(getJSON))
+      .then(function (a) {
+        X.idx = a[0]; X.coef = a[1]; X.rates = a[2]; X.model = a[3]; X.mi = a[4];
+        ENG = PriceEngine.create({ config: X.idx.engine, coef: X.coef, rates: X.rates });
+        ISC = InspectionScore.create(X.model);
+        S = fromHash();
+        layout();
+        marketLine();
+        renderInputs();
+        return loadGroup();
+      })
+      .then(function () { renderInputs(); compute(); })
+      .catch(fail);
+  }
+
+  boot();
+})();

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>시세 산정 — 엔카 인텔</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="description" content="엔카 매물로 대상 차의 시세를 근거와 함께 추정하고 팀 환산가를 내는 도구" />
+<meta name="robots" content="noindex" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: { extend: {
+      fontFamily: {
+        sans: ['Inter', 'Pretendard Variable', 'Pretendard', 'system-ui', 'sans-serif'],
+        display: ['Barlow Condensed', 'Black Han Sans', 'sans-serif']
+      },
+      colors: { saa: '#C85A2A', up: '#3E8B4C', down: '#B54453' }
+    }}
+  }
+</script>
+<link rel="stylesheet" href="../styles.css" />
+<link rel="stylesheet" href="v2.css" />
+</head>
+<body class="font-sans antialiased">
+
+<header class="sticky top-0 z-40">
+  <div class="max-w-[1600px] mx-auto px-4 md:px-6 flex items-center gap-6 md:gap-10" style="height:54px;">
+    <a href="#/price" class="brand-mark shrink-0">
+      <span class="swoosh"></span>
+      <span class="ko">엔카 인텔</span>
+      <span class="en hidden sm:inline">ENCAR · MARKET INTEL</span>
+    </a>
+    <nav class="flex items-center gap-0 overflow-x-auto no-scrollbar">
+      <a class="nav-tab on" href="#/price">시세 산정</a>
+      <span class="nav-tab v2-off" title="준비 중">시장 시황 <span class="badge">준비 중</span></span>
+      <span class="nav-tab v2-off" title="준비 중">데이터 <span class="badge">준비 중</span></span>
+    </nav>
+    <div class="ml-auto flex items-center gap-3 shrink-0">
+      <span class="eyebrow hidden md:block" id="asOf">—</span>
+      <a class="tag tag-lock hidden sm:inline-flex" href="../index.html">기존 사이트</a>
+    </div>
+  </div>
+</header>
+
+<div class="v2-market" id="marketLine"></div>
+
+<main id="app" class="max-w-[1600px] mx-auto px-4 md:px-6 py-6">
+  <div class="loading-wrap"><div><div class="spinner mx-auto"></div><div class="text-center">데이터 불러오는 중…</div></div></div>
+</main>
+
+<footer class="mt-16 py-10 text-center" style="border-top:1px solid var(--line);">
+  <div class="eyebrow mb-2">ENCAR MARKET INTEL · 시세 산정(미리보기)</div>
+  <div class="text-[11px]" style="color:var(--tx-4);">추정 시세는 엔카 호가 기준입니다. 환산가는 팀 환산 비율(도·소매 갭 요약치)을 적용한 값입니다.</div>
+</footer>
+
+<div class="v2-tip" id="tip" hidden></div>
+
+<script src="../lib/inspection_score.js"></script>
+<script src="../lib/price_engine.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -103,7 +103,8 @@
     }
 
     /* 대상 차 한 대. t: grade, trim, age(개월), km(km), rent(0/1), color(계열 | null=모름),
-       dep(성능감가율 % | null=상태 미상), perf(성능등급 | null), excludeId(비교에서 뺄 매물 ID)
+       dep(성능감가율 % | null=상태 미상), perf(성능등급 | null), excludeId(비교에서 뺄 매물 ID),
+       excludeIds(화면에서 사용자가 뺀 매물 ID 목록 — 사이트 전용, 후보에서 빼는 것 말고는 계산이 같다)
        o: { sold, time, weight, outlier, adjust } — 기본 모두 true. 비교 매물이 5대 미만이면 null */
     function estimate(grp, name, t, o) {
       var G = prepare(grp, name);
@@ -111,11 +112,11 @@
       o = Object.assign({ sold: true, time: true, weight: true, outlier: true, adjust: true }, o || {});
       var known = t.dep != null, tdep = known ? t.dep / 100 : 0, tperf = known ? t.perf : 0;
       var tage = t.age, tkm = Math.min(t.km, KM_CAP) / 1e4, tg = t.grade, tt = t.trim || '';
-      var n0 = G.n, i, j, k;
+      var n0 = G.n, i, j, k, excl = t.excludeIds && t.excludeIds.length ? new Set(t.excludeIds) : null;
       var base = new Uint8Array(n0), dage = new Float64Array(n0), dkm = new Float64Array(n0), same = new Uint8Array(n0),
         dperf = new Float64Array(n0);
       for (i = 0; i < n0; i++) {
-        base[i] = (t.excludeId == null || G.ids[i] !== t.excludeId) && (o.sold || !G.sold[i]) ? 1 : 0;
+        base[i] = (t.excludeId == null || G.ids[i] !== t.excludeId) && (o.sold || !G.sold[i]) && !(excl && excl.has(G.ids[i])) ? 1 : 0;
         dage[i] = Math.abs(G.age[i] - tage);
         dkm[i] = Math.abs(G.km[i] - tkm);
         same[i] = G.grades[i] === tg ? 1 : 0;
@@ -214,14 +215,16 @@
     }
 
     /* 사이트 입력 형태: 모델, 등급, 세부등급, 등록연월(yyyymm), 주행km, 색상계열, 렌트, 성능({감가율, 등급} | null=상태 미상),
-       수리비(만원), 연료·연식(환산 비율 모델 예외용), 기준연월(기본 이번 달), 팀환산(%), excludeId */
+       수리비(만원), 연료·연식(환산 비율 모델 예외용), 기준연월(기본: 데이터 기준 달 now_ym — 판매중 비교 매물과 같은 시점),
+       팀환산(%), excludeId, excludeIds */
     function estimateCar(grp, car, o) {
-      var now = new Date(), ym = car['기준연월'] || now.getFullYear() * 100 + now.getMonth() + 1;
+      var ym = car['기준연월'] || grp.F.now_ym;
       var reg = car['등록연월'], perf = car['성능'] || null;
       var age = Math.floor(ym / 100) * 12 + ym % 100 - (Math.floor(reg / 100) * 12 + reg % 100);
       var r = estimate(grp, car['모델'], {
         grade: car['등급'], trim: car['세부등급'] || '', age: age, km: car['주행km'], rent: car['렌트'] ? 1 : 0,
-        color: car['색상계열'] || null, dep: perf ? perf['감가율'] : null, perf: perf ? perf['등급'] : null, excludeId: car.excludeId
+        color: car['색상계열'] || null, dep: perf ? perf['감가율'] : null, perf: perf ? perf['등급'] : null, excludeId: car.excludeId,
+        excludeIds: car.excludeIds
       }, o);
       if (!r) return null;
       var yrs = Math.floor(ym / 100) - (car['연식'] || Math.floor(reg / 100));
