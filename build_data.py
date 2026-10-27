@@ -705,4 +705,12 @@ if os.path.exists(_ts):
 for fn in os.listdir(OUT_DL):
     print(f"  [dl] {fn}  ({os.path.getsize(os.path.join(OUT_DL, fn))/1024:.0f} KB)")
 
+# 새 사이트(web/v2) 데이터 탭용 내려받기 목록 — 배포 서버가 파일 크기를 머리글로 주지 않아 여기서 적어 둔다. 실패해도 빌드는 계속
+try:
+    dump("downloads.json", {"asOf": datetime.now().strftime("%Y-%m-%d"),
+                            "files": [{"name": fn, "bytes": os.path.getsize(os.path.join(OUT_DL, fn))}
+                                      for fn in sorted(os.listdir(OUT_DL)) if os.path.isfile(os.path.join(OUT_DL, fn))]})
+except Exception as e:
+    print(f"  [warn] downloads.json 만들기 실패(무시): {e}")
+
 print("\n[OK] build_data 완료")

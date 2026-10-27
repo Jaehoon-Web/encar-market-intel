@@ -114,6 +114,7 @@ select.filter-select:disabled, .v2-in:disabled { color: var(--tx-4); cursor: def
 .v2-tbl input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--accent); }
 .v2-tbl a { color: var(--info); }
 .v2-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.v2-act { font-size: 12px; font-weight: 600; color: var(--tx-1); }
 .v2-dmb { font: inherit; font-size: 12px; color: var(--info); background: none; border: 0; padding: 0 0 0 4px; cursor: pointer; white-space: nowrap; }
 .v2-dmb:hover { text-decoration: underline; }
 .v2-tbl tr.v2-dmrow td { white-space: normal; font-size: 12px; color: var(--tx-2); background: var(--bg-2); padding: 6px 12px 8px 40px; }

@@ -780,7 +780,7 @@
     $('navMarket').classList.toggle('on', page === 'market');
     $('navData').classList.toggle('on', page === 'data');
     if (page === 'data') {
-      if (!DV) DV = V2Data.create({ X: X, esc: esc });
+      if (!DV) DV = V2Data.create({ X: X, esc: esc, getJSON: getJSON });
       DV.show($('dataView'));
       return Promise.resolve();
     }

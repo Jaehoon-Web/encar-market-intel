@@ -101,15 +101,22 @@
         LIMITS.map(function (t) { return '<li>' + bold(t) + '</li>'; }).join('') + '</ul></div>';
     }
 
-    function fetchSizes() {                                  // 파일 크기 — 응답 머리글(content-length)로, 못 받으면 비워 둔다
+    function setSize(name, n) {
+      sizes[name] = n;
+      var td = el && el.querySelector('td[data-size="' + name + '"]');
+      if (td) td.textContent = kb(n);
+    }
+    function fetchSizes() {                                  // 파일 크기 — 파이프라인이 적은 downloads.json, 없으면 응답 머리글(content-length)
+      ctx.getJSON('downloads.json').then(function (j) {
+        (j.files || []).forEach(function (f) { setSize(f.name, f.bytes); });
+      }).catch(function () {}).then(headSizes);
+    }
+    function headSizes() {
       FILES.forEach(function (f) {
         if (sizes[f[0]] != null) return;
         fetch('../downloads/' + encodeURIComponent(f[0]), { method: 'HEAD', cache: 'no-store' }).then(function (r) {
           var n = Number(r.headers.get('content-length'));
-          if (!r.ok || !n) return;
-          sizes[f[0]] = n;
-          var td = el && el.querySelector('td[data-size="' + f[0] + '"]');
-          if (td) td.textContent = kb(n);
+          if (r.ok && n) setSize(f[0], n);
         }).catch(function () {});
       });
     }

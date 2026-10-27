@@ -14,10 +14,12 @@
   var LIMIT = 200;                                           // 한 번에 산정하는 대수(브라우저 계산 시간 기준)
   var STORE = 'v2.batch.';                                   // + draft(붙여넣은 글·열 지정) · fix(고친 표기)
   var ROLES = [['', '쓰지 않음'], ['plate', '차량번호'], ['maker', '제조사'], ['name', '차명'], ['grade', '등급·트림'], ['fuel', '연료'],
-    ['year', '연식'], ['reg', '최초등록'], ['km', '주행거리'], ['color', '색상'], ['cond', '성능 상태'], ['cost', '수리비'], ['rent', '렌트']];
+    ['year', '연식'], ['reg', '최초등록'], ['km', '주행거리'], ['color', '색상'], ['cond', '성능 상태'], ['cost', '수리비'], ['rent', '렌트'],
+    ['actual', '실제 낙찰가']];
   var ROLE_NAME = {};
   ROLES.forEach(function (r) { ROLE_NAME[r[0]] = r[1]; });
   var TEXT_ROLES = ['maker', 'name', 'grade', 'fuel'];       // 여러 열이면 이 순서로 이어 붙여 차명 매칭에 쓴다
+  var ACTUAL_HEAD = /(낙찰|매각|실제\s*판매|실거래)\s*(가|가격|금액)|^\s*(낙찰|매각)\s*$/;   // 실제 건 검증(기획안 WP3): 과거 매각 건의 실제 값
   var SKIP_HEAD = /가격|금액|시세|호가|매입|낙찰|판매가|희망가|비고|메모|^no\.?$|^번호$|순번|^#$/i;
   var HEAD = [['plate', /차량\s*번호|차번|번호판|등록\s*번호/], ['cost', /수리\s*비|정비\s*비|예상\s*수리/],
     ['cond', /성능|상태|사고|기록부|수리\s*내역|외판/], ['reg', /최초\s*등록|등록\s*(일|연월|년월)|출고/],
@@ -52,6 +54,13 @@
     if (!s) return null;
     var m = s.match(/^(\d+(?:\.\d+)?)만$/), x = m ? parseFloat(m[1]) * 1e4 : (/^\d+(\.\d+)?$/.test(s) ? Number(s) : NaN);
     return isFinite(x) && x >= 0 && x < 2e6 ? Math.round(x) : null;
+  }
+  function priceOf(v) {                                      // 차 값 → 만원: "1,850" · "1850만" · "1억 2,300" · "18,500,000"(원, 10만 이상이면 원으로 봄)
+    var s = String(v || '').replace(/[\s,]|원/g, ''), m = s.match(/^(?:(\d+(?:\.\d+)?)억)?(\d+(?:\.\d+)?)?(만)?$/);
+    if (!s || !m || (!m[1] && !m[2])) return null;
+    var x = (m[1] ? parseFloat(m[1]) * 1e4 : 0) + (m[2] ? parseFloat(m[2]) : 0);
+    if (!m[1] && !m[3] && x >= 1e5) x /= 1e4;
+    return x > 0 ? x : null;
   }
   function costOf(v) {                                       // 만원. 단위 없이 1만 이상이면 원으로 본다(150,000 → 15만)
     var s = String(v || '').replace(/[,\s]/g, ''), m = s.match(/^(\d+(?:\.\d+)?)(만원|만|원)?$/);
@@ -133,6 +142,7 @@
     // ───── 열 알아보기 ─────
     function headRole(h) {                                   // 역할 · ''(쓰지 않는 열) · null(모름 → 값으로 알아본다)
       if (!h) return null;
+      if (ACTUAL_HEAD.test(h)) return 'actual';
       if (SKIP_HEAD.test(h)) return '';
       for (var i = 0; i < HEAD.length; i++) if (HEAD[i][1].test(h)) return HEAD[i][0];
       return null;
@@ -177,6 +187,7 @@
       r.cost = costOf(one('cost'));
       r.rent = rentOf(r.plate, one('rent'));
       r.condRaw = one('cond');
+      r.actual = priceOf(one('actual'));
       readCond(r);
       return r;
     }
@@ -439,6 +450,34 @@
         cond: r.cond.state === '미상' ? '미상' : (r.cond.items.length ? '입력' : '무사고'), items: r.cond.items });
     }
     function eok(v) { v = Math.round(v); return v >= 1e4 ? Math.floor(v / 1e4) + '억 ' + man(v % 1e4) : man(v); }
+    function sgn(p) { return (p > 0 ? '+' : p < 0 ? '−' : '') + Math.abs(p).toFixed(1) + '%'; }
+    function med(a) { var s = a.slice().sort(function (x, y) { return x - y; }), n = s.length; return n ? (n % 2 ? s[n >> 1] : (s[n / 2 - 1] + s[n / 2]) / 2) : null; }
+
+    // 실제 건 검증(기획안 WP3): '실제 낙찰가' 열이 있으면 환산가와 비교하고, 실제 값으로 거꾸로 구한 환산 비율을 지금 비율과 견준다
+    function verify() {
+      var v = rows.filter(function (r) { return r.R && r.actual != null; });
+      if (!v.length) return null;
+      var err = v.map(function (r) { return (r.R.converted - r.actual) / r.actual * 100; });
+      var imp = v.map(function (r) { return (1 - (r.actual + (r.cost || 0)) / r.R.est) * 100; }), used = v.map(function (r) { return r.R.rate; });
+      return { rows: v, n: v.length, mdape: med(err.map(Math.abs)), bias: med(err), within: err.filter(function (e) { return Math.abs(e) <= 10; }).length / v.length,
+        imp: med(imp), used: med(used), err: err, impl: imp };
+    }
+    function verifyCard(s) {
+      var gap = s.imp - s.used, adv = Math.abs(gap) < 1.5 ? '지금 쓰는 비율과 비슷합니다' :
+        '지금 비율보다 <b>' + Math.abs(gap).toFixed(1) + '%p ' + (gap > 0 ? '높습니다' : '낮습니다') + '</b> — ' + (s.n < 5 ? '건수가 적어 참고만 하세요' :
+          '⚙ 환산 비율에서 해당 호가대·차령 칸이나 모델별 비율을 ' + (gap > 0 ? '올리는' : '내리는') + ' 것을 검토하세요');
+      var h = '<div class="card"><div class="card-title">실제 건 비교 <span class="hint">붙여넣은 실제 낙찰가 대비 환산가 · + 는 환산가가 실제보다 높음</span></div>' +
+        '<div class="v2-kv">비교 <b>' + s.n + '대</b> · 오차 중위(절댓값) <b>' + s.mdape.toFixed(1) + '%</b> · 치우침 <b>' + sgn(s.bias) + '</b> · ±10% 안 <b>' +
+        Math.round(s.within * 100) + '%</b><br>실제 낙찰가로 거꾸로 구한 환산 비율 중위 <b>' + s.imp.toFixed(1) + '%</b> · 지금 쓰는 비율 중위 <b>' + s.used.toFixed(1) +
+        '%</b> → ' + adv + '</div><div class="v2-tablewrap"><table class="t v2-tbl"><thead><tr><th class="num">행</th><th>세부모델 · 등급</th><th class="num">추정 시세</th>' +
+        '<th class="num">환산가</th><th class="num">실제 낙찰가</th><th class="num">오차</th><th class="num">쓴 비율</th><th class="num">실제 비율</th><th>비율 출처</th></tr></thead><tbody>';
+      s.rows.forEach(function (r, k) {
+        h += '<tr><td class="num v2-dim">' + r.no + '</td><td>' + esc(r.best.model + ' ' + r.grade) + '</td><td class="num">' + man(r.R.price) + '</td>' +
+          '<td class="num">' + man(r.R.converted) + '</td><td class="num"><b>' + man(r.actual) + '</b></td><td class="num">' + sgn(s.err[k]) + '</td>' +
+          '<td class="num">' + r.R.rate + '%</td><td class="num">' + s.impl[k].toFixed(1) + '%</td><td>' + esc(r.R.rateSource) + '</td></tr>';
+      });
+      return h + '</tbody></table></div><p class="v2-help">실제 비율 = 1 − (실제 낙찰가 + 수리비) ÷ 수리비 빼기 전 추정 시세. 같은 호가대·차령에서 실제 비율이 꾸준히 다르면 ⚙ 환산 비율에서 그 칸을 고칩니다.</p></div>';
+    }
 
     function rowHtml(r, i) {                                 // 한 행 = 차(번호판·붙여넣은 글) · 매칭(세부모델/등급) · 등록·주행 · 성능 · 결과
       var warnM = r.conf === 'mid' || r.conf === 'low';
@@ -451,8 +490,9 @@
         '<br>' + (r.km != null ? (r.km / 1e4).toFixed(1) + '만km' : '<span class="v2-bad">주행 없음</span>') + '</td>';
       h += '<td class="v2-cond">' + condCell(r) + '</td>';
       if (r.R) {
+        var act = r.actual != null ? '<br><span class="v2-act">실제 ' + man(r.actual) + ' (' + sgn((r.R.converted - r.actual) / r.actual * 100) + ')</span>' : '';
         h += '<td class="num"><b class="v2-amt">' + man(r.R.price) + '</b><br><span class="v2-dim">' + man(r.R.range[0]) + '~' + man(r.R.range[1]) + '</span></td>' +
-          '<td class="num"><b class="v2-amt">' + man(r.R.converted) + '</b><br><span class="v2-dim">' + r.R.rate + '%</span></td>' +
+          '<td class="num"><b class="v2-amt">' + man(r.R.converted) + '</b><br><span class="v2-dim">' + r.R.rate + '%</span>' + act + '</td>' +
           '<td><span class="v2-gb ' + r.R.grade + '">' + r.R.grade + '</span> <span class="v2-dim">' + r.R.n + '대</span></td>' +
           '<td><a href="' + esc(link(r)) + '" target="_blank" rel="noopener">열기 ↗</a></td>';
       } else h += '<td colspan="4" class="v2-bad">' + esc(r.why.join(' · ')) + '</td>';
@@ -473,6 +513,8 @@
         ctx.tile('추정 시세 합계', man(sumP), '만원', eok(sumP) + '만 · 엔카 호가 기준 · 수리비 반영') +
         ctx.tile('환산가 합계', man(sumC), '만원', eok(sumC) + '만 · 팀 환산 비율 적용') +
         ctx.tile('확인할 차', String(chk + skip), '대', '신뢰도 C ' + cN + '대 · 차명 확인 ' + chk + '대') + '</div>';
+      var vs = verify();
+      if (vs) h += verifyCard(vs);
       var shown = rows.map(function (r, i) { return [r, i]; }).filter(function (x) { return !onlyCheck || !x[0].R || needsCheck(x[0]) || x[0].R.grade === 'C'; });
       h += '<div class="card"><div class="v2-tablewrap"><table class="t v2-tbl v2-btbl"><thead><tr><th class="num">행</th>' +
         '<th>차(붙여넣은 글)</th><th>매칭 — 세부모델 / 등급·세부등급</th><th>등록 · 주행</th><th>성능</th>' +
@@ -490,16 +532,21 @@
       var calc = ['산정_제조사', '산정_모델', '산정_세부모델', '산정_등급', '산정_세부등급', '차명 확신', '산정_최초등록', '산정_주행(km)', '성능 상태(읽은 결과)',
         '사고 라벨', '성능등급', '성능감가율(%)', '글로비스 종합', '글로비스 사고평가', '수리비(만원)', '추정 시세(만원)', '범위 하한(만원)', '범위 상한(만원)',
         '환산 비율(%)', '환산가(만원)', '환산 비율 출처', '신뢰도', '비교 매물(대)', '매칭 단계', '계산 안 된 이유', '한 대 산정 주소'];
+      var vs = verify();
+      if (vs) calc = calc.concat(['실제 낙찰가(만원)', '환산가 오차(%)', '실제 환산 비율(%)']);
       var CONF = { high: '확실', mid: '확인 권장', low: '확인 필요', fixed: '직접 고름', none: '못 찾음' };
       var base = location.href.split('#')[0], out = [head.concat(calc)];
       rows.forEach(function (r) {
         var c = r.c, R = r.R, cond = r.cond.unknown.length ? '못 읽음: ' + r.cond.unknown.join(', ') : r.cond.state === '미상' ? '미상' : (r.cond.items.length ? ISC.summary(r.cond.items) : '무사고');
-        out.push(r.cells.slice(0, nc).concat([r.best ? r.best.maker : null, r.best ? r.best.group : null, r.best ? r.best.model : null, r.grade || null, r.trim || null,
+        var line = r.cells.slice(0, nc).concat([r.best ? r.best.maker : null, r.best ? r.best.group : null, r.best ? r.best.model : null, r.grade || null, r.trim || null,
           CONF[r.conf] || r.conf, r.reg ? r.reg.y + '-' + pad(r.reg.m) + (r.reg.guess ? '(월 미상)' : '') : null, r.km, cond,
           c && c['상태'] !== '미상' ? c['사고라벨'] : null, c && c['상태'] !== '미상' ? c['성능등급'] : null, c && c['상태'] !== '미상' ? c['성능감가율'] : null,
           c && c['상태'] !== '미상' ? c['글로비스_종합평가점'] : null, c && c['상태'] !== '미상' ? c['글로비스_사고평가점'] : null, r.cost || null,
           R ? Math.round(R.price) : null, R ? Math.round(R.range[0]) : null, R ? Math.round(R.range[1]) : null, R ? R.rate : null, R ? Math.round(R.converted) : null,
-          R ? R.rateSource : null, R ? R.grade : null, R ? R.n : null, R ? R.stepName : null, r.why.join(' · ') || null, R ? base + link(r) : null]));
+          R ? R.rateSource : null, R ? R.grade : null, R ? R.n : null, R ? R.stepName : null, r.why.join(' · ') || null, R ? base + link(r) : null]);
+        if (vs) line.push(r.actual != null ? r.actual : null, R && r.actual != null ? +((R.converted - r.actual) / r.actual * 100).toFixed(1) : null,
+          R && r.actual != null ? +((1 - (r.actual + (r.cost || 0)) / R.est) * 100).toFixed(1) : null);
+        out.push(line);
       });
       if (T.over) (T.header ? T.table.slice(1) : T.table).slice(LIMIT).forEach(function (cells) {
         var line = cells.slice(0, nc);
@@ -507,7 +554,8 @@
         line[nc + calc.indexOf('계산 안 된 이유')] = LIMIT + '대 초과 — 나눠서 다시 붙여 주세요';
         out.push(line);
       });
-      var money = ['산정_주행(km)', '추정 시세(만원)', '범위 하한(만원)', '범위 상한(만원)', '환산가(만원)'].map(function (k) { return nc + calc.indexOf(k); });
+      var money = ['산정_주행(km)', '추정 시세(만원)', '범위 하한(만원)', '범위 상한(만원)', '환산가(만원)', '실제 낙찰가(만원)']
+        .filter(function (k) { return calc.indexOf(k) >= 0; }).map(function (k) { return nc + calc.indexOf(k); });
       var cmp = [['행', '차량', '유사도', '매물ID', '상태', '판매 확인일', '최초등록', '주행(km)', '색상', '등급', '세부등급', '성능등급', '사고 라벨',
         '손상 부위', '호가(만원)', '보정 후(만원)', '이상치', '엔카 링크']];
       rows.forEach(function (r) {
@@ -533,7 +581,9 @@
         ['최초등록', '연식만 있으면 그해 6월 등록으로 계산'], ['성능 상태', '빈칸은 상태 미상(성능 보정 없이 계산). 못 읽은 표기가 있으면 계산하지 않음'],
         ['수리비', '단위 없이 1만 이상이면 원으로 보고 만원으로 바꿈. 추정 시세·환산가에서 그대로 뺌'],
         ['참고', '추정 시세는 엔카 호가 기준. 환산가는 팀 환산 비율(도·소매 갭 요약치)을 적용한 값']];
-      var widths = head.map(function () { return 14; }).concat([10, 12, 20, 18, 14, 10, 12, 11, 30, 12, 8, 10, 10, 10, 10, 12, 12, 12, 10, 12, 16, 7, 9, 22, 24, 40]);
+      if (vs) info.push(['실제 건 비교', vs.n + '대 · 오차 중위(절댓값) ' + vs.mdape.toFixed(1) + '% · 치우침 ' + sgn(vs.bias) + ' · ±10% 안 ' + Math.round(vs.within * 100) + '%'],
+        ['실제로 구한 환산 비율', '중위 ' + vs.imp.toFixed(1) + '% (지금 쓰는 비율 중위 ' + vs.used.toFixed(1) + '%) — 실제 비율 = 1 − (낙찰가 + 수리비) ÷ 수리비 빼기 전 추정 시세']);
+      var widths = head.map(function () { return 14; }).concat([10, 12, 20, 18, 14, 10, 12, 11, 30, 12, 8, 10, 10, 10, 10, 12, 12, 12, 10, 12, 16, 7, 9, 22, 24, 40], vs ? [14, 12, 14] : []);
       XlsxWriter.download(ctx.fileSafe('묶음산정_' + ctx.today()) + '.xlsx', [
         { name: '결과', rows: out, header: true, freeze: true, money: money, widths: widths },
         { name: '비교 매물', rows: cmp, header: true, freeze: true, money: [7, 14, 15], widths: [6, 30, 7, 11, 7, 11, 9, 10, 9, 18, 14, 8, 12, 34, 10, 11, 7, 42] },
@@ -645,7 +695,7 @@
     return { show: show, addCar: addCar, parseTSV: parseTSV, detect: detect };
   }
 
-  var api = { create: create, parseTSV: parseTSV, kmOf: kmOf, costOf: costOf, regOf: regOf, yearOf: yearOf, colorOf: colorOf, rentOf: rentOf };
+  var api = { create: create, parseTSV: parseTSV, kmOf: kmOf, costOf: costOf, priceOf: priceOf, regOf: regOf, yearOf: yearOf, colorOf: colorOf, rentOf: rentOf };
   root.V2Batch = api;
   if (typeof module === 'object' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
