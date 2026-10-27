@@ -7,7 +7,12 @@
 > 설정은 [wrangler.toml](wrangler.toml)의 `[assets] directory = "./web"`. GitHub 연동(Workers Builds)으로 **`git push` 시 자동 재배포**된다 — 파이프라인에 `wrangler` 호출 단계는 없다.
 > `web/_headers`의 캐시 규칙(데이터/다운로드 5분, 코드 자산 1일)은 Workers 정적 자산에서도 정상 적용된다(2026-07-30 라이브 확인).
 
-이 사이트는 **DB·백엔드 없는 순수 정적 사이트**입니다. 시세조회 필터링·분위수 계산은 전부 브라우저에서 JS로 처리되므로, 상주 서버(Railway 등)가 **필요 없고 호스팅 비용이 0원**입니다.
+**주소 구조 (2026-10-27 교체)**
+- `/` = **새 사이트**(시세 산정·묶음 산정·⚙ 환산 비율·시장 시황·데이터). 진입 파일은 `web/index.html`, 화면 코드는 `web/v2/`. `/v2/`도 같은 화면이다(검색 제외).
+- `/old.html` = **이전 사이트**(같은 데이터로 매주 갱신, 위쪽에 새 사이트 안내 띠, 검색 제외). 이전 즐겨찾기 주소(`/#/overview` 등)는 `/old.html#/…`로 자동으로 넘어간다.
+- 되돌리려면 교체 커밋을 `git revert`해 push한다(`web/index.html` ↔ `web/old.html`).
+
+이 사이트는 **DB 없는 정적 사이트**입니다. 시세 산정·필터링·분위수 계산은 전부 브라우저에서 JS로 처리되므로, 상주 서버(Railway 등)가 **필요 없고 호스팅 비용이 0원**입니다. 서버 코드는 환산 비율 팀 수정을 Workers KV에 저장하는 작은 Worker(`/api/rates`, `worker/index.js`) 하나뿐입니다.
 
 ## 배포 반영 확인 (1줄)
 ```bash
@@ -58,7 +63,7 @@ git commit -m "데이터 갱신: <날짜>"
 git push                      # → Cloudflare 자동 재배포
 ```
 
-## 새 사이트(web/v2) 점검 — 코드를 바꾼 뒤·교체 전에
+## 사이트 점검 — 코드를 바꾼 뒤
 
 ```bash
 python tools/qa_all.py
@@ -66,7 +71,7 @@ python tools/qa_all.py
 - 사이트 정적 점검, 저장 API, 엑셀 작성기, 차명 매칭, 성능 계산기 일치, 시세 엔진 일치를 한 번에 돌린다(약 4~5분).
 - `--quick`은 일치 검증 둘을 빼고 1분 안에 끝난다.
 - 하나라도 실패하면 종료 코드 1이다.
-- 화면은 `site-worker` 미리보기(`node tools/dev_server.mjs`, http://127.0.0.1:8792/v2/)로 본다.
+- 화면은 `site-worker` 미리보기(`node tools/dev_server.mjs`, http://127.0.0.1:8792/ · 이전 사이트 /old.html)로 본다.
 
 ## 환산 비율 저장소 연결 (기획안 D6 · 5.1.6) — ✅ 2026-10-27 연결함
 
@@ -115,12 +120,12 @@ id = "<1단계 Namespace ID>"
 curl -s https://encar-market-intel.fullsoup.workers.dev/api/rates
 ```
 - `{"ok":true,"store":true,"writable":true,"team":null}`가 나오면 연결된 것이다.
-- `/v2/#/price?view=rates`에서 [수정하기]가 열린다.
+- `/#/price?view=rates`에서 [수정하기]가 열린다.
 - 문제가 생기면 `wrangler.toml`을 이전 판으로 되돌려 push한다(정적 사이트로 돌아감).
 
 **로컬 시험**:
 - `node tools/worker_check.mjs`: API 시험(가짜 KV).
-- `node tools/dev_server.mjs`: 미리보기 `http://127.0.0.1:8792/v2/`. Worker 코드를 그대로 쓰고, 가짜 KV는 `encar_output/dev_kv.json`, 비밀번호는 `dev`다.
+- `node tools/dev_server.mjs`: 미리보기 `http://127.0.0.1:8792/`. Worker 코드를 그대로 쓰고, 가짜 KV는 `encar_output/dev_kv.json`, 비밀번호는 `dev`다.
 
 ## (선택) 커스텀 도메인
 Cloudflare → Workers & Pages → 해당 Worker → Settings → **Domains & Routes** 에서 보유 도메인 연결(무료). 도메인 자체 구매 비용만 발생.

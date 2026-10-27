@@ -9,7 +9,8 @@
 (function () {
   'use strict';
 
-  var DATA = '../data/';
+  // 사이트 뿌리 = 이 파일(v2/app.js)의 한 단계 위 — 기본 주소(/)와 /v2/ 어디서 열어도 data/·downloads/ 가 같은 곳
+  var ROOT = new URL('../', document.currentScript.src).href, DATA = ROOT + 'data/';
   var COLORS = ['흰색·진주', '검정', '회색·은색', '청색', '기타'];
   var FIXES = ['외장', '내장', '광택', '룸클리닝', '휠', '타이어', '유리'];
   var STATUS_LABEL = { X: 'X 교환', W: 'W 판금', '절단': '용접·절단', U: 'U 요철', T: 'T 손상', C: 'C 부식', A: 'A 흠집' };
@@ -780,7 +781,7 @@
     $('navMarket').classList.toggle('on', page === 'market');
     $('navData').classList.toggle('on', page === 'data');
     if (page === 'data') {
-      if (!DV) DV = V2Data.create({ X: X, esc: esc, getJSON: getJSON });
+      if (!DV) DV = V2Data.create({ X: X, esc: esc, getJSON: getJSON, root: ROOT });
       DV.show($('dataView'));
       return Promise.resolve();
     }

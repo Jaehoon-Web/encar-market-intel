@@ -17,11 +17,17 @@ function ok(cond, name, extra) { n++; if (!cond) fail++; console.log((cond ? '  
 function section(t) { console.log('[' + t + ']'); }
 
 section('화면 파일');
-const html = fs.readFileSync(path.join(V2, 'index.html'), 'utf8');
-const refs = [...html.matchAll(/(?:src|href)="([^"#:]+)"/g)].map(m => m[1]).filter(r => !/^(https?:)?\/\//.test(r));
-const missing = refs.filter(r => !fs.existsSync(path.join(V2, r)));
-ok(!missing.length, `index.html이 부르는 파일 ${refs.length}개가 모두 있음`, missing.join(', '));
-for (const f of ['app.js', 'batch.js', 'rates.js', 'market.js', 'data.js']) ok(html.includes(`src="${f}"`), `${f}를 부름`);
+// 기본 주소(web/index.html)와 /v2/ 는 같은 새 화면, old.html 은 이전 사이트(2026-10-27 교체)
+for (const page of ['index.html', 'v2/index.html', 'old.html']) {
+  const h = fs.readFileSync(path.join(WEB, page), 'utf8'), dir = path.dirname(path.join(WEB, page));
+  const refs = [...h.matchAll(/(?:src|href)="([^"#:]+)"/g)].map(m => m[1]).filter(r => !/^(https?:)?\/\//.test(r));
+  const missing = refs.filter(r => !fs.existsSync(path.join(dir, r)));
+  ok(!missing.length, `${page}이 부르는 파일 ${refs.length}개가 모두 있음`, missing.join(', '));
+}
+const html = fs.readFileSync(path.join(WEB, 'index.html'), 'utf8'), v2html = fs.readFileSync(path.join(V2, 'index.html'), 'utf8');
+for (const f of ['app.js', 'batch.js', 'rates.js', 'market.js', 'data.js']) ok(html.includes(`src="v2/${f}"`) && v2html.includes(`src="${f}"`), `${f}를 부름(기본 주소·/v2/)`);
+ok(html.includes("location.replace('old.html'") && html.includes('href="old.html"') && !html.includes('noindex'),
+  '기본 주소: 이전 사이트 주소(#/overview 등)는 old.html로 보내고, 이전 사이트 링크가 있음');
 
 section('데이터 파일');
 const idx = read(path.join(DATA, 'comps', 'index.json'));

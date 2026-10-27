@@ -1,20 +1,26 @@
-# 엔카 마켓 인텔 — 중고차 재고·시세 대시보드 (web)
+# 엔카 마켓 인텔 — 중고차 시세 산정·시장 시황 (web)
 
-엔카 크롤링 데이터를 기반으로 한 **시장 재고 현황·시세 분석·인사이트** 정적 웹 대시보드.
+**2026-10-27부터 기본 주소(`index.html`)는 새 사이트**다 — 시세 산정·묶음 산정·환산 비율·시장 시황·데이터(기획안 `PLAN_사이트개편_기획안_v2.md`).
+이전 대시보드는 `old.html`로 옮겼고, 이전 즐겨찾기 주소(`#/overview` 등)는 `old.html`로 자동으로 넘어간다. 아래 '탭' 이하는 이전 사이트 설명이다.
+
+이전 사이트: 엔카 크롤링 데이터를 기반으로 한 **시장 재고 현황·시세 분석·인사이트** 정적 웹 대시보드.
 디자인은 `D:\현재가치_웹\web` 의 **SKR Nike-DNA 라이트(웜 베이지)** 컨셉을 계승.
 
 ## 구성
 ```
 web/
-  index.html        진입점 (SPA · 해시 라우팅)
-  app.js            렌더링·차트·인터랙션 (vanilla JS + Chart.js)
-  styles.css        SKR 디자인 시스템 (계승 + 엔카 전용 컴포넌트 추가)
+  index.html        새 사이트 진입점 (해시 라우팅 #/price · #/market · #/data) — 화면 코드는 v2/
+  v2/               새 사이트 화면 코드(app.js·batch.js·rates.js·market.js·data.js·v2.css) · /v2/ 주소도 같은 화면
+  lib/              산정 계산(price_engine·inspection_score·name_match·rates_store·xlsx_writer) — 파이썬 파이프라인과 같은 계산
+  old.html          이전 사이트 진입점 (SPA · 해시 라우팅)
+  app.js            이전 사이트 렌더링·차트·인터랙션 (vanilla JS + Chart.js)
+  styles.css        SKR 디자인 시스템 (두 사이트 공용, 계승 + 엔카 전용 컴포넌트 추가)
   assets/           로고 SVG
-  data/*.json       집계 데이터 (build_data.py 생성)
-  downloads/*.csv   다운로드용 집계 CSV (build_data.py 생성)
+  data/             집계·산정 데이터 (build_data.py · price_engine.py · market_index.py 등이 매주 생성)
+  downloads/        내려받기 CSV·zip (매주 생성, 엑셀용 CP949)
 ```
 
-## 탭
+## 탭 (이전 사이트 `old.html`)
 | 탭 | 내용 | 데이터 |
 |----|------|--------|
 | 시장 개요 | 전체 재고 히어로, 핵심 KPI, 제조사·연료 분포, 모델 TOP10 | L0+L2 |
@@ -54,9 +60,11 @@ cd web
 python -m http.server 8778
 # http://127.0.0.1:8778
 ```
+새 사이트의 환산 비율 저장소(`/api/rates`)까지 보려면 프로젝트 루트에서 `node tools/dev_server.mjs` → http://127.0.0.1:8792/ (가짜 저장소, 비밀번호 `dev`).
 
 ## 배포 (공개 웹서비스)
-순수 정적 사이트이므로 어디든 배포 가능:
+지금은 Cloudflare Workers(정적 파일 + 환산 비율 저장소 `/api/rates`, `worker/index.js`)로 배포한다 — 루트 `DEPLOY.md` 참고.
+정적 파일만 올려도 화면은 모두 돌고, 환산 비율은 보기만 된다:
 - **정적 호스팅**: Netlify / Vercel / Cloudflare Pages / GitHub Pages — `web/` 디렉토리를 배포
 - **주의**: `downloads/listings_compact.csv`(~20MB) 포함 시 호스팅 용량 확인
 

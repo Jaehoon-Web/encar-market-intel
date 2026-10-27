@@ -52,5 +52,5 @@ http.createServer(async (req, res) => {
     res.end(String(e && e.stack || e));
   }
 }).listen(PORT, '127.0.0.1', () => {
-  console.log(`미리보기 http://127.0.0.1:${PORT}/v2/  ·  /api/rates (가짜 KV ${path.relative(ROOT, KV_FILE)}, 비밀번호 '${env.RATES_PASSWORD === 'dev' ? 'dev' : '환경 변수'}')`);
+  console.log(`사이트 http://127.0.0.1:${PORT}/ (이전 사이트 /old.html)  ·  /api/rates (가짜 KV ${path.relative(ROOT, KV_FILE)}, 비밀번호 '${env.RATES_PASSWORD === 'dev' ? 'dev' : '환경 변수'}')`);
 });

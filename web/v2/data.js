@@ -51,7 +51,7 @@
   ];
 
   function create(ctx) {
-    var MI = ctx.X.mi, esc = ctx.esc, el = null, sizes = {};
+    var MI = ctx.X.mi, esc = ctx.esc, el = null, sizes = {}, DL = (ctx.root || '../') + 'downloads/';   // 사이트 뿌리는 app.js가 준다
 
     function md(s) { return (+s.slice(5, 7)) + '/' + (+s.slice(8, 10)); }
     function kb(n) { return n == null ? '' : n >= 1048576 ? (n / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(n / 1024)) + 'KB'; }
@@ -63,7 +63,7 @@
       FILES.forEach(function (f) {
         h += '<tr><td><b>' + esc(f[0]) + '</b>' + (f[2] ? ' <span class="v2-new">새</span>' : '') + '</td><td class="v2-desc">' + esc(f[1]) + '</td>' +
           '<td class="num" data-size="' + esc(f[0]) + '">' + kb(sizes[f[0]]) + '</td>' +
-          '<td><a class="v2-btn" href="../downloads/' + encodeURIComponent(f[0]) + '" download>내려받기</a></td></tr>';
+          '<td><a class="v2-btn" href="' + DL + encodeURIComponent(f[0]) + '" download>내려받기</a></td></tr>';
       });
       return h + '</tbody></table></div><p class="v2-help">시세 산정·모델 요약·묶음 산정·차종 비교 화면의 [엑셀 내려받기]는 그 화면에서 보는 조건 그대로 만든다.</p></div>';
     }
@@ -114,7 +114,7 @@
     function headSizes() {
       FILES.forEach(function (f) {
         if (sizes[f[0]] != null) return;
-        fetch('../downloads/' + encodeURIComponent(f[0]), { method: 'HEAD', cache: 'no-store' }).then(function (r) {
+        fetch(DL + encodeURIComponent(f[0]), { method: 'HEAD', cache: 'no-store' }).then(function (r) {
           var n = Number(r.headers.get('content-length'));
           if (r.ok && n) setSize(f[0], n);
         }).catch(function () {});
