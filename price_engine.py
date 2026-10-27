@@ -22,7 +22,7 @@ price_engine.py — 시세 산정 엔진 (기획안 WP1, 5.1.2): "가장 비슷�
   6 신뢰도: A 10대 이상·2단계 이내·범위가 대표값 ±8% 안 / B 4단계 이내 / C 5단계(참고용)
   7 환산가: 대표값 × (1 − 환산 비율: 팀 수정 → 모델 예외 → 호가대×차령 기준표). 수리비는 시세·환산가에서 전액 뺀다
 """
-import os, sys, json, zlib, glob, argparse, datetime, subprocess
+import os, re, sys, json, zlib, glob, argparse, datetime, subprocess
 import numpy as np
 import pandas as pd
 import adjust_coef as AC
@@ -370,6 +370,20 @@ def _num(v):
     return v
 
 
+KEY_SKIP = re.compile(r"^(?:\d+WD|AWD|FWD|RWD|4MATIC|\d+인승|\d+\.\d+T?|\d+세대|\d+)$")
+
+
+def grade_keys(grades, limit=30):
+    """등급명에서 영문과 숫자가 섞인 코드(520D·530I·E300·A645 등). 구동·배기량·인승 표시는 뺀다. 많이 쓰인 순"""
+    cnt = {}
+    for gname, n in grades.value_counts().items():
+        for tok in re.split(r"[\s/()·,+]+", str(gname).upper()):                   # 띄어쓰기 단위 낱말 중 영문+숫자
+            tok = tok.strip(".-")
+            if len(tok) >= 3 and re.search(r"\d", tok) and re.search(r"[A-Z]", tok) and not KEY_SKIP.match(tok):
+                cnt[tok] = cnt.get(tok, 0) + int(n)
+    return [k for k, _ in sorted(cnt.items(), key=lambda x: -x[1])[:limit]]
+
+
 def site_groups(pool):
     """파일을 나누는 모델그룹. 비어 있으면 같은 모델의 가장 흔한 모델그룹, 그것도 없으면 모델 이름"""
     grp = pool["모델그룹"].fillna("").astype(str)
@@ -421,9 +435,13 @@ def export(pool):
                  fi_[r.연료 if isinstance(r.연료, str) else "기타"]] for r in g.itertuples()]
         tf = {k: float(v) for k, v in g[g["sold"]].groupby("tk")["tf"].first().items()}   # 같은 키는 같은 배수
         minfo = [{"name": m, "seg": s["seg"].mode().iat[0], "n": len(s), "onsale": int((~s["sold"]).sum()),
-                  "onsale_all": int(allon.get((mk, m), 0))} for m, s in ((m, g[g["모델"] == m]) for m in models)]
+                  "onsale_all": int(allon.get((mk, m), 0)),
+                  "y0": int((s["등록연월"] // 100).quantile(0.02)), "y1": int((s["등록연월"] // 100).quantile(0.98)),   # 등록 연도 범위
+                  "gk": grade_keys(s["등급"])}                       # 등급명의 영문·숫자 코드(520d·E300 등) — 모델명 매칭용
+                 for m, s in ((m, g[g["모델"] == m]) for m in models)]
         head = json.dumps({"version": version, "maker": mk, "group": gname, "now_ym": now_ym, "now_date": now_date, "tf": tf,
-                           "fields": ROW_FIELDS, "models": minfo, "grades": list(gi), "trims": list(ti), "colors": colors,
+                           "fields": ROW_FIELDS, "models": [{k: v for k, v in m.items() if k != "gk"} for m in minfo],   # 등급 코드는 index.json에만
+                           "grades": list(gi), "trims": list(ti), "colors": colors,
                            "labels": labels, "fuels": fuels}, ensure_ascii=False, separators=(",", ":"))
         body = ",\n".join(json.dumps(r, ensure_ascii=False, separators=(",", ":")) for r in rows)
         path = os.path.join(SITE, fname)

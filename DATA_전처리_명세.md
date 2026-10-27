@@ -296,6 +296,7 @@ crawler(1→2→3) → process → clean → append_history → [prep.py] → [�
   - 차대번호·번호판·표준 모델명은 넣지 않는다.
   - 행에는 바뀌지 않는 값만 두고, 매주 바뀌는 값(현재 월, 시점 보정 배수)은 파일 머리말에 둔다. 그래서 바뀐 매물만 커밋에 쌓인다.
   - 엔진 규칙을 바꾸면 `python price_engine.py --parity`(Node 필요)로 사이트 JS 엔진과 일치하는지 다시 확인한다.
+  - 세부모델마다 등록 연도 범위(`y0`·`y1` = 2%·98% 분위)를 넣는다. `index.json`에는 등급명의 영문·숫자 코드(`gk`, 예: 520D·E300)도 넣는다. 묶음 산정의 차명 매칭(`web/lib/name_match.js`, 기획안 D5)이 쓴다. 매칭 정확도는 `python tools/name_match_check.py`로 잰다.
 - 현재 사이트(`build_data.py`)는 당분간 기존 `encar_cleaned`를 쓴다. 새 사이트를 만들 때 `listings.parquet`으로 옮긴다.
 - **`price_obs.parquet`는 이번 주부터 쌓는다.** 가격 인하·3개월 추세 지표의 원천이라, 사이트 개편과 상관없이 먼저 시작한다.
 

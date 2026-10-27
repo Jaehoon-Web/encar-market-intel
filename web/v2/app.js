@@ -1,5 +1,5 @@
 /*
- * app.js — 새 사이트(v2) 시세 산정 · 한 대 산정 화면 (기획안 5.1.1 · 5.1.1-1 · 5.1.3)
+ * app.js — 새 사이트(v2) 시세 산정 · 한 대 산정 · 모델 요약 화면 (기획안 5.1.1 · 5.1.1-1 · 5.1.3 · 5.1.5). 묶음 산정(5.1.4)은 batch.js
  *
  * 데이터(../data): comps/index.json(선택 목록·엔진 설정) · comps/g????????.json(모델그룹별 비교 매물) · adj_coef.json(보정 계수)
  *                 · conversion_rates.json(환산 비율) · inspection_model.json(성능 계산) · market_index.json(시황 지수)
@@ -16,8 +16,8 @@
   var COEF_LEVEL = { '모델': '이 세부모델 자체 값', '차급': '같은 차급 평균 값(이 모델 표본이 없어서)', '시장': '시장 평균 값' };
   var SHOW = 30;                                            // 비교 매물 표 기본 행 수
   var KM_BANDS = [[0, 3e4, '3만 미만'], [3e4, 6e4, '3~6만'], [6e4, 1e5, '6~10만'], [1e5, 1.5e5, '10~15만'], [1.5e5, Infinity, '15만 이상']];
-  var X = {}, ENG = null, ISC = null, GROUPS = {}, R = null, LAST = null, timer = 0;
-  var VIEW = { sort: 'sim', all: false, mode: 'one' };      // mode: one(한 대 산정) · model(모델 요약)
+  var X = {}, ENG = null, ISC = null, GROUPS = {}, R = null, LAST = null, timer = 0, B = null;
+  var VIEW = { sort: 'sim', all: false, mode: 'one' };      // mode: one(한 대 산정) · model(모델 요약) · batch(묶음 산정)
   var S = blank();
 
   function blank() {
@@ -129,21 +129,22 @@
       return { part: p[0], side: p[1] || null, pillar: p[2] || null, status: name[p[3]] || p[3] };
     });
   }
-  function toHash() {
+  function query(s, mode) {
     var q = new URLSearchParams();
-    KEYS.forEach(function (k) { if (S[k] !== '' && S[k] != null) q.set(k, S[k]); });
-    if (S.rent) q.set('rent', '1');
-    if (S.cond !== '미상') q.set('cond', S.cond);
-    if (S.cond === '입력' && S.items.length) q.set('it', itemsCode(S.items));
-    if (S.sr !== 'auto') q.set('sr', S.sr);
-    if (S.mech !== '0') q.set('mech', S.mech);
-    if (S.fixes.length) q.set('fx', S.fixes.join(','));
-    if (!S.sold) q.set('sold', '0');
-    if (S.ex.length) q.set('ex', S.ex.join(','));
-    if (VIEW.mode === 'model') q.set('view', 'model');
-    var s = q.toString();
-    history.replaceState(null, '', '#/price' + (s ? '?' + s : ''));
+    KEYS.forEach(function (k) { if (s[k] !== '' && s[k] != null) q.set(k, s[k]); });
+    if (s.rent) q.set('rent', '1');
+    if (s.cond !== '미상') q.set('cond', s.cond);
+    if (s.cond === '입력' && s.items.length) q.set('it', itemsCode(s.items));
+    if (s.sr !== 'auto') q.set('sr', s.sr);
+    if (s.mech !== '0') q.set('mech', s.mech);
+    if (s.fixes.length) q.set('fx', s.fixes.join(','));
+    if (!s.sold) q.set('sold', '0');
+    if (s.ex.length) q.set('ex', s.ex.join(','));
+    if (mode !== 'one') q.set('view', mode);
+    var str = q.toString();
+    return '#/price' + (str ? '?' + str : '');
   }
+  function toHash() { history.replaceState(null, '', query(S, VIEW.mode)); }
   function fromHash() {
     var h = location.hash, i = h.indexOf('?'), q = new URLSearchParams(i >= 0 ? h.slice(i + 1) : ''), s = blank();
     KEYS.forEach(function (k) { if (q.has(k)) s[k] = q.get(k); });
@@ -155,7 +156,7 @@
     s.fixes = (q.get('fx') || '').split(',').filter(Boolean);
     s.sold = q.get('sold') !== '0';
     s.ex = (q.get('ex') || '').split(',').filter(Boolean);
-    VIEW.mode = q.get('view') === 'model' ? 'model' : 'one';
+    VIEW.mode = ['model', 'batch'].indexOf(q.get('view')) >= 0 ? q.get('view') : 'one';
     return s;
   }
 
@@ -322,9 +323,7 @@
     if (!S.y || !S.m) need.push('최초등록 연·월');
     if (km == null) need.push('주행거리');
     var model = G && S.model && G.models[S.model] && (VIEW.mode === 'model' || need.length);   // 모델만 골랐으면 모델 요약
-    document.querySelectorAll('button[data-seg="mode"]').forEach(function (b) {
-      b.classList.toggle('on', b.getAttribute('data-v') === (model ? 'model' : 'one'));
-    });
+    markMode(model ? 'model' : 'one');
     if (model) { R = null; summary(G, need); return; }
     if (need.length || !G) { R = null; guide(need); return; }
     var c = condResult(), rate = S.rate === '' ? null : Number(S.rate);
@@ -698,10 +697,26 @@
     $('marketLine').innerHTML = '<div>' + h + '</div>';
   }
 
+  function markMode(v) {
+    document.querySelectorAll('button[data-seg="mode"]').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-v') === v); });
+  }
+  function applyMode() {                                     // 묶음 산정은 입력·결과 대신 붙여넣기 화면
+    var batch = VIEW.mode === 'batch';
+    $('grid').hidden = batch;
+    $('batch').hidden = !batch;
+    if (!batch) { compute(); return; }
+    markMode('batch');
+    if (!B) {
+      B = V2Batch.create({ X: X, ENG: ENG, ISC: ISC, GROUPS: GROUPS, getJSON: getJSON, esc: esc, man: man, pad: pad, today: today,
+        fileSafe: fileSafe, tile: tile, href: function (s) { return query(Object.assign(blank(), s), 'one'); } });
+    }
+    B.show($('batch'));
+  }
+
   function layout() {
-    $('app').innerHTML = '<div class="v2-mode">' + seg('mode', [['one', '한 대 산정'], ['model', '모델 요약']], VIEW.mode, '산정 방식') +
-      '<span class="v2-help" style="margin:0">묶음 산정은 준비 중</span></div>' +
-      '<div class="v2-grid"><aside class="card v2-input" id="inp" aria-label="대상 차 조건"></aside><section class="v2-result" id="res" aria-live="polite"></section></div>';
+    $('app').innerHTML = '<div class="v2-mode">' + seg('mode', [['one', '한 대 산정'], ['model', '모델 요약'], ['batch', '묶음 산정']], VIEW.mode, '산정 방식') + '</div>' +
+      '<div class="v2-grid" id="grid"><aside class="card v2-input" id="inp" aria-label="대상 차 조건"></aside><section class="v2-result" id="res" aria-live="polite"></section></div>' +
+      '<section class="v2-batch" id="batch" aria-label="묶음 산정" hidden></section>';
     var inp = $('inp'), res = $('res'), tip = $('tip');
     inp.addEventListener('change', function (e) {
       var t = e.target, k = t.getAttribute('data-k');
@@ -728,7 +743,7 @@
       if (!b) return;
       var k = b.getAttribute('data-seg'), chipK = b.getAttribute('data-chip'), act = b.getAttribute('data-act'), v = b.getAttribute('data-v');
       if (k === 'sort') { VIEW.sort = v; compute(); return; }
-      if (k === 'mode') { VIEW.mode = v; toHash(); compute(); return; }
+      if (k === 'mode') { VIEW.mode = v; toHash(); applyMode(); return; }
       if (act === 'xlsx') { exportOne(); return; }
       if (act === 'xlsxModel') { exportModel(); return; }
       var cell = b.getAttribute('data-cell'), gname = b.getAttribute('data-grade');
@@ -748,6 +763,7 @@
         else prompt('이 주소를 복사하세요', location.href);
       }
     }
+    $('app').querySelector('.v2-mode').addEventListener('click', clicks);
     inp.addEventListener('click', clicks);
     res.addEventListener('click', clicks);
     res.addEventListener('change', function (e) {
@@ -771,7 +787,7 @@
     res.addEventListener('mouseout', function (e) { if (e.target.getAttribute && e.target.getAttribute('data-tip')) tip.hidden = true; });
     window.addEventListener('hashchange', function () {
       S = fromHash();
-      loadGroup().then(function () { renderInputs(); compute(); }).catch(fail);
+      loadGroup().then(function () { renderInputs(); applyMode(); }).catch(fail);
     });
   }
 
@@ -792,7 +808,7 @@
         renderInputs();
         return loadGroup();
       })
-      .then(function () { renderInputs(); compute(); })
+      .then(function () { renderInputs(); applyMode(); })
       .catch(fail);
   }
 
