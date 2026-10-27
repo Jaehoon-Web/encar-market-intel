@@ -28,7 +28,8 @@ const ASSETS = {
     if (p.endsWith('/')) p += 'index.html';
     const f = path.normalize(path.join(WEB, p));
     if (!f.startsWith(WEB) || !fs.existsSync(f) || !fs.statSync(f).isFile()) return new Response('없는 파일: ' + p, { status: 404 });
-    return new Response(fs.readFileSync(f), { status: 200, headers: { 'content-type': TYPES[path.extname(f).toLowerCase()] || 'application/octet-stream' } });
+    return new Response(request.method === 'HEAD' ? null : fs.readFileSync(f), { status: 200, headers: {
+      'content-type': TYPES[path.extname(f).toLowerCase()] || 'application/octet-stream', 'content-length': String(fs.statSync(f).size) } });
   }
 };
 const env = { RATES, ASSETS, RATES_PASSWORD: process.env.RATES_PASSWORD || 'dev' };

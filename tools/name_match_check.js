@@ -44,3 +44,13 @@ console.log('\n[세부모델 틀린 예] [입력, 연도, 고른 것, 정답]');
 for (const [k, list] of Object.entries(bad)) console.log(`  ${k}: ` + list.slice(0, 4).map(x => JSON.stringify(x)).join('  '));
 console.log('\n[등급 틀린 예] [입력, 고른 것, 정답]');
 for (const [k, list] of Object.entries(badG)) console.log(`  ${k}: ` + list.slice(0, 5).map(x => JSON.stringify(x)).join('  '));
+
+// 합격 기준(엔카 표기 시험일 때만): 엔카 표기 그대로 세부모델 99% · 등급 98% 이상, 확신 '높음'은 99.5% 이상 맞아야
+if (stat.A) {
+  const fails = [];
+  if (stat.A.model / stat.A.n < 0.99) fails.push(`A 세부모델 ${pct(stat.A.model, stat.A.n)} < 99%`);
+  if (stat.A.grade / stat.A.gradeN < 0.98) fails.push(`A 등급 ${pct(stat.A.grade, stat.A.gradeN)} < 98%`);
+  if (conf.high && conf.high.ok / conf.high.n < 0.995) fails.push(`확신 높음 ${pct(conf.high.ok, conf.high.n)} < 99.5%`);
+  console.log(fails.length ? '\n✗ 합격 기준 미달: ' + fails.join(' · ') : '\n✓ 합격 기준 통과(A 세부모델 99%·등급 98% · 확신 높음 99.5%)');
+  if (fails.length) process.exitCode = 1;
+}

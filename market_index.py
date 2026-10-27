@@ -3,6 +3,7 @@
 market_index.py — 시황판 지수 (기획안 D4, 5.2.1): 시세·판매속도·재고·시황지수
 
     python market_index.py      → web/data/market_index.json(지수 + 회차별 흐름) · web/data/market_models.json(차종 비교)
+                                  + web/downloads/market_index.csv · market_models.csv(데이터 탭, CP949)
                                   + encar_output/prep/market_index_report.txt
                                   (회차별 목록 기준 세그먼트 대수는 encar_output/prep/list_counts.csv에 누적)
 
@@ -30,6 +31,7 @@ IDS_ALL = os.path.join(SRC, "ids_all.json")
 LIST_COUNTS = os.path.join(PREP, "list_counts.csv")
 OUT_JSON = os.path.join(ROOT, "web", "data", "market_index.json")
 OUT_MODELS = os.path.join(ROOT, "web", "data", "market_models.json")   # 차종 비교(세부모델별 시장 숫자)
+DL = os.path.join(ROOT, "web", "downloads")                             # 데이터 탭 내려받기(CSV)
 REPORT = os.path.join(PREP, "market_index_report.txt")
 COEF = os.path.join(ROOT, "web", "data", "adj_coef.json")
 
@@ -375,9 +377,31 @@ def build(L, crawls, obs, total, C):
                          + (", 재고 계산 제외" if iv["missing"] / iv["start_all"] > STOCK_GAP_MAX else ""))
         if c.strftime("%Y-%m-%d") != obs[c].strftime("%Y-%m-%d"):
             notes.append(f"파이프라인 기록일 {c:%m/%d}")
-        log.append({"date": obs[c].strftime("%Y-%m-%d"), "crawl": c.strftime("%Y-%m-%d"), "gap_days": g, "note": " · ".join(notes)})
+        log.append({"date": obs[c].strftime("%Y-%m-%d"), "crawl": c.strftime("%Y-%m-%d"), "gap_days": g, "note": " · ".join(notes),
+                    "list": int(total[c]), "detail": FL[("전체", "전체")][c]["on"]})          # 목록 매물 · 상세 확인 판매중(데이터 탭 수집 현황)
     MS = model_stats(L, crawls, obs, ivs, PF)
     return series, log, LC, MS
+
+
+def write_csvs(series, models):
+    """데이터 탭 내려받기(기획안 5.3): 시황판(회차별 지수·흐름)과 차종 비교. 엑셀에서 바로 열리게 CP949 — build_data.py 다운로드와 같은 방식"""
+    rows = []
+    for key, pts in series.items():
+        o, s = key.split("|")
+        for e in pts:
+            rows.append({"구분": o, "차급": s, "목록관측일": e["date"], "시세지수": e.get("시세"), "판매속도지수": e.get("판매속도"),
+                         "재고지수": e.get("재고"), "시황지수": e.get("시황"), "시황": e.get("label"), "신규비교대수": e.get("n_price"),
+                         "판매속도_시작재고": e.get("n_start"), "판매속도_판매": e.get("n_sold"), "목록재고": e.get("n_stock"),
+                         "재고_구성비추정": "예" if e.get("stock_est") else None, "표본적음": "예" if e.get("low_sample") else None,
+                         "판매중재고_상세확인": e.get("on"), "구간일": e.get("days"), "신규유입": e.get("new"), "판매": e.get("sold"),
+                         "신규유입_주": e.get("new_w"), "판매_주": e.get("sold_w"), "신규매물_중앙호가_만원": e.get("new_med"),
+                         "판매_누락의심": "예" if e.get("sold_suspect") else None})
+    pd.DataFrame(rows).to_csv(os.path.join(DL, "market_index.csv"), index=False, encoding="cp949", errors="replace")
+    cols = ["maker", "group", "model", "seg", "origin", "on", "price", "cut", "sold90", "dwell", "rate_w", "weeks", "pidx"]   # 판매속도 구간이 없는 주에도 열은 그대로
+    m = pd.DataFrame(models, columns=cols).rename(columns={"maker": "제조사", "group": "모델", "model": "세부모델", "seg": "차급", "origin": "국산수입",
+                                             "on": "판매중", "price": "중앙호가_만원", "cut": "인하매물비율", "sold90": "최근90일판매",
+                                             "dwell": "중위체류일", "rate_w": "주간판매율", "weeks": "재고소진주수", "pidx": "시세_기준기간100"})
+    m.to_csv(os.path.join(DL, "market_models.csv"), index=False, encoding="cp949", errors="replace")
 
 
 def report(series, log, LC, L, crawls, obs):
@@ -447,6 +471,7 @@ def main():
     with open(OUT_MODELS, "w", encoding="utf-8", newline="\n") as f:
         json.dump(mout, f, ensure_ascii=False, separators=(",", ":"))
         f.write("\n")
+    write_csvs(series, models)
     print(report(series, log, LC, L, crawls, obs))
     print(f"→ {OUT_JSON} ({os.path.getsize(OUT_JSON) / 1024:.0f}KB) · {OUT_MODELS} 모델 {len(models):,}개 "
           f"({os.path.getsize(OUT_MODELS) / 1024:.0f}KB, 판매속도 구간 {minfo['speed_interval'] or '없음'}) · {(datetime.datetime.now() - t0).seconds}초")

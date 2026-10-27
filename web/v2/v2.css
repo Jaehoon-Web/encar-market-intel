@@ -238,3 +238,16 @@ select.filter-select:disabled, .v2-in:disabled { color: var(--tx-4); cursor: def
 .v2-sorth { font: inherit; font-size: 11px; font-weight: 700; color: var(--tx-2); background: none; border: 0; padding: 0; cursor: pointer; white-space: nowrap; }
 .v2-sorth.on { color: var(--accent); }
 .v2-msearch { width: 220px; padding: 6px 10px; }
+
+/* 데이터 탭(5.3) */
+.v2-dl { min-width: 720px; }
+.v2-dl td, .v2-crawl td { vertical-align: top; }
+.v2-tbl td.v2-desc { white-space: normal; min-width: 260px; color: var(--tx-2); }
+.v2-dl a.v2-btn { display: inline-block; text-decoration: none; }
+.v2-new { font-size: 11px; font-weight: 700; color: var(--accent); border: 1px solid var(--accent-line); border-radius: 4px; padding: 0 4px; }
+.v2-crawl { min-width: 760px; }
+.v2-warnc { color: #8A6A1E; font-weight: 700; }
+.v2-terms { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 8px 28px; }
+.v2-terms dl { margin: 0; }
+.v2-terms dt { font-size: 13px; font-weight: 700; color: var(--tx-1); margin-top: 10px; }
+.v2-terms dd { font-size: 13px; color: var(--tx-2); line-height: 1.65; margin: 2px 0 0; }

@@ -16,7 +16,7 @@
   var COEF_LEVEL = { '모델': '이 세부모델 자체 값', '차급': '같은 차급 평균 값(이 모델 표본이 없어서)', '시장': '시장 평균 값' };
   var SHOW = 30;                                            // 비교 매물 표 기본 행 수
   var KM_BANDS = [[0, 3e4, '3만 미만'], [3e4, 6e4, '3~6만'], [6e4, 1e5, '6~10만'], [1e5, 1.5e5, '10~15만'], [1.5e5, Infinity, '15만 이상']];
-  var X = {}, ENG = null, ISC = null, GROUPS = {}, R = null, LAST = null, timer = 0, B = null, RV = null, MK = null;
+  var X = {}, ENG = null, ISC = null, GROUPS = {}, R = null, LAST = null, timer = 0, B = null, RV = null, MK = null, DV = null;
   var VIEW = { sort: 'sim', all: false, mode: 'one' };      // mode: one(한 대 산정) · model(모델 요약) · batch(묶음 산정) · rates(⚙ 환산 비율)
   var MODES = ['model', 'batch', 'rates'];                  // 주소 view= 로 남는 화면
   var S = blank();
@@ -724,14 +724,20 @@
     } else compute();
   }
 
-  // ───── 화면 고르기: #/market = 시장 시황(market.js), 그 밖 = 시세 산정 ─────
-  function isMarket() { return location.hash.indexOf('#/market') === 0; }
+  // ───── 화면 고르기: #/market = 시장 시황(market.js) · #/data = 데이터(data.js) · 그 밖 = 시세 산정 ─────
   function route() {
-    var market = isMarket();
-    $('priceView').hidden = market;
-    $('marketView').hidden = !market;
-    $('navPrice').classList.toggle('on', !market);
-    $('navMarket').classList.toggle('on', market);
+    var h0 = location.hash, page = h0.indexOf('#/market') === 0 ? 'market' : h0.indexOf('#/data') === 0 ? 'data' : 'price', market = page === 'market';
+    $('priceView').hidden = page !== 'price';
+    $('marketView').hidden = page !== 'market';
+    $('dataView').hidden = page !== 'data';
+    $('navPrice').classList.toggle('on', page === 'price');
+    $('navMarket').classList.toggle('on', page === 'market');
+    $('navData').classList.toggle('on', page === 'data');
+    if (page === 'data') {
+      if (!DV) DV = V2Data.create({ X: X, esc: esc });
+      DV.show($('dataView'));
+      return Promise.resolve();
+    }
     if (market) {
       if (!MK) {
         MK = V2Market.create({ X: X, esc: esc, man: man, getJSON: getJSON, fileSafe: fileSafe, today: today,
@@ -762,7 +768,8 @@
       '<div class="v2-grid" id="grid"><aside class="card v2-input" id="inp" aria-label="대상 차 조건"></aside><section class="v2-result" id="res" aria-live="polite"></section></div>' +
       '<section class="v2-batch" id="batch" aria-label="묶음 산정" hidden></section>' +
       '<section class="v2-batch v2-rates" id="ratesView" aria-label="환산 비율 설정" hidden></section></div>' +
-      '<section class="v2-batch v2-mk" id="marketView" aria-label="시장 시황" hidden></section>';
+      '<section class="v2-batch v2-mk" id="marketView" aria-label="시장 시황" hidden></section>' +
+      '<section class="v2-batch" id="dataView" aria-label="데이터" hidden></section>';
     var inp = $('inp'), res = $('res'), tip = $('tip');
     inp.addEventListener('change', function (e) {
       var t = e.target, k = t.getAttribute('data-k');

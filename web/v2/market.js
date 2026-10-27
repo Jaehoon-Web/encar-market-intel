@@ -17,7 +17,10 @@
     ['sold90', '90일 판매', 'n'], ['dwell', '중위 체류', 'n'], ['rate_w', '주간 판매율', 'n'], ['weeks', '소진 주수', 'n'], ['pidx', '시세(7월=100)', 'n']];
 
   function create(ctx) {
-    var MI = ctx.X.mi, esc = ctx.esc, man = ctx.man, el = null, MM = null, mmWait = null;
+    var MI = ctx.X.mi, esc = ctx.esc, man = ctx.man, el = null, MM = null, mmWait = null, HAVE = {};
+    ctx.X.idx.makers.forEach(function (mk) {                 // 시세 산정에 비교 매물이 있는 세부모델(모델 요약으로 갈 수 있는 것)
+      mk.groups.forEach(function (g) { g.models.forEach(function (m) { HAVE[mk.name + '|' + g.name + '|' + m.name] = true; }); });
+    });
     var V = { o: '전체', s: '전체', range: 'all', sort: 'on', dir: -1, q: '', shown: PAGE, table: false };
 
     function $(id) { return document.getElementById(id); }
@@ -353,8 +356,9 @@
             (on ? (V.dir > 0 ? ' ↑' : ' ↓') : '') + '</button></th>';
         }).join('') + '</tr></thead><tbody>';
       list.slice(0, V.shown).forEach(function (m) {
-        var href = ctx.href({ mk: m.maker, grp: m.group, model: m.model }, 'model');
-        h += '<tr><td><a class="v2-link" href="' + esc(href) + '">' + esc(m.maker + ' ' + m.model) + '</a></td><td>' + esc(m.seg + '·' + m.origin) + '</td>' +
+        var href = ctx.href({ mk: m.maker, grp: m.group, model: m.model }, 'model'), name = esc(m.maker + ' ' + m.model);
+        h += '<tr><td>' + (HAVE[m.maker + '|' + m.group + '|' + m.model] ? '<a class="v2-link" href="' + esc(href) + '">' + name + '</a>'
+          : '<span title="성능점검 있는 비교 매물이 적어 시세 산정 대상이 아님">' + name + '</span>') + '</td><td>' + esc(m.seg + '·' + m.origin) + '</td>' +
           '<td class="num">' + m.on.toLocaleString() + '</td><td class="num">' + (m.price != null ? man(m.price) : '–') + '</td>' +
           '<td class="num">' + (m.cut * 100).toFixed(0) + '%</td><td class="num">' + m.sold90.toLocaleString() + '</td>' +
           '<td class="num">' + (m.dwell != null ? m.dwell + '일' : '–') + '</td><td class="num">' + (m.rate_w != null ? (m.rate_w * 100).toFixed(1) + '%' : '–') + '</td>' +

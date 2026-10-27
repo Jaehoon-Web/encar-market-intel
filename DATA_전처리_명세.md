@@ -291,6 +291,7 @@ crawler(1→2→3) → process → clean → append_history → [prep.py] → [�
 - 그다음 `market_index.py`(2.8단계)가 시황판 지수(기획안 D4, 5.2.1)를 처음부터 다시 계산한다. 실패해도 배포는 계속된다. 결과는 세 가지다.
   - `web/data/market_index.json`: 세그먼트별 시세·판매속도·재고·시황, 크롤 로그, 회차별 흐름(판매중 재고·신규 유입·판매·신규 매물 중앙 호가, 5.2.2).
   - `web/data/market_models.json`: 세부모델별 시장 숫자(차종 비교, 5.2.4).
+  - `web/downloads/market_index.csv` · `market_models.csv`: 위 두 가지를 엑셀용 CP949로(새 사이트 데이터 탭 내려받기).
   - `encar_output/prep/market_index_report.txt`.
   - 이번 목록(`ids_all.json`)의 국산·수입 × 차급 대수를 `encar_output/prep/list_counts.csv`에 회차별로 쌓는다. 재고지수의 세그먼트 구성비가 여기서 나온다. **이 파일은 다시 만들 수 없으니 지우지 않는다.**
   - 시세는 D3 계수를 쓰므로 계수가 바뀌면 과거 값도 조금 움직인다(매주 전체 재계산).
