@@ -509,14 +509,15 @@
       });
       var money = ['산정_주행(km)', '추정 시세(만원)', '범위 하한(만원)', '범위 상한(만원)', '환산가(만원)'].map(function (k) { return nc + calc.indexOf(k); });
       var cmp = [['행', '차량', '유사도', '매물ID', '상태', '판매 확인일', '최초등록', '주행(km)', '색상', '등급', '세부등급', '성능등급', '사고 라벨',
-        '호가(만원)', '보정 후(만원)', '이상치', '엔카 링크']];
+        '손상 부위', '호가(만원)', '보정 후(만원)', '이상치', '엔카 링크']];
       rows.forEach(function (r) {
         if (!r.R) return;
         var G = GROUPS[r.best.file], F = G.F, fi = G.fi, who = (r.plate ? r.plate + ' ' : '') + r.best.model + ' ' + r.grade;
         r.R.comps.forEach(function (x) {
           var row = x.row, reg = String(row[fi.reg]), sold = row[fi.sold] === 1;
           cmp.push([r.no, who, x.sim, row[fi.id], sold ? '판매' : '판매중', sold ? row[fi.sd] : null, reg.slice(0, 4) + '-' + reg.slice(4, 6), row[fi.km],
-            F.colors[row[fi.col]], F.grades[row[fi.g]], F.trims[row[fi.t]] || null, row[fi.perf], F.labels[row[fi.acc]], row[fi.price], Math.round(x.adj),
+            F.colors[row[fi.col]], F.grades[row[fi.g]], F.trims[row[fi.t]] || null, row[fi.perf], F.labels[row[fi.acc]],
+            ENG.damage(G, row).join(' · ') || null, row[fi.price], Math.round(x.adj),
             x.outlier ? '예' : null, 'https://fem.encar.com/cars/detail/' + row[fi.id]]);
         });
       });
@@ -535,7 +536,7 @@
       var widths = head.map(function () { return 14; }).concat([10, 12, 20, 18, 14, 10, 12, 11, 30, 12, 8, 10, 10, 10, 10, 12, 12, 12, 10, 12, 16, 7, 9, 22, 24, 40]);
       XlsxWriter.download(ctx.fileSafe('묶음산정_' + ctx.today()) + '.xlsx', [
         { name: '결과', rows: out, header: true, freeze: true, money: money, widths: widths },
-        { name: '비교 매물', rows: cmp, header: true, freeze: true, money: [7, 13, 14], widths: [6, 30, 7, 11, 7, 11, 9, 10, 9, 18, 14, 8, 12, 10, 11, 7, 42] },
+        { name: '비교 매물', rows: cmp, header: true, freeze: true, money: [7, 14, 15], widths: [6, 30, 7, 11, 7, 11, 9, 10, 9, 18, 14, 8, 12, 34, 10, 11, 7, 42] },
         { name: '산정 기준', rows: info, header: true, widths: [22, 90] }]);
     }
 

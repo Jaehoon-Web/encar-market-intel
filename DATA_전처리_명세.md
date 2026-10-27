@@ -298,6 +298,7 @@ crawler(1→2→3) → process → clean → append_history → [prep.py] → [�
 - 마지막으로 `price_engine.py --export`(2.9단계)가 사이트 시세 엔진용 비교 매물 파일을 `web/data/comps/`에 다시 만든다(기획안 WP1, 5.1.2). 모델그룹별 파일과 `index.json`이 나오고, `web/data`와 함께 매주 커밋된다. 실패해도 배포는 계속된다.
   - 입력: `listings.parquet`의 비교사용·성능점검 매물(판매중 + 최근 3개월 판매), `adj_coef.json`, `market_index.json`(판매 매물 시점 보정).
   - 차대번호·번호판·표준 모델명은 넣지 않는다.
+  - 손상 부위(`손상부위`)는 파일 머리말 `damage` 목록의 번호 배열(`dm`)로 넣는다. 손상 없는 행은 칸을 두지 않는다. 화면의 비교 매물 표와 엑셀에서만 쓰고, 계산에는 쓰지 않는다.
   - 행에는 바뀌지 않는 값만 두고, 매주 바뀌는 값(현재 월, 시점 보정 배수)은 파일 머리말에 둔다. 그래서 바뀐 매물만 커밋에 쌓인다.
   - 엔진 규칙을 바꾸면 `python price_engine.py --parity`(Node 필요)로 사이트 JS 엔진과 일치하는지 다시 확인한다.
   - 세부모델마다 등록 연도 범위(`y0`·`y1` = 2%·98% 분위)를 넣는다. `index.json`에는 등급명의 영문·숫자 코드(`gk`, 예: 520D·E300)도 넣는다. 묶음 산정의 차명 매칭(`web/lib/name_match.js`, 기획안 D5)이 쓴다. 매칭 정확도는 `python tools/name_match_check.py`로 잰다.

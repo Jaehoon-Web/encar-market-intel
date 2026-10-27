@@ -238,7 +238,19 @@
       return r;
     }
 
-    return { group: group, prepare: prepare, estimate: estimate, estimateCar: estimateCar, conversionRate: conversionRate };
+    // 손상 부위(비교 매물 표·엑셀용, 계산에는 안 씀): 행의 dm = 파일 머리말 damage 번호 → ['후드(교환)', '리어 도어(판금) ×2']
+    function damage(grp, row) {
+      var ids = grp.fi.dm != null ? row[grp.fi.dm] : null, names = grp.F.damage || [], cnt = {}, order = [];
+      (ids || []).forEach(function (i) {
+        var t = names[i];
+        if (t == null) return;
+        if (!cnt[t]) { cnt[t] = 0; order.push(t); }
+        cnt[t]++;
+      });
+      return order.map(function (t) { return cnt[t] > 1 ? t + ' ×' + cnt[t] : t; });
+    }
+
+    return { group: group, prepare: prepare, estimate: estimate, estimateCar: estimateCar, conversionRate: conversionRate, damage: damage };
   }
 
   var api = { create: create };

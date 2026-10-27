@@ -423,11 +423,30 @@
       '<td class="num">' + (x ? x.sim : '–') + '</td><td>' + ym(row[fi.reg]) + '</td>' +
       '<td class="num">' + (row[fi.km] / 1e4).toFixed(1) + '만</td><td>' + esc(F.colors[row[fi.col]]) + '</td>' +
       '<td>' + esc(F.grades[row[fi.g]] + (trim ? ' ' + trim : '')) + '</td>' +
-      '<td>' + row[fi.perf] + '등급' + (gv != null ? ' (' + gv + '점·감점 ' + row[fi.gp] + ')' : '') + ' · ' + esc(F.labels[row[fi.acc]]) + '</td>' +
+      '<td>' + row[fi.perf] + '등급' + (gv != null ? ' (' + gv + '점·감점 ' + row[fi.gp] + ')' : '') + ' · ' + esc(F.labels[row[fi.acc]]) + dmButton(G, row) + '</td>' +
       '<td class="num price">' + man(price) + '</td><td class="num">' + (x ? '<b>' + man(x.adj) + '</b>' : '–') + '</td>' +
       '<td>' + state + '</td><td class="num">' + (x && x.dwell != null ? x.dwell + '일' : '–') + '</td>' +
       '<td class="num">' + (p0 != null && p0 > price ? '−' + man(p0 - price) : '–') + '</td>' +
       '<td><a href="https://fem.encar.com/cars/detail/' + id + '" target="_blank" rel="noopener">보기 ↗</a></td></tr>';
+  }
+
+  function dmButton(G, row) {                                // 손상 부위 펼치기(기획안 5.1.3 ①) — 누르면 아래에 한 줄
+    var dm = ENG.damage(G, row), n = G.fi.dm != null && row[G.fi.dm] ? row[G.fi.dm].length : 0;
+    return dm.length ? ' <button type="button" class="v2-dmb" data-dmt="' + esc(dm.join(' · ')) + '" aria-expanded="false">▸ 손상 ' + n + '곳</button>' : '';
+  }
+  function toggleDamage(b) {
+    var tr = b.closest('tr'), next = tr.nextElementSibling, open = next && next.classList.contains('v2-dmrow');
+    if (open) next.remove();
+    else {
+      var row = document.createElement('tr'), td = document.createElement('td');
+      row.className = 'v2-dmrow';
+      td.colSpan = tr.children.length;
+      td.textContent = '손상 부위: ' + b.getAttribute('data-dmt');
+      row.appendChild(td);
+      tr.parentNode.insertBefore(row, tr.nextSibling);
+    }
+    b.setAttribute('aria-expanded', open ? 'false' : 'true');
+    b.textContent = (open ? '▸' : '▾') + b.textContent.slice(1);
   }
 
   function basisCard(G, car, c) {
@@ -664,12 +683,13 @@
       ['비교 매물 파일', F.version], ['보정 계수', X.coef.version], ['환산 비율', RatesStore.label(X.rates)],
       ['비교 범위', S.sold ? '판매중 + 최근 3개월 판매' : '판매중만'], ['산정 화면 주소', location.href],
       ['참고', '추정 시세는 엔카 호가 기준. 환산가는 팀 환산 비율(도·소매 갭 요약치)을 적용한 값']);
-    var cr = [['유사도', '매물ID', '상태', '판매 확인일', '최초등록', '주행(km)', '색상', '등급', '세부등급', '연료', '성능등급', '사고 라벨',
+    var cr = [['유사도', '매물ID', '상태', '판매 확인일', '최초등록', '주행(km)', '색상', '등급', '세부등급', '연료', '성능등급', '사고 라벨', '손상 부위',
       '글로비스 종합', '글로비스 감점', '호가(만원)', '보정 후(만원)', '첫 호가(만원)', '인하(만원)', '체류일', '이상치', '직접 제외', '엔카 링크']];
     function line(row, x) {
       var p0 = row[fi.p0], price = row[fi.price], sold = row[fi.sold] === 1, reg = String(row[fi.reg]);
       return [x ? x.sim : null, row[fi.id], sold ? '판매' : '판매중', sold ? row[fi.sd] : null, reg.slice(0, 4) + '-' + reg.slice(4, 6), row[fi.km],
         F.colors[row[fi.col]], F.grades[row[fi.g]], F.trims[row[fi.t]] || null, F.fuels ? F.fuels[row[fi.fu]] : null, row[fi.perf], F.labels[row[fi.acc]],
+        ENG.damage(G, row).join(' · ') || null,
         row[fi.gv], row[fi.gp], price, x ? Math.round(x.adj) : null, p0, p0 != null && p0 > price ? p0 - price : null,
         x && x.dwell != null ? x.dwell : null, x && x.outlier ? '예' : null, x ? null : '예', 'https://fem.encar.com/cars/detail/' + row[fi.id]];
     }
@@ -677,8 +697,8 @@
     modelRows(G, S.model).filter(function (r) { return S.ex.indexOf(String(r[fi.id])) >= 0; }).forEach(function (r) { cr.push(line(r, null)); });
     XlsxWriter.download(fileSafe('시세산정_' + S.model + '_' + S.grade + '_' + today()) + '.xlsx', [
       { name: '산정 결과', rows: rows, header: true, widths: [32, 64] },
-      { name: '비교 매물', rows: cr, header: true, freeze: true, money: [5, 14, 15, 16, 17],
-        widths: [7, 11, 7, 11, 9, 10, 9, 18, 14, 8, 8, 12, 10, 10, 10, 11, 11, 9, 7, 7, 8, 42] }]);
+      { name: '비교 매물', rows: cr, header: true, freeze: true, money: [5, 15, 16, 17, 18],
+        widths: [7, 11, 7, 11, 9, 10, 9, 18, 14, 8, 8, 12, 34, 10, 10, 10, 11, 11, 9, 7, 7, 8, 42] }]);
   }
 
   function exportModel() {
@@ -824,6 +844,7 @@
       if (k === 'sort') { VIEW.sort = v; compute(); return; }
       if (k === 'mode') { VIEW.mode = v; toHash(); applyMode(); return; }
       if (act === 'xlsx') { exportOne(); return; }
+      if (b.hasAttribute('data-dmt')) { toggleDamage(b); return; }
       if (act === 'toBatch') { addToBatch(b); return; }
       if (act === 'openBatch') { VIEW.mode = 'batch'; toHash(); applyMode(); window.scrollTo(0, 0); return; }
       if (act === 'xlsxModel') { exportModel(); return; }
