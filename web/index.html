@@ -7,7 +7,12 @@
 <meta name="description" content="엔카 매물로 대상 차의 시세를 근거와 함께 추정하고 팀 환산가를 낸다. 묶음 산정, 시장 시황 지수, 차종 비교, 데이터 내려받기" />
 <script>
   // 이전 사이트 즐겨찾기(#/overview 등)는 이전 사이트로 — 2026-10-27 교체(이전 사이트는 old.html)
-  if (/^#\/(overview|inventory|lookup|model|trend|insights|download)\b/.test(location.hash)) location.replace('old.html' + location.hash);
+  // 새 사이트를 연 채로 즐겨찾기를 누르면 페이지가 다시 읽히지 않으므로 해시가 바뀔 때도 본다
+  (function () {
+    function toOld() { if (/^#\/(overview|inventory|lookup|model|trend|insights|download)\b/.test(location.hash)) location.replace('old.html' + location.hash); }
+    toOld();
+    addEventListener('hashchange', toOld);
+  })();
 </script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css" />
 <script src="https://cdn.tailwindcss.com"></script>
