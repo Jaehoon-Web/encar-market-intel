@@ -394,6 +394,14 @@ def export(pool):
                        om=np.where(pool["sold"], seen.str[:4].astype(int) * 100 + seen.str[5:7].astype(int), 0),
                        tk=np.where(pool["sold"], pool["origin"] + "|" + seen, ""),
                        ds=start.dt.strftime("%Y%m%d").where(start.notna(), ""))
+    allon = pd.read_parquet(os.path.join(PREP, "listings.parquet"), columns=["상태", "제조사", "모델", "중복"])
+    allon = allon[(allon["상태"] == "판매중") & ~allon["중복"].eq(True)].groupby(["제조사", "모델"]).size()   # 성능점검 없는 매물까지
+    segs = {}                                                                        # 모델 요약의 차급 평균(비교 매물 기준)
+    for s, g in pool.groupby("seg"):
+        on, so = g[~g["sold"]], g[g["sold"]]
+        dw = so["체류일"].median()
+        segs[s] = {"onsale": int(len(on)), "sold": int(len(so)), "cut": round(float((on["첫가격"] > on["price"]).mean()), 4) if len(on) else None,
+                   "dwell": None if dw != dw else int(round(dw))}
     labels = sorted(pool["사고라벨"].fillna("미상").unique())
     fuels = sorted(pool["연료"].fillna("기타").unique())
     colors = ["흰색·진주"] + COLORS
@@ -412,8 +420,8 @@ def export(pool):
                  int(r.ds) if r.ds else None, _num(r.첫가격), str(r.판매추정일) if r.sold else None,
                  fi_[r.연료 if isinstance(r.연료, str) else "기타"]] for r in g.itertuples()]
         tf = {k: float(v) for k, v in g[g["sold"]].groupby("tk")["tf"].first().items()}   # 같은 키는 같은 배수
-        minfo = [{"name": m, "seg": s["seg"].mode().iat[0], "n": len(s), "onsale": int((~s["sold"]).sum())}
-                 for m, s in ((m, g[g["모델"] == m]) for m in models)]
+        minfo = [{"name": m, "seg": s["seg"].mode().iat[0], "n": len(s), "onsale": int((~s["sold"]).sum()),
+                  "onsale_all": int(allon.get((mk, m), 0))} for m, s in ((m, g[g["모델"] == m]) for m in models)]
         head = json.dumps({"version": version, "maker": mk, "group": gname, "now_ym": now_ym, "now_date": now_date, "tf": tf,
                            "fields": ROW_FIELDS, "models": minfo, "grades": list(gi), "trims": list(ti), "colors": colors,
                            "labels": labels, "fuels": fuels}, ensure_ascii=False, separators=(",", ":"))
@@ -427,7 +435,8 @@ def export(pool):
              "models": [{k: v for k, v in m.items() if k != "seg"} for m in minfo]})
         for m in models:
             file_of[(mk, m)] = fname
-    index = {"version": version, "engine": ENGINE, "makers": sorted(makers.values(), key=lambda x: -sum(g["n"] for g in x["groups"]))}
+    index = {"version": version, "engine": ENGINE, "segments": segs,
+             "makers": sorted(makers.values(), key=lambda x: -sum(g["n"] for g in x["groups"]))}
     with open(os.path.join(SITE, "index.json"), "w", encoding="utf-8", newline="\n") as f:
         json.dump(index, f, ensure_ascii=False, separators=(",", ":"))
         f.write("\n")
