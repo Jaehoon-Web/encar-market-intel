@@ -68,7 +68,18 @@ python tools/qa_all.py
 - 하나라도 실패하면 종료 코드 1이다.
 - 화면은 `site-worker` 미리보기(`node tools/dev_server.mjs`, http://127.0.0.1:8792/v2/)로 본다.
 
-## 환산 비율 저장소 연결 (기획안 D6 · 5.1.6) — 처음 1회
+## 환산 비율 저장소 연결 (기획안 D6 · 5.1.6) — ✅ 2026-10-27 연결함
+
+- **연결한 것**
+  - KV 저장소 `encar-rates`(ID `560f410dafd740fba1e8a624fe428f3e`)를 `wrangler.toml`에 넣었다. `main = "worker/index.js"`, `run_worker_first = ["/api/*"]`.
+  - 수정 비밀번호는 Worker 비밀값 `RATES_PASSWORD`로 사용자가 직접 넣었다.
+- **이 PC의 wrangler 로그인**: `npx.cmd wrangler@4 login`으로 했다(OAuth, 이 PC에 토큰 저장).
+  - PowerShell 실행 정책 때문에 `npx` 대신 `npx.cmd`로 부른다.
+  - 그만 쓰려면 `npx.cmd wrangler@4 logout`.
+- **비밀번호를 바꾸려면**: `npx.cmd wrangler@4 secret put RATES_PASSWORD`로 새 값을 직접 입력한다.
+- 아래는 처음 연결할 때의 절차다(다시 만들 때 참고).
+
+### 처음 1회 절차(참고)
 
 새 사이트의 ⚙ 환산 비율 화면은 팀이 고친 비율을 Cloudflare **Workers KV**에 저장한다.
 - 코드: Worker `worker/index.js`(`/api/rates`), 사이트 `web/lib/rates_store.js` · `web/v2/rates.js`.

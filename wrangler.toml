@@ -1,7 +1,15 @@
 name = "encar-market-intel"
+main = "worker/index.js"
 compatibility_date = "2025-01-01"
 
-# 정적 자산 전용 배포 (Worker 스크립트 없음) — web/ 폴더를 그대로 서빙
+# web/ 폴더를 정적 자산으로 서빙하고, /api/* 만 Worker(worker/index.js)가 먼저 받는다 — 환산 비율 팀 공용 저장소(기획안 D6)
 [assets]
 directory = "./web"
+binding = "ASSETS"
 not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+# 환산 비율 팀 수정 저장소(KV "encar-rates"). 수정 비밀번호는 비밀값 RATES_PASSWORD(wrangler secret put — 저장소에 넣지 않음)
+[[kv_namespaces]]
+binding = "RATES"
+id = "560f410dafd740fba1e8a624fe428f3e"
