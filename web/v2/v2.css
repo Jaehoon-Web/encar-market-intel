@@ -8,6 +8,8 @@
 .v2-market > div { max-width: 1600px; margin: 0 auto; padding: 8px 16px; display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; }
 @media (min-width: 768px) { .v2-market > div { padding: 8px 24px; } }
 .v2-market b { color: var(--tx-1); font-variant-numeric: tabular-nums; }
+.v2-mlink { color: var(--info); font-weight: 600; text-decoration: none; margin-left: auto; }
+.v2-mlink:hover { text-decoration: underline; }
 
 /* 레이아웃 */
 .v2-mode { margin-bottom: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }

@@ -611,6 +611,28 @@
       }
     }
 
+    // 한 대 산정 [묶음에 추가](기획안 6장): 지금 붙여넣은 표의 열 구성에 맞춰 한 줄을 덧붙인다. 비어 있으면 기본 머리글로 시작
+    var STD = ['차명', '최초등록', '주행거리', '색상', '성능 상태', '수리비', '렌트'];
+    function addCar(c) {                                     // c = { name, reg(YYYY-MM), year, km, color, cond, cost, rent } → 묶음 대수
+      var text = el ? $('bPaste').value : ((load('draft') || {}).text || '');
+      var table = parseTSV(text);
+      if (!table.length) { text = STD.join('\t'); table = [STD.slice()]; }
+      var det = detect(table), d = load('draft');
+      var roles = d && d.text === text && d.roles && d.roles.length === det.roles.length ? d.roles : det.roles;
+      var header = d && d.text === text && d.roles ? d.header : det.header;
+      var val = { name: c.name, reg: c.reg, year: c.year, km: c.km, color: c.color, cond: c.cond, cost: c.cost, rent: c.rent ? '렌트' : '' };
+      var used = {}, cells = roles.map(function (r) {
+        if (!r || used[r]) return '';                         // 같은 쓰임의 둘째 열(예: 제조사·등급으로 나뉜 차명)은 비운다
+        used[r] = true;
+        return val[r] == null ? '' : val[r];
+      });
+      if (!used.name && roles.indexOf('grade') >= 0) cells[roles.indexOf('grade')] = c.name;
+      text = text.replace(/\s+$/, '') + '\n' + cells.map(function (v) { return String(v).replace(/[\t\r\n]+/g, ' '); }).join('\t');
+      if (el) { $('bPaste').value = text; run(); }
+      else save('draft', { text: text, roles: roles, header: header });
+      return parseTSV(text).length - (header ? 1 : 0);
+    }
+
     function show(container) {
       if (el !== container) {
         el = container;
@@ -619,7 +641,7 @@
         if (d && d.text) { $('bPaste').value = d.text; run(); }
       }
     }
-    return { show: show, parseTSV: parseTSV, detect: detect };
+    return { show: show, addCar: addCar, parseTSV: parseTSV, detect: detect };
   }
 
   var api = { create: create, parseTSV: parseTSV, kmOf: kmOf, costOf: costOf, regOf: regOf, yearOf: yearOf, colorOf: colorOf, rentOf: rentOf };

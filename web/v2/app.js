@@ -372,7 +372,8 @@
       '<br><span class="sub">' + S.y + '-' + pad(S.m) + ' 등록 · ' + car['주행km'].toLocaleString('ko-KR') + 'km · ' + esc(S.color || '색상 상관없음') +
       (S.rent ? ' · 렌트' : '') + ' · ' + (c['상태'] === '미상' ? '상태 미상' : esc(c['사고라벨']) + ' · 성능 ' + c['성능등급'] + '등급 · 글로비스 ' +
         c['글로비스_종합평가점'] + '점·' + esc(c['글로비스_사고평가점'])) + '</span></div>' +
-      '<button type="button" class="v2-btn" data-act="xlsx">엑셀 내려받기</button></div>';
+      '<div class="v2-actions" style="margin:0"><button type="button" class="v2-btn" data-act="toBatch" title="이 차를 묶음 산정 목록에 한 줄로 더합니다. 단순수리·기계 결함·직접 뺀 매물·직접 넣은 환산 비율은 넘어가지 않습니다">묶음에 추가</button>' +
+      '<button type="button" class="v2-btn" data-act="xlsx">엑셀 내려받기</button></div></div>';
 
     h += '<div class="v2-cards">';
     h += '<div class="card"><div class="eyebrow">추정 시세 · 엔카 호가 기준</div><div class="v2-big" style="margin-top:12px">' + man(r.price) + '<small>만원</small></div>' +
@@ -521,21 +522,36 @@
     var W = 300, H = 110, L = 30, RR = 46, T = 14, B = 22;
     var vs = pts.map(function (p) { return p['시세']; }).concat([100]);
     var lo = Math.min.apply(null, vs) - 1, hi = Math.max.apply(null, vs) + 1;
-    function px(i) { return L + i / (pts.length - 1) * (W - L - RR); }
+    var dn = function (d) { return Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)) / 864e5; }, d0 = dn(pts[0].date), d1 = dn(pts[pts.length - 1].date);
+    function px(d) { return L + (dn(d) - d0) / ((d1 - d0) || 1) * (W - L - RR); }     // 실제 날짜 간격(시장 시황 차트와 같게)
     function py(v) { return T + (hi - v) / (hi - lo) * (H - T - B); }
     var s = '<svg class="v2-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(name) + ' 시세지수 추이">' +
       '<line x1="' + L + '" x2="' + (W - RR) + '" y1="' + py(100) + '" y2="' + py(100) + '" stroke="var(--line-hard)" stroke-width="1"/>' +
-      '<text x="' + (L - 4) + '" y="' + (py(100) + 4) + '" text-anchor="end">100</text>';
-    s += '<polyline fill="none" stroke="var(--accent)" stroke-width="2" points="' + pts.map(function (p, i) { return px(i).toFixed(1) + ',' + py(p['시세']).toFixed(1); }).join(' ') + '"/>';
-    pts.forEach(function (p, i) {
-      s += '<circle cx="' + px(i).toFixed(1) + '" cy="' + py(p['시세']).toFixed(1) + '" r="4" fill="var(--accent)" stroke="var(--bg-1)" stroke-width="2" data-tip="' +
+      '<text x="' + (L - 4) + '" y="' + (py(100) + 4) + '" text-anchor="end">100</text>', seg2 = [];
+    pts.forEach(function (p, i) {                             // 16일 넘는 수집 공백은 옅은 선으로만 잇는다
+      if (i && dn(p.date) - dn(pts[i - 1].date) > 16) {
+        if (seg2.length > 1) s += '<polyline fill="none" stroke="var(--accent)" stroke-width="2" points="' + seg2.join(' ') + '"/>';
+        s += '<line x1="' + px(pts[i - 1].date).toFixed(1) + '" y1="' + py(pts[i - 1]['시세']).toFixed(1) + '" x2="' + px(p.date).toFixed(1) + '" y2="' + py(p['시세']).toFixed(1) +
+          '" stroke="var(--tx-4)" stroke-width="1"/>';
+        seg2 = [];
+      }
+      seg2.push(px(p.date).toFixed(1) + ',' + py(p['시세']).toFixed(1));
+    });
+    if (seg2.length > 1) s += '<polyline fill="none" stroke="var(--accent)" stroke-width="2" points="' + seg2.join(' ') + '"/>';
+    pts.forEach(function (p) {
+      s += '<circle cx="' + px(p.date).toFixed(1) + '" cy="' + py(p['시세']).toFixed(1) + '" r="4" fill="var(--accent)" stroke="var(--bg-1)" stroke-width="2" data-tip="' +
         esc(p.date + '\n시세지수 ' + p['시세'] + (p.n_price ? ' · 신규 비교 ' + p.n_price.toLocaleString() + '대' : '')) + '"/>';
     });
     var last = pts[pts.length - 1];
-    s += '<text class="lbl" x="' + (px(pts.length - 1) + 8) + '" y="' + (py(last['시세']) + 4) + '">' + Number(last['시세']).toFixed(1) + '</text>' +
-      '<text x="' + px(0) + '" y="' + (H - 6) + '" text-anchor="start">' + mmdd(pts[0].date) + '</text>' +
-      '<text x="' + px(pts.length - 1) + '" y="' + (H - 6) + '" text-anchor="end">' + mmdd(last.date) + '</text></svg>';
-    return h + s + '<p class="v2-help">세부모델별 추세는 매주 수집이 더 쌓이면 제공합니다.</p></div>';
+    s += '<text class="lbl" x="' + (px(last.date) + 8) + '" y="' + (py(last['시세']) + 4) + '">' + Number(last['시세']).toFixed(1) + '</text>' +
+      '<text x="' + px(pts[0].date) + '" y="' + (H - 6) + '" text-anchor="start">' + mmdd(pts[0].date) + '</text>' +
+      '<text x="' + px(last.date) + '" y="' + (H - 6) + '" text-anchor="end">' + mmdd(last.date) + '</text></svg>';
+    var mm = X.mmBy && X.mmBy[G.F.maker + '|' + S.model], own;                     // 이 세부모델의 신규 매물 시세(차종 비교와 같은 값)
+    if (!X.mmBy) own = '세부모델 시세를 불러오는 중…';
+    else if (mm && mm.pidx != null) own = '이 세부모델(' + S.model + ')만 보면 <b>' + Number(mm.pidx).toFixed(1) + '</b>(' + mmdd(X.mm.date) + ' 신규 매물, 7월 초 = 100). 차급보다 ' +
+      (mm.pidx >= last['시세'] ? '<b>' + (mm.pidx - last['시세']).toFixed(1) + '</b> 높음' : '<b>' + (last['시세'] - mm.pidx).toFixed(1) + '</b> 낮음') + '.';
+    else own = '이 세부모델만의 시세는 7월 초와 지금 신규 매물이 각각 10대 이상일 때 나옵니다.';
+    return h + s + '<p class="v2-kv">' + own + '</p><p class="v2-help">세부모델 추이선은 매주 수집이 더 쌓이면 붙입니다.</p></div>';
   }
 
   // ───── 모델 요약 (5.1.5) ─────
@@ -698,8 +714,22 @@
     if (last['재고'] != null) h += '<span>재고지수 <b>' + f1(last['재고']) + '</b></span>';
     h += last['시황'] != null ? '<span>시황지수 <b>' + f1(last['시황']) + '</b> ' + esc(last.label || '') + '</span>'
       : '<span>시황지수 — <span style="color:var(--tx-3)">판매속도가 생기는 다음 수집부터</span></span>';
-    h += '<span style="color:var(--tx-3)">기준 ' + mmdd(last.date) + ' 목록</span>';
+    h += '<span style="color:var(--tx-3)">기준 ' + mmdd(last.date) + ' 목록</span><a class="v2-mlink" href="#/market">시장 시황 보기 →</a>';
     $('marketLine').innerHTML = '<div>' + h + '</div>';
+  }
+
+  function batch() {                                         // 묶음 산정(batch.js) — 처음 쓸 때 만든다(묶음에 추가도 여기로)
+    if (!B) {
+      B = V2Batch.create({ X: X, ENG: ENG, ISC: ISC, GROUPS: GROUPS, getJSON: getJSON, esc: esc, man: man, pad: pad, today: today,
+        fileSafe: fileSafe, tile: tile, href: function (s) { return query(Object.assign(blank(), s), 'one'); } });
+    }
+    return B;
+  }
+  function addToBatch(btn) {                                 // 한 대 산정 → 묶음 산정 목록(기획안 6장)
+    var n = batch().addCar({ name: S.mk + ' ' + S.model + ' ' + S.grade + (S.trim ? ' ' + S.trim : ''), reg: S.y + '-' + pad(S.m), year: S.y,
+      km: S.km, color: S.color, cost: S.cost, rent: S.rent,
+      cond: S.cond === '미상' ? '' : S.cond === '무사고' || !S.items.length ? '무사고' : ISC.toText(S.items) });
+    btn.outerHTML = '<button type="button" class="v2-btn" data-act="openBatch">묶음 산정 열기 · ' + n + '대</button>';
   }
 
   function markMode(v) {
@@ -712,11 +742,7 @@
     $('ratesView').hidden = m !== 'rates';
     if (m === 'batch') {
       markMode('batch');
-      if (!B) {
-        B = V2Batch.create({ X: X, ENG: ENG, ISC: ISC, GROUPS: GROUPS, getJSON: getJSON, esc: esc, man: man, pad: pad, today: today,
-          fileSafe: fileSafe, tile: tile, href: function (s) { return query(Object.assign(blank(), s), 'one'); } });
-      }
-      B.show($('batch'));
+      batch().show($('batch'));
     } else if (m === 'rates') {
       markMode('rates');
       if (!RV) RV = V2Rates.create({ X: X, ENG: ENG, esc: esc, man: man, store: X.store, changed: function () {} });   // 한 대 산정은 돌아갈 때 다시 계산
@@ -798,6 +824,8 @@
       if (k === 'sort') { VIEW.sort = v; compute(); return; }
       if (k === 'mode') { VIEW.mode = v; toHash(); applyMode(); return; }
       if (act === 'xlsx') { exportOne(); return; }
+      if (act === 'toBatch') { addToBatch(b); return; }
+      if (act === 'openBatch') { VIEW.mode = 'batch'; toHash(); applyMode(); window.scrollTo(0, 0); return; }
       if (act === 'xlsxModel') { exportModel(); return; }
       var cell = b.getAttribute('data-cell'), gname = b.getAttribute('data-grade');
       if (cell) { fillFromCell(+cell.split('|')[0], +cell.split('|')[1]); return; }
@@ -857,6 +885,11 @@
         S = fromHash();
         layout();
         marketLine();
+        getJSON('market_models.json').then(function (j) {    // 세부모델 시세(⑤ 추세 한 줄) — 늦게 와도 되므로 따로
+          X.mm = j; X.mmBy = {};
+          j.models.forEach(function (m) { X.mmBy[m.maker + '|' + m.model] = m; });
+          if (!$('priceView').hidden && (VIEW.mode === 'one' || VIEW.mode === 'model') && S.model) compute();
+        }).catch(function () { X.mmBy = {}; });
         return route();
       })
       .catch(fail);
