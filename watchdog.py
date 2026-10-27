@@ -8,6 +8,9 @@ Windows 작업 스케줄러(EncarWatchdog)가 30분마다 pythonw 로 실행(창
 
 판단 순서
   1) 크롤(auto_update/run.py/crawler) 프로세스가 살아있나? → 있으면 건너뜀
+  1.5) 안 올라간 '데이터 갱신' 커밋이 있으면 git push 재시도(git_push.py)
+     → 회사 와이파이(Genian NAC)에서 실패한 자동 배포를 핫스팟으로 바뀐 뒤 올린다.
+       사람이 만든 커밋이 섞여 있으면 건드리지 않는다
   2) 직전 실행(logs/auto_*.log, lock 때문에 건너뛴 회차 로그는 제외)이 '완료'로 끝났나?
      → 완료면 재개 안 함 (네트워크 실패로 남은 소수 매물은 다음 주간 실행이 수집)
   3) 중단된 채 끝났으면 → stale lock 제거 후 EncarResumeOnce 작업(--resume) 실행
@@ -18,6 +21,7 @@ Windows 작업 스케줄러(EncarWatchdog)가 30분마다 pythonw 로 실행(창
     python watchdog.py --dry-run   # 판단만 출력, 실행 안 함
 """
 import os, sys, json, glob, subprocess, datetime, argparse
+import git_push
 
 try:
     import psutil
@@ -108,6 +112,15 @@ def start_resume():
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
     return "직접 실행(auto_update.py --resume, 작업 %s 실행 실패 rc=%d)" % (RESUME_TASK, rc)
 
+def push_retry(dry, tag):
+    """안 올라간 '데이터 갱신' 커밋을 다시 push. 올릴 것이 없으면 로그도 남기지 않는다."""
+    if dry:
+        subs = git_push.pending(ROOT)
+        if subs:
+            log(tag + "안 올린 커밋 %d개 → push 재시도 예정(모두 데이터 갱신일 때만): %s" % (len(subs), " / ".join(subs[-3:])))
+        return
+    git_push.push(ROOT, log, only_data=True)
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="판단만 출력하고 재개하지 않음")
@@ -117,6 +130,7 @@ def main():
     if crawl_running():
         log(tag + "크롤 실행중 → 건너뜀")
         return
+    push_retry(dry, tag)
     state, name = last_run()
     st = load_state()
     if state is None:

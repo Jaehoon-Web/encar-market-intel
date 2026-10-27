@@ -9,7 +9,8 @@
 1. ids_*.json 캐시 삭제   (신규 매물 반영 강제 — 아래 ★ 참조)
 2. python run.py --fresh  (Stage1 ID → 2 상세 → 3 성능점검 → process → clean)
 3. python build_data.py   (web/data·web/downloads 재생성)
-4. git add/commit/push    (Cloudflare 자동 재배포)
+4. git add/commit/push    (Cloudflare 자동 재배포 — 지난번에 못 올린 커밋도 올림)
+      ↳ push 실패 시: 실행은 '완료'로 끝내고, 감시 작업(EncarWatchdog)이 30분마다 push만 다시 시도
 ```
 
 ### ★ 왜 캐시를 먼저 지우나 (중요)
@@ -22,7 +23,8 @@
 | `auto_update.py` | 오케스트레이터(락·로깅·에러처리·단계 실행) |
 | `weekly_update.bat` | 작업 스케줄러용 런처(Python 경로 고정 호출) |
 | `cleanup_old.py` | 오래된 로그·캐시 정리(크롤 완료 후 1회/수시) |
-| `watchdog.py` | 30분마다(작업 `EncarWatchdog`) 직전 실행이 중단 상태면 `EncarResumeOnce`(--resume)로 자동 재개. 진척 없이 6회 연속이면 보류 → `logs/watchdog.log` 확인 |
+| `watchdog.py` | 30분마다(작업 `EncarWatchdog`) ① 안 올라간 '데이터 갱신' 커밋이 있으면 push 재시도(사람이 만든 커밋이 섞여 있으면 안 올림) ② 직전 실행이 중단 상태면 `EncarResumeOnce`(--resume)로 자동 재개. 진척 없이 6회 연속이면 보류 → `logs/watchdog.log` 확인 |
+| `git_push.py` | 안 올린 커밋 push(주간 작업 끝·감시 작업이 사용). `python git_push.py` = 안 올린 커밋 보기 |
 | `status_server.py` / `status_dashboard.bat` | 진행 상황 대시보드(http://127.0.0.1:8790, 로그 읽기 전용) |
 | `logs/` | 실행 로그(자동 생성, git 제외) |
 
@@ -38,6 +40,8 @@ schtasks /Create /TN "EncarWeeklyUpdate" /TR "\"C:\개발작업\기타작업\enc
 > **PC 전원**: 수요일 9시에 PC가 켜져 있어야 한다(크롤 수 시간 동안 유지). 절전 사용 시 작업 스케줄러 속성 → 조건 → "이 작업을 실행하기 위해 컴퓨터의 절전 모드 해제" 체크. 가급적 상시 전원 권장.
 
 > **Git 인증**: 이미 자격증명이 Windows 자격증명 관리자에 저장돼 무인 push가 된다. 혹시 push가 인증을 요구하기 시작하면, 수동으로 `git push` 한 번 실행해 자격증명을 갱신하면 된다.
+
+> **회사 와이파이에서 push 실패**: PC가 HQ_wifi에 붙어 있으면 보안 장비(Genian NAC)가 HTTPS를 가로채 push가 `SEC_E_UNTRUSTED_ROOT`로 실패한다. 우회하지 않는다. 감시 작업이 30분마다 다시 올리므로, 휴대폰 핫스팟으로 바뀌면 다음 시도에 사이트가 갱신된다(`logs/watchdog.log`의 "git push 완료" 줄). 지금 안 올린 커밋은 `python git_push.py`로 본다.
 
 ## 수동 실행 (테스트/임시 갱신)
 ```bash

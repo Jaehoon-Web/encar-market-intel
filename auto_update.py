@@ -12,13 +12,15 @@ auto_update.py — 엔카 크롤링 → 사이트 빌드 → 자동 배포 무�
        체크포인트는 보존 → Stage 2/3은 신규분만 수집하므로 빠름)
   2) python run.py  (Stage1→2→3→process→clean 자동, encar_cleaned.csv 생성)
   3) python build_data.py  (web/data·web/downloads 재생성)
-  4) git add/commit/push  (Cloudflare 자동 재배포)
+  4) git add/commit/push  (Cloudflare 자동 재배포 — 지난번에 못 올린 커밋도 올린다.
+     push가 실패해도 '완료'로 끝내고, watchdog.py가 30분마다 다시 올린다: git_push.py)
 
 옵션:
   --full   전체 초기화 후 풀 재크롤(체크포인트·상세까지 삭제, 수일 소요·주말 권장).
            누적된 '판매 완료' 매물을 비우고 완전히 새로 수집.
 """
 import sys, os, subprocess, glob, datetime, argparse, time, ctypes, json
+import git_push
 
 # 크롤 중 PC 절전 방지 (런타임 요청 — 시스템 설정 변경 아님, 프로세스 종료 시 자동 해제)
 ES_CONTINUOUS = 0x80000000
@@ -107,6 +109,26 @@ def purge_full():
                 log("  삭제 실패: %s (%s)" % (p, e))
     log("[--full] %d개 파일 삭제(완전 초기화)" % n)
 
+def git_deploy(full):
+    """web/data·web/downloads 커밋 → 안 올린 커밋이 있으면 push(Cloudflare 자동 재배포).
+       커밋할 변경이 없어도 지난번에 못 올린 커밋은 올린다(이어받기 회차가 push를 건너뛰던 문제).
+       push가 실패해도 예외를 내지 않는다 — 수집·빌드는 끝났으니 '완료'로 끝내야 감시 작업이 수집부터
+       다시 돌리지 않고, 대신 30분마다 push만 다시 시도한다(watchdog.py)."""
+    run(["git", "add", "web/data", "web/downloads"], "git add")
+    today = datetime.date.today().isoformat()
+    msg = "%s %s%s" % (git_push.DATA_PREFIX, today, " (전체 재크롤)" if full else " (주간)")
+    # 변경 없으면 commit가 실패(비정상 아님) → 분기 처리
+    with open(_logfile, "a", encoding="utf-8") as f:
+        rc = subprocess.call(["git", "commit", "-m", msg], cwd=ROOT, stdout=f, stderr=subprocess.STDOUT)
+    if rc != 0:
+        log("커밋할 변경 없음(또는 commit 스킵)")
+    log("▶ git push(자동 배포)")
+    res = git_push.push(ROOT, log)
+    if res == "none":
+        log("올릴 커밋 없음 → push 생략")
+    elif res != "pushed":
+        log("push 못 함 — 수집·빌드는 끝났다. 감시 작업(EncarWatchdog)이 30분마다 다시 올린다")
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--full", action="store_true", help="전체 초기화 후 풀 재크롤(수일 소요)")
@@ -170,17 +192,7 @@ def main():
         run([PY, "build_data.py"], "사이트 빌드(build_data.py)")
 
         # 4) Git 배포
-        run(["git", "add", "web/data", "web/downloads"], "git add")
-        today = datetime.date.today().isoformat()
-        msg = "데이터 갱신 %s%s" % (today, " (전체 재크롤)" if args.full else " (주간)")
-        # 변경 없으면 commit가 실패(비정상 아님) → 분기 처리
-        rc = subprocess.call(["git", "commit", "-m", msg], cwd=ROOT,
-                             stdout=open(_logfile, "a", encoding="utf-8"),
-                             stderr=subprocess.STDOUT)
-        if rc != 0:
-            log("커밋할 변경 없음(또는 commit 스킵) → push 생략")
-        else:
-            run(["git", "push"], "git push(자동 배포)")
+        git_deploy(args.full)
 
         log("================ 완료 : %s ================" % mode)
     except Exception as e:
