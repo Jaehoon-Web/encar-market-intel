@@ -160,6 +160,12 @@ def main():
         except Exception as e:
             log("시황 지수 실패(무시하고 계속): %s" % e)
 
+        # 2.9) 사이트용 비교 매물 파일(WP1 시세 엔진 입력 → web/data/comps, 보정 계수·시황 지수 다음) — 실패해도 배포는 계속
+        try:
+            run([PY, "price_engine.py", "--export"], "비교 매물 파일(price_engine.py --export)")
+        except Exception as e:
+            log("비교 매물 파일 실패(무시하고 계속): %s" % e)
+
         # 3) 사이트 데이터 빌드
         run([PY, "build_data.py"], "사이트 빌드(build_data.py)")
 

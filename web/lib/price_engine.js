@@ -17,7 +17,8 @@
  *                          성능: { 감가율: 2.5, 등급: 8 } | null, 수리비: 30, 연료: '가솔린', 연식: 2017 });
  *
  * 결과: est·lo·hi(만원, 범위 25~75%) · n(비교 매물) · out(이상치) · step·stepName · grade(A·B·C) · est0(상태 미상일 때 무사고 기준)
- *       · comps(비교 매물: row·adj(보정가)·sim(유사도 0~100)·outlier) · basis(보정 근거, 만원) · coefLevel(모델·차급·시장)
+ *       · comps(비교 매물: row·adj(보정가)·sim(유사도 0~100)·outlier·sold·age·dwell) · basis(보정 근거, 만원) · coefLevel(모델·차급·시장)
+ * 파일 행은 매물이 바뀌지 않으면 그대로다. 매주 바뀌는 값(now_ym·now_date·시점 보정 배수 tf)은 파일 머리말에 있다.
  */
 (function (root) {
   'use strict';
@@ -36,6 +37,13 @@
     var x = q * c[n - 1];
     for (i = 0; i < n && c[i] < x; i++);
     return v[o[Math.min(i, n - 1)]];
+  }
+
+  // 체류일: 시작일(yyyymmdd 숫자)부터 끝(yyyy-mm-dd)까지 일수
+  function days(from, to) {
+    var a = Date.UTC(Math.floor(from / 10000), Math.floor(from / 100) % 100 - 1, from % 100);
+    var b = Date.UTC(+to.slice(0, 4), +to.slice(5, 7) - 1, +to.slice(8, 10));
+    return Math.round((b - a) / 86400000);
   }
 
   // numpy np.median 과 같음(짝수 개면 가운데 두 값의 평균)
@@ -82,11 +90,12 @@
         sold: new Uint8Array(n), tf: new Float64Array(n), fe: new Float64Array(n) };
       for (var i = 0; i < n; i++) {
         var r = rows[i], col = F.colors[r[fi.col]], g = F.grades[r[fi.g]], t = F.trims[r[fi.t]];
-        var km = Math.min(r[fi.km], KM_CAP) / 1e4;
-        G.ids[i] = r[fi.id]; G.age[i] = r[fi.age]; G.km[i] = km;
-        G.x[i] = [r[fi.age], km, r[fi.rent]].concat(COLORS.map(function (c) { return col === c ? 1 : 0; }));
+        var km = Math.min(r[fi.km], KM_CAP) / 1e4, om = r[fi.om] == null ? F.now_ym : r[fi.om], reg = r[fi.reg];
+        var age = Math.floor(om / 100) * 12 + om % 100 - (Math.floor(reg / 100) * 12 + reg % 100);   // 그 가격을 본 때의 차령
+        G.ids[i] = r[fi.id]; G.age[i] = age; G.km[i] = km;
+        G.x[i] = [age, km, r[fi.rent]].concat(COLORS.map(function (c) { return col === c ? 1 : 0; }));
         G.grades[i] = g; G.trims[i] = t; G.perf[i] = r[fi.perf]; G.dep[i] = r[fi.dep] / 100;
-        G.price[i] = r[fi.price]; G.sold[i] = r[fi.sold]; G.tf[i] = r[fi.tf];
+        G.price[i] = r[fi.price]; G.sold[i] = r[fi.sold]; G.tf[i] = r[fi.tk] == null ? 1 : F.tf[r[fi.tk]];
         G.fe[i] = feOf(cf, g, t);
       }
       grp.cache[name] = G;
@@ -182,8 +191,11 @@
       }
       r.basis = {};
       names.forEach(function (nm, q) { r.basis[nm] = Math.round(est * (Math.exp(sums[q] / ws) - 1)); });
+      var fi = grp.fi, F = grp.F;
       r.comps = sel.map(function (i2, q) {
-        return { row: G.rows[i2], adj: adj[q], sim: rint(w[q] / wmax * 100), outlier: !keep[q], sold: !!G.sold[i2] };
+        var row = G.rows[i2];
+        return { row: row, adj: adj[q], sim: rint(w[q] / wmax * 100), outlier: !keep[q], sold: !!G.sold[i2], age: G.age[i2],
+          dwell: row[fi.ds] == null ? null : days(row[fi.ds], G.sold[i2] ? row[fi.sd] : F.now_date) };
       }).sort(function (a, c) { return c.sim - a.sim; });
       return r;
     }

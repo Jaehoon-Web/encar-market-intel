@@ -5,7 +5,7 @@ price_engine.py — 시세 산정 엔진 (기획안 WP1, 5.1.2): "가장 비슷�
     python price_engine.py --validate     # 판매중 매물 하나씩을 나머지 매물로 추정해 정확도를 잰다
                                           # → encar_output/prep/price_engine_report.txt
     python price_engine.py --demo         # 판매중 매물 몇 대로 한 대 산정 결과(비교 매물·보정 근거·환산가)를 보여 준다
-    python price_engine.py --export       # 사이트용 모델그룹별 비교 매물 파일 + index.json → encar_output/site/comps
+    python price_engine.py --export       # 사이트용 모델그룹별 비교 매물 파일 + index.json → web/data/comps (매주 auto_update 2.9단계)
     python price_engine.py --parity       # --export 후, 사이트 엔진(web/lib/price_engine.js)이 같은 값을 내는지 판매중 전체로 검증
 
 산정 순서 (대상 차 1대)
@@ -31,7 +31,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 PREP = os.path.join(ROOT, "encar_output", "prep")
 DATA = os.path.join(ROOT, "web", "data")
 REPORT = os.path.join(PREP, "price_engine_report.txt")
-SITE = os.path.join(ROOT, "encar_output", "site", "comps")      # 사이트용 비교 매물 파일(공개 방식을 정하기 전까지 저장소 밖)
+SITE = os.path.join(DATA, "comps")                               # 사이트용 비교 매물 파일 — 매주 auto_update가 web/data와 함께 커밋
 PARITY = os.path.join(PREP, "_engine_parity.json")
 RUNNER = os.path.join(ROOT, "tools", "price_engine_parity.js")
 
@@ -45,8 +45,11 @@ SIM = {"age": 12.0, "km": 4.0, "grade": 0.5, "trim": 0.25, "perf": 0.25, "sold":
 OPTS = {"sold": True, "time": True, "weight": True, "outlier": True, "adjust": True}
 ENGINE = {"steps": [list(s) for s in STEPS], "colors": COLORS, "km_cap": KM_CAP, "min_comps": MIN_COMPS, "good_comps": GOOD_COMPS,
           "out_mad": OUT_MAD, "out_floor": OUT_FLOOR, "a_width": A_WIDTH, "sim": SIM}       # 사이트 엔진이 읽는 설정(한곳에서 관리)
-ROW_FIELDS = ["id", "m", "g", "t", "reg", "age", "km", "rent", "col", "perf", "dep", "price", "sold", "tf",
-              "acc", "gv", "gp", "dwell", "p0", "sd"]
+ROW_FIELDS = ["id", "m", "g", "t", "reg", "om", "km", "rent", "col", "perf", "dep", "price", "sold", "tk",
+              "acc", "gv", "gp", "ds", "p0", "sd"]
+# 행에는 매물이 바뀌지 않으면 그대로인 값만 둔다 — 매주 바뀌는 값(현재 월·시점 보정 배수)은 파일 머리말(now_ym·tf)에.
+#   om: 가격을 본 달(yyyymm, 판매중은 null → now_ym) · tk: 시점 보정 키('국산|크롤일', 판매중은 null → 1)
+#   ds: 체류 시작일(yyyymmdd, 체류일 = 판매일 또는 now_date − ds) · sd: 판매 추정일 · p0: 첫 호가
 
 
 # ───────── 데이터 ─────────
@@ -377,11 +380,20 @@ def site_groups(pool):
 
 def export(pool):
     """모델그룹별 비교 매물 파일 + index.json(선택 목록·엔진 설정). 차대번호·번호판·표준 모델명은 넣지 않는다
-    파일 안 행 순서 = 비교 후보 순서(같은 세부모델끼리의 순서가 파이썬 엔진과 같아야 동률 처리가 같다)"""
+    파일 안 행 순서 = 비교 후보 순서(같은 세부모델끼리의 순서가 파이썬 엔진과 같아야 동률 처리가 같다).
+    매물 한 대를 한 줄에 써서, 매주 커밋할 때 바뀐 매물만 차이로 쌓이게 한다"""
     os.makedirs(SITE, exist_ok=True)
     for f in glob.glob(os.path.join(SITE, "*.json")):
         os.remove(f)
-    pool = pool.assign(grp=site_groups(pool))
+    seen = pool["마지막관측일"].astype(str)
+    now_date = seen.max()                                                            # 최신 크롤일(판매중 매물이 마지막으로 보인 날)
+    now_ym = int(now_date[:4]) * 100 + int(now_date[5:7])
+    base = pd.to_datetime(pd.Series(np.where(pool["sold"], pool["판매추정일"].astype(str), now_date), index=pool.index))
+    start = base - pd.to_timedelta(pool["체류일"], unit="D")
+    pool = pool.assign(grp=site_groups(pool),
+                       om=np.where(pool["sold"], seen.str[:4].astype(int) * 100 + seen.str[5:7].astype(int), 0),
+                       tk=np.where(pool["sold"], pool["origin"] + "|" + seen, ""),
+                       ds=start.dt.strftime("%Y%m%d").where(start.notna(), ""))
     labels = sorted(pool["사고라벨"].fillna("미상").unique())
     colors = ["흰색·진주"] + COLORS
     ci, li = {v: i for i, v in enumerate(colors)}, {v: i for i, v in enumerate(labels)}
@@ -393,17 +405,20 @@ def export(pool):
         mi = {v: i for i, v in enumerate(models)}
         gi = {v: i for i, v in enumerate(sorted(g["등급"].unique()))}
         ti = {v: i for i, v in enumerate(sorted(g["세부"].unique()))}
-        rows = [[int(r.Index), mi[r.모델], gi[r.등급], ti[r.세부], int(r.등록연월), _num(r.age), _num(r.주행km), int(r.rent),
-                 ci.get(r.색상계열, 0), _num(r.성능등급), _num(r.성능감가율), _num(r.price), int(r.sold), _num(r.tf),
+        rows = [[int(r.Index), mi[r.모델], gi[r.등급], ti[r.세부], int(r.등록연월), int(r.om) or None, _num(r.주행km), int(r.rent),
+                 ci.get(r.색상계열, 0), _num(r.성능등급), _num(r.성능감가율), _num(r.price), int(r.sold), r.tk or None,
                  li[r.사고라벨 if isinstance(r.사고라벨, str) else "미상"], _num(r.글로비스_종합평가점), _num(r.글로비스_감점합),
-                 _num(r.체류일), _num(r.첫가격), str(r.판매추정일) if r.sold else None] for r in g.itertuples()]
+                 int(r.ds) if r.ds else None, _num(r.첫가격), str(r.판매추정일) if r.sold else None] for r in g.itertuples()]
+        tf = {k: float(v) for k, v in g[g["sold"]].groupby("tk")["tf"].first().items()}   # 같은 키는 같은 배수
         minfo = [{"name": m, "seg": s["seg"].mode().iat[0], "n": len(s), "onsale": int((~s["sold"]).sum())}
                  for m, s in ((m, g[g["모델"] == m]) for m in models)]
-        doc = {"version": version, "maker": mk, "group": gname, "fields": ROW_FIELDS, "models": minfo,
-               "grades": list(gi), "trims": list(ti), "colors": colors, "labels": labels, "rows": rows}
+        head = json.dumps({"version": version, "maker": mk, "group": gname, "now_ym": now_ym, "now_date": now_date, "tf": tf,
+                           "fields": ROW_FIELDS, "models": minfo, "grades": list(gi), "trims": list(ti), "colors": colors,
+                           "labels": labels}, ensure_ascii=False, separators=(",", ":"))
+        body = ",\n".join(json.dumps(r, ensure_ascii=False, separators=(",", ":")) for r in rows)
         path = os.path.join(SITE, fname)
         with open(path, "w", encoding="utf-8", newline="\n") as f:
-            json.dump(doc, f, ensure_ascii=False, separators=(",", ":"))
+            f.write(head[:-1] + ',"rows":[\n' + body + "\n]}\n")
         sizes.append(os.path.getsize(path))
         makers.setdefault(mk, {"name": mk, "origin": g["origin"].mode().iat[0], "groups": []})["groups"].append(
             {"name": gname, "file": fname, "n": len(g), "onsale": int((~g["sold"]).sum()),
@@ -413,6 +428,7 @@ def export(pool):
     index = {"version": version, "engine": ENGINE, "makers": sorted(makers.values(), key=lambda x: -sum(g["n"] for g in x["groups"]))}
     with open(os.path.join(SITE, "index.json"), "w", encoding="utf-8", newline="\n") as f:
         json.dump(index, f, ensure_ascii=False, separators=(",", ":"))
+        f.write("\n")
     sz = np.array(sizes) / 1024
     print(f"[내보내기] {SITE} — 모델그룹 파일 {len(sizes):,}개 · 합계 {sz.sum() / 1024:.1f}MB · 중위 {np.median(sz):.0f}KB · "
           f"최대 {sz.max() / 1024:.2f}MB · index.json {os.path.getsize(os.path.join(SITE, 'index.json')) / 1024:.0f}KB")

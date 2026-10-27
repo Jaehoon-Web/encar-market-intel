@@ -275,7 +275,7 @@
 ## 7. 파이프라인 통합
 
 ```
-crawler(1→2→3) → process → clean → append_history → [prep.py] → [adjust_coef.py] → [market_index.py] → build_data → 배포
+crawler(1→2→3) → process → clean → append_history → [prep.py] → [로컬 단계] → [adjust_coef.py] → [market_index.py] → [price_engine.py --export] → build_data → 배포
 ```
 
 - `append_history.py`는 크롤일을 **목록(`ids_all.json`)을 수집한 날**로 남긴다(2026-10-26 변경, 전에는 실행한 날). 상세 수집이 며칠 걸린 10월 회차가 목록 10/21인데 10/26으로 기록돼 바꿨다. 목록이 마지막 크롤일보다 오래됐으면(새 목록 없음) 건너뛴다. 이미 남은 10/26 기록은 그대로 두고, 지수 계산(`market_index.py`)에서 10/21로 읽는다.
@@ -291,6 +291,11 @@ crawler(1→2→3) → process → clean → append_history → [prep.py] → [a
 - 그다음 `market_index.py`(2.8단계)가 시황판 지수(기획안 D4, 5.2.1)를 처음부터 다시 계산한다. 결과는 `web/data/market_index.json`(세그먼트별 시세·판매속도·재고·시황 + 크롤 로그)과 `encar_output/prep/market_index_report.txt`. 실패해도 배포는 계속된다.
   - 이번 목록(`ids_all.json`)의 국산·수입 × 차급 대수를 `encar_output/prep/list_counts.csv`에 회차별로 쌓는다. 재고지수의 세그먼트 구성비가 여기서 나온다. **이 파일은 다시 만들 수 없으니 지우지 않는다.**
   - 시세는 D3 계수를 쓰므로 계수가 바뀌면 과거 값도 조금 움직인다(매주 전체 재계산).
+- 마지막으로 `price_engine.py --export`(2.9단계)가 사이트 시세 엔진용 비교 매물 파일을 `web/data/comps/`에 다시 만든다(기획안 WP1, 5.1.2). 모델그룹별 파일과 `index.json`이 나오고, `web/data`와 함께 매주 커밋된다. 실패해도 배포는 계속된다.
+  - 입력: `listings.parquet`의 비교사용·성능점검 매물(판매중 + 최근 3개월 판매), `adj_coef.json`, `market_index.json`(판매 매물 시점 보정).
+  - 차대번호·번호판·표준 모델명은 넣지 않는다.
+  - 행에는 바뀌지 않는 값만 두고, 매주 바뀌는 값(현재 월, 시점 보정 배수)은 파일 머리말에 둔다. 그래서 바뀐 매물만 커밋에 쌓인다.
+  - 엔진 규칙을 바꾸면 `python price_engine.py --parity`(Node 필요)로 사이트 JS 엔진과 일치하는지 다시 확인한다.
 - 현재 사이트(`build_data.py`)는 당분간 기존 `encar_cleaned`를 쓴다. 새 사이트를 만들 때 `listings.parquet`으로 옮긴다.
 - **`price_obs.parquet`는 이번 주부터 쌓는다.** 가격 인하·3개월 추세 지표의 원천이라, 사이트 개편과 상관없이 먼저 시작한다.
 
