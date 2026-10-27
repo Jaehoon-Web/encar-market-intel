@@ -17,6 +17,7 @@ run.lock
 
 # ── 에디터/도구 로컬 설정 ──
 .claude/
+.wrangler/
 .vscode/
 .idea/
 
