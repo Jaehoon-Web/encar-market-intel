@@ -173,6 +173,25 @@ select.filter-select.v2-need, .v2-in.v2-need { border-color: var(--accent); box-
   .v2-flow .why { grid-column: 1 / -1; padding-top: 0; }
   .v2-flow .k, .v2-flow .trk, .v2-flow .v { border-bottom: 0; }
 }
+/* 판매 속도 · 같은 모델 가격 사다리(보강안 2단계) — 이름 | 막대 | 값 한 줄 */
+.v2-ssub { font-size: 12px; font-weight: 700; color: var(--tx-2); margin: 12px 0 4px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.v2-ssub .hint { font-weight: 400; }
+.v2-hrow { display: grid; grid-template-columns: minmax(84px, 38%) minmax(0, 1fr) auto; column-gap: 10px; align-items: center; font-size: 13px; padding: 4px 0; }
+.v2-hrow .k { color: var(--tx-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v2-hrow.me .k, .v2-hrow.me .v { color: var(--tx-1); font-weight: 700; }
+.v2-hrow .trk { height: 12px; }
+.v2-hrow .trk i { display: block; height: 12px; min-width: 2px; border-radius: 0 3px 3px 0; }
+.v2-hrow .trk i.me { background: var(--accent); }
+.v2-hrow .trk i.base { background: var(--line-hard); }
+.v2-hrow .trk i.dn { background: var(--down); }
+.v2-hrow .v { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--tx-2); }
+.v2-hrow .v small { color: var(--tx-3); font-weight: 400; margin-left: 2px; }
+.v2-pill { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: var(--r-pill); background: var(--bg-2); color: var(--tx-2); }
+.v2-pill.up { background: var(--up-wash); color: var(--up); }
+.v2-pill.dn { background: var(--down-wash); color: var(--down); }
+.v2-cutline { margin-top: 10px; }
+.v2-ladder { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 4px 24px; }
+.v2-mtx td.me { box-shadow: inset 0 0 0 2px var(--accent); background: var(--accent-wash); }
 .v2-sig { font-size: 13px; color: var(--tx-2); line-height: 1.9; }
 .v2-sig b { color: var(--tx-1); font-variant-numeric: tabular-nums; }
 

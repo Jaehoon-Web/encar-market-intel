@@ -35,6 +35,10 @@
     cut: '첫 호가보다 내린 금액',
     pos: '점은 비교 매물의 실제 호가입니다(판매된 매물은 목록에서 사라지기 전 마지막 호가). 별은 이 차의 추정 시세, 세로 띠는 추정 범위(25~75%)입니다. ' +
       '점선은 이 차와 다른 조건이 같고 주행(또는 연식)만 다를 때의 값으로, 매주 데이터에서 추정한 보정 계수로 그립니다. 점을 누르면 아래 표의 그 매물로 갑니다.',
+    speed: '차급 대비는 이 세부모델과 같은 차급(국산·수입 구분) 전체의 주간 판매율을 비교합니다(±15% 안이면 비슷). 가격 위치별 일수는 최근 3개월에 판매된 비교 매물을 ' +
+      '이 차 조건으로 맞춘 값(보정가)이 추정가보다 얼마나 쌌는지·비쌌는지로 나눠, 엔카에 올라온 뒤 목록에서 사라지기까지 걸린 날수의 가운데 값을 보여 줍니다. 판매자가 내린 매물도 섞일 수 있습니다.',
+    ladder: '같은 세부모델 안에서 연식·주행, 등급, 성능 상태에 따라 값이 어떻게 달라지는지 봅니다. 시세표와 등급별은 판매중 매물의 호가 가운데 값이고, ' +
+      '성능 상태별은 매물을 이 차 조건으로 맞춘 뒤 사고 단계끼리 비교한 값입니다(사고 차 매각가를 잡을 때 참고).',
     flow: '비교 매물 호가의 가운데 값에서 출발해 조건 차이를 맞추는 보정(비교 매물 평균)을 더하면 추정 시세가 됩니다. "나머지"는 가운데 값끼리의 차이로, ' +
       '매물마다 보정이 달라서 생깁니다. 환산가는 추정 시세에 환산 비율을 적용한 경매 예상가입니다.'
   };
@@ -603,7 +607,8 @@
     h += '</div>';
 
     h += '<div class="v2-two-col v2-wide">' + posCard(G, car) + flowCard(G, car, c) + '</div>';   // 보강안 1단계(기획 5.1.3-2): 그림 먼저, 표는 아래
-    h += '<div class="v2-two-col">' + signalCard() + trendCard(G) + '</div>';
+    h += '<div class="v2-two-col">' + speedCard(G) + trendCard(G) + '</div>';
+    h += ladderCard(G, car, c);
     h += compsTable(G);
     $('res').innerHTML = h;
   }
@@ -872,16 +877,129 @@
     if (tr) tr.scrollIntoView({ block: 'center' });
   }
 
-  function signalCard() {
+  // ───── 판매 속도(보강안 2단계, 기획 5.1.3-2 C) — 차급 대비 · 가격 위치별 판매까지 일수 · 인하 ─────
+  var POS_EDGES = [-Infinity, -8, -3, 3, 8, Infinity], POS_MIN = 10;   // 추정가 대비 보정가 위치(%) — 판매 10대 미만 구간은 이웃과 합침
+  function posLabel(lo, hi) {
+    var f = function (v) { return (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v) + '%'; };
+    return lo === -Infinity ? f(hi) + ' 미만' : hi === Infinity ? f(lo) + ' 이상' : lo === -hi ? '±' + hi + '%' : f(lo) + ' ~ ' + f(hi);
+  }
+  function posBuckets() {
+    var sold = R.comps.filter(function (x) { return !x.outlier && x.sold && x.dwell != null; });
+    var bk = POS_EDGES.slice(0, -1).map(function (lo, i) { return { lo: lo, hi: POS_EDGES[i + 1], d: [] }; });
+    sold.forEach(function (x) {
+      var p = (x.adj / R.est - 1) * 100;
+      for (var i = 0; i < bk.length; i++) if (p >= bk[i].lo && p < bk[i].hi) { bk[i].d.push(x.dwell); break; }
+    });
+    while (bk.length > 1) {                                  // 가장 적은 구간부터 더 적은 이웃과 합친다
+      var k = -1;
+      bk.forEach(function (b, i) { if (b.d.length < POS_MIN && (k < 0 || b.d.length < bk[k].d.length)) k = i; });
+      if (k < 0) break;
+      var j = k === 0 ? 1 : k === bk.length - 1 ? k - 1 : (bk[k - 1].d.length <= bk[k + 1].d.length ? k - 1 : k + 1), a = Math.min(k, j);
+      bk.splice(a, 2, { lo: bk[a].lo, hi: bk[a + 1].hi, d: bk[a].d.concat(bk[a + 1].d) });
+    }
+    return { n: sold.length, bk: bk.length >= 2 ? bk : null };
+  }
+
+  function speedCard(G) {
+    var M = G.models[S.model], seg = M && M.seg, sname = seg ? seg.split('·')[1] + ' ' + seg.split('·')[0] : '차급';
+    var mm = X.mmBy && X.mmBy[G.F.maker + '|' + S.model], sg = X.mm && X.mm.segments && X.mm.segments[seg];
     var kept = R.comps.filter(function (x) { return !x.outlier; });
     var on = kept.filter(function (x) { return !x.sold; }), sold = kept.filter(function (x) { return x.sold; });
-    var dw = median(sold.map(function (x) { return x.dwell; }).filter(function (v) { return v != null; }));
-    var mOn = median(on.map(function (x) { return x.adj; })), mSold = median(sold.map(function (x) { return x.adj; }));
-    var h = '<div class="card"><div class="card-title">시장 신호 <span class="hint">소매 시장 기준 — 경매 수요 참고용</span></div><div class="v2-sig">' +
-      '같은 조건 판매중 <b>' + on.length + '대</b>' + (S.sold ? ' · 최근 3개월 판매 <b>' + sold.length + '대</b>' : ' · 최근 판매 매물은 빼고 보는 중');
-    if (dw != null) h += '<br>판매된 매물의 중위 체류일 <b>' + Math.round(dw) + '일</b>';
-    if (mOn && mSold) h += '<br>판매된 매물의 보정가 중앙값은 판매중보다 <b>' + pct((mSold / mOn - 1) * 100) + '</b>';
-    return h + '<br><span class="v2-help">판매 매물의 가격은 목록에서 사라지기 전 마지막 호가입니다(실제 거래가가 아님).</span></div></div>';
+    var h = '<div class="card"><div class="card-title">판매 속도' + q(TIP.speed) + ' <span class="hint">소매 시장 기준 · 판매 = 목록에서 사라짐(추정)</span></div>' +
+      '<div class="v2-kv">같은 조건 판매중 <b>' + on.length + '대</b>' + (S.sold ? ' · 최근 3개월 판매 <b>' + sold.length + '대</b>' : ' · 최근 판매 매물은 빼고 보는 중') + '</div>';
+    // ① 차급 대비 — 주간 판매율(지난 구간 판매 ÷ 시작 재고, 7일 환산). 없으면 중위 체류일로
+    if (!X.mmBy) h += '<p class="v2-kv">차급 비교를 불러오는 중…</p>';
+    else if (mm && sg && mm.rate_w != null && sg.rate_w) {
+      var ratio = mm.rate_w / sg.rate_w, verdict = ratio >= 1.15 ? ['빠름', 'up'] : ratio <= 0.87 ? ['느림', 'dn'] : ['비슷', ''];
+      var mx = Math.max(mm.rate_w, sg.rate_w), bar = function (name, v, cls, me) {
+        return '<div class="v2-hrow' + (me ? ' me' : '') + '"><span class="k">' + esc(name) + '</span><span class="trk"><i class="' + cls + '" style="width:' +
+          (v / mx * 100).toFixed(1) + '%"></i></span><span class="v">주 ' + (v * 100).toFixed(1) + '%</span></div>';
+      };
+      h += '<div class="v2-ssub">차급 대비 <span class="v2-pill ' + verdict[1] + '">' + sname + '보다 ' + verdict[0] + ' ' + pct((ratio - 1) * 100) + '</span></div>' +
+        bar('이 세부모델', mm.rate_w, 'me', true) + bar(sname, sg.rate_w, 'base') +
+        '<p class="v2-help">주간 판매율 = 지난 구간(' + mmdd(X.mm.speed_interval[0]) + '→' + mmdd(X.mm.speed_interval[1]) + ') 판매 ÷ 시작 재고, 7일 환산. ' +
+        (mm.weeks ? '판매중 매물이 다 팔리는 데 약 <b>' + mm.weeks + '주</b>' + (sg.weeks ? '(차급 ' + sg.weeks + '주)' : '') + '. ' : '') +
+        (mm.dwell != null && sg.dwell ? '최근 90일 판매의 중위 체류 ' + mm.dwell + '일(차급 ' + sg.dwell + '일). ' : '') + '주간 수집이 쌓일수록 안정됩니다.</p>';
+    } else if (mm && sg && mm.dwell != null && sg.dwell) {
+      var r2 = sg.dwell / mm.dwell, v2 = r2 >= 1.15 ? ['빠름', 'up'] : r2 <= 0.87 ? ['느림', 'dn'] : ['비슷', ''];
+      h += '<div class="v2-ssub">차급 대비 <span class="v2-pill ' + v2[1] + '">' + sname + '보다 ' + v2[0] + '</span></div>' +
+        '<p class="v2-kv">최근 90일 판매의 중위 체류 <b>' + mm.dwell + '일</b>(차급 ' + sg.dwell + '일) — 주간 판매율은 판매중 매물이 적어 계산하지 않았습니다.</p>';
+    } else h += '<p class="v2-kv">이 세부모델은 매물이 적어 차급과 비교하지 않습니다.</p>';
+    // ② 가격 위치별 판매까지 일수 — 보정가(이 차 조건으로 맞춘 값)가 추정가보다 얼마나 쌌나·비쌌나
+    var pb = posBuckets();
+    h += '<div class="v2-ssub">가격 위치별 판매까지 일수 <span class="hint">판매된 비교 매물 ' + pb.n + '대 · 추정가 대비 보정가</span></div>';
+    if (!pb.bk) h += '<p class="v2-kv">판매된 비교 매물이 적어(구간마다 ' + POS_MIN + '대 이상 필요) 생략합니다.</p>';
+    else {
+      var md = pb.bk.map(function (b) { return median(b.d); }), top = Math.max.apply(null, md);
+      pb.bk.forEach(function (b, i) {
+        var me = b.lo <= 0 && 0 < b.hi;
+        h += '<div class="v2-hrow' + (me ? ' me' : '') + '"><span class="k">' + posLabel(b.lo, b.hi) + (me ? ' · 추정가' : '') + '</span><span class="trk"><i class="' +
+          (me ? 'me' : 'base') + '" style="width:' + (md[i] / top * 100).toFixed(1) + '%"></i></span><span class="v">' + Math.round(md[i]) + '일 <small>' + b.d.length + '대</small></span></div>';
+      });
+      var a = pb.bk[0], z = pb.bk[pb.bk.length - 1];
+      h += '<p class="v2-help">추정가보다 싸게 낸 매물(' + posLabel(a.lo, a.hi) + ')은 중위 ' + Math.round(md[0]) + '일, 비싸게 낸 매물(' + posLabel(z.lo, z.hi) + ')은 ' +
+        Math.round(md[md.length - 1]) + '일 만에 팔렸습니다. 일수 = 엔카에 올라온 날부터 목록에서 사라진 날까지.</p>';
+    }
+    // ③ 인하 — 가끔 참고(Q48)
+    var cut = on.filter(function (x) { var p0 = x.row[G.fi.p0]; return p0 != null && p0 > x.row[G.fi.price]; });
+    if (on.length) h += '<p class="v2-kv v2-cutline">판매중 비교 매물의 <b>' + Math.round(cut.length / on.length * 100) + '%</b>가 첫 호가보다 내림' +
+      (cut.length ? '(중앙 −' + man(median(cut.map(function (x) { return x.row[G.fi.p0] - x.row[G.fi.price]; }))) + '만)' : '') + '</p>';
+    return h + '</div>';
+  }
+
+  // ───── 같은 모델 가격 사다리(보강안 2단계, 기획 5.1.3-2 E) — 연식×주행 시세표(내 칸) · 등급별 · 성능 상태별 ─────
+  var ACC_ORDER = ['무사고', '외판1·판금', '외판1·교환', '외판2·판금', '외판2·교환', '골격·판금', '골격·교환'];
+  function condLadder(G, car) {                              // 이 모델 매물을 이 차 조건(차령·주행·렌트·색상·등급·시점)으로 맞춘 뒤 사고 단계별 가운데 값 — 성능 보정만 빼고
+    var P = ENG.prepare(G, S.model), fi = G.fi, F = G.F, b = P.cf.b.slice(), nb = b.length;
+    if (!S.color) for (var j = 3; j < nb; j++) b[j] = 0;
+    var ym = F.now_ym, reg = car['등록연월'], tage = Math.floor(ym / 100) * 12 + ym % 100 - (Math.floor(reg / 100) * 12 + reg % 100);
+    var colors = X.idx.engine.colors, tx = [tage, Math.min(car['주행km'], X.idx.engine.km_cap) / 1e4, S.rent ? 1 : 0].concat(colors.map(function (c) { return S.color === c ? 1 : 0; }));
+    var cg = P.cf.grade || {}, ct = (P.cf.trim || {})[S.grade] || {}, tfe = (cg[S.grade] || 0) + (ct[S.trim || ''] || 0);
+    var by = {};
+    for (var i = 0; i < P.n; i++) {
+      var lin = 0;
+      for (j = 0; j < nb; j++) lin += (tx[j] - P.x[i][j]) * b[j];
+      var v = P.price[i] * Math.exp(lin + tfe - P.fe[i]) * P.tf[i], lab = F.labels[P.rows[i][fi.acc]];
+      (by[lab] = by[lab] || []).push(v);
+    }
+    var base = by['무사고'] && by['무사고'].length >= POS_MIN ? median(by['무사고']) : null;
+    if (!base) return null;
+    return ACC_ORDER.concat(Object.keys(by).filter(function (k) { return ACC_ORDER.indexOf(k) < 0; }))
+      .filter(function (k) { return by[k] && by[k].length >= POS_MIN; })
+      .map(function (k) { return { k: k, n: by[k].length, rel: median(by[k]) / base - 1 }; });
+  }
+
+  function ladderCard(G, car, c) {
+    var st = modelStats(G), fi = G.fi, yi = st.years.indexOf(+S.y), kj = -1;
+    KM_BANDS.forEach(function (bd, j) { if (car['주행km'] >= bd[0] && car['주행km'] < bd[1]) kj = j; });
+    var h = '<div class="card"><div class="v2-tools"><div class="card-title">같은 모델 가격 사다리' + q(TIP.ladder) + ' <span class="hint">' + esc(S.model) + ' · 판매중 호가 중앙값(만원)</span></div>' +
+      (S.grade ? seg('mgrade', [['one', S.grade + '만'], ['all', '전체 등급']], VIEW.allGrades ? 'all' : 'one', '시세표 등급') : '') + '</div>' +
+      '<div class="v2-ladder"><div><div class="v2-ssub">연식 × 주행 <span class="hint">굵은 칸 = 이 차 · 칸을 누르면 그 조건으로 다시 산정</span></div>' + matrixTable(st, yi, kj) + '</div>';
+    var gs = st.grades.filter(function (g) { return g.n >= 5; }).slice(0, 8).sort(function (a, b) { return b.med - a.med; });   // 판매중이 많은 8개 등급을 값 순으로(사다리)
+    var gmax = Math.max.apply(null, gs.map(function (g) { return g.med; }).concat([1])), gme = gs.find(function (g) { return g.name === S.grade; });
+    h += '<div><div class="v2-ssub">등급별</div>' + (gs.length ? gs.map(function (g) {
+      var me = g.name === S.grade;
+      return '<div class="v2-hrow' + (me ? ' me' : '') + '"><span class="k"><button type="button" class="v2-link" data-grade="' + esc(g.name) + '">' + esc(g.name) + '</button>' + (me ? ' · 이 차' : '') +
+        '</span><span class="trk"><i class="' + (me ? 'me' : 'base') + '" style="width:' + (g.med / gmax * 100).toFixed(1) + '%"></i></span><span class="v">' + man(g.med) +
+        ' <small>' + (gme && !me ? signed(g.med - gme.med) + ' · ' : '') + g.n + '대</small></span></div>';
+    }).join('') : '<p class="v2-kv">판매중 5대 이상인 등급이 없습니다.</p>');
+    var cl = condLadder(G, car), mine = c['상태'] === '미상' ? null : c['사고라벨'];
+    var base0 = c['상태'] === '무사고' ? R.est : R0 ? R0.est : R.est0 != null ? R.est0 : null;
+    h += '<div class="v2-ssub" style="margin-top:14px">성능 상태별 <span class="hint">무사고 대비 · 다른 조건은 이 차로 맞춤</span></div>';
+    if (!cl) h += '<p class="v2-kv">무사고 매물이 적어 비교하지 않습니다.</p>';
+    else {
+      var lo = Math.min.apply(null, cl.map(function (x) { return x.rel; }).concat([-0.01]));
+      cl.forEach(function (x) {
+        var me = x.k === mine;
+        h += '<div class="v2-hrow' + (me ? ' me' : '') + '"><span class="k">' + esc(x.k) + (me ? ' · 이 차' : '') + '</span><span class="trk"><i class="' + (x.rel < 0 ? 'dn' : 'base') +
+          '" style="width:' + (Math.abs(x.rel) / Math.abs(lo) * 100).toFixed(1) + '%"></i></span><span class="v">' + (x.k === '무사고' ? '기준' : pct(x.rel * 100)) +
+          (base0 && x.k !== '무사고' ? ' <small>' + man(base0 * (1 + x.rel)) + '만</small>' : ' <small>' + x.n + '대</small>') + '</span></div>';
+      });
+      h += '<p class="v2-help">같은 모델 매물을 이 차의 차령·주행·등급·색상으로 맞춘 뒤 사고 단계별 가운데 값을 무사고와 비교했습니다(' + POS_MIN + '대 이상인 단계만). ' +
+        (base0 ? '만원은 이 차가 무사고일 때 ' + man(base0) + '만 기준.' : '') + (mine ? '' : ' 이 차는 성능 상태를 넣지 않아 표시가 없습니다.') +
+        (mine && R0 ? ' 위 추정 시세(무사고 대비 ' + pct((R.est / R0.est - 1) * 100) + ')는 이 차의 손상 부위·성능등급까지 본 값이라 단계 평균과 다를 수 있습니다.' : '') + '</p>';
+    }
+    return h + '</div></div></div>';
   }
 
   function trendCard(G) {
@@ -974,17 +1092,21 @@
     var h = '<div class="card"><div class="v2-tools"><div class="card-title">시세표' + (st.gsel ? ' · ' + esc(S.grade) + ' 등급' : S.grade ? ' · 전체 등급' : '') +
       ' <span class="hint">판매중 호가 중앙값(만원) · 칸을 누르면 그 조건으로 한 대 산정 · 5대 미만 칸은 비움</span></div>' +
       (S.grade ? seg('mgrade', [['one', S.grade + '만'], ['all', '전체 등급']], VIEW.allGrades ? 'all' : 'one', '시세표 등급') : '') + '</div>';
-    if (!st.years.length) return h + '<p class="v2-kv">판매중 매물이 없습니다.</p></div>';
-    h += '<div class="v2-tablewrap"><table class="t v2-mtx"><thead><tr><th>최초등록 \\ 주행</th>' +
+    return h + matrixTable(st, -1, -1) + '</div>';
+  }
+
+  function matrixTable(st, yi, kj) {                         // yi·kj = 이 차의 연식 행·주행 열(강조, 없으면 -1)
+    if (!st.years.length) return '<p class="v2-kv">판매중 매물이 없습니다.</p>';
+    var h = '<div class="v2-tablewrap"><table class="t v2-mtx"><thead><tr><th>최초등록 \\ 주행</th>' +
       KM_BANDS.map(function (b) { return '<th>' + b[2] + '</th>'; }).join('') + '<th>합계</th></tr></thead><tbody>';
     st.years.forEach(function (y, i) {
       var tot = st.cells[i].reduce(function (s, c) { return s + c.n; }, 0);
       h += '<tr><td><b>' + y + '년</b></td>' + st.cells[i].map(function (c, j) {
-        return '<td>' + (c.n >= 5 ? '<button type="button" class="v2-cell" data-cell="' + i + '|' + j + '">' + man(c.med) + '<small>' + c.n + '대</small></button>'
+        return '<td' + (i === yi && j === kj ? ' class="me"' : '') + '>' + (c.n >= 5 ? '<button type="button" class="v2-cell" data-cell="' + i + '|' + j + '">' + man(c.med) + '<small>' + c.n + '대</small></button>'
           : '<span class="v2-na">' + (c.n ? c.n + '대' : '') + '</span>') + '</td>';
       }).join('') + '<td>' + tot + '대</td></tr>';
     });
-    return h + '</tbody></table></div></div>';
+    return h + '</tbody></table></div>';
   }
 
   function gradeCard(st) {

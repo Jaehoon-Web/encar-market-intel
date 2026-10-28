@@ -384,7 +384,16 @@ def model_stats(L, crawls, obs, ivs, d):
             r["pidx"] = round(float(pidx[k]), 1)
         rows.append(r)
     rows.sort(key=lambda x: -x["on"])
-    info = {"date": oc.strftime("%Y-%m-%d"), "models": len(rows),
+    segs = {}                                                                     # 차급 평균(시세 산정 '판매 속도'의 비교 기준) — 모델과 같은 정의
+    if iv is not None:
+        g = iv["st"].groupby(["seg", "origin"])["sold"].agg(["size", "sum"])
+        for (s, o), r in g[g["size"] >= 30].iterrows():
+            rw = 1 - (1 - r["sum"] / r["size"]) ** (7 / iv["days"])
+            segs[f"{s}·{o}"] = {"rate_w": round(float(rw), 4), "weeks": round(1 / rw, 1) if rw > 0 else None, "n_start": int(r["size"])}
+    sd = sold.groupby(["seg", "origin"])["체류일"].agg(["median", "size"])
+    for (s, o), r in sd[sd["size"] >= 5].iterrows():
+        segs.setdefault(f"{s}·{o}", {})["dwell"] = int(round(r["median"]))
+    info = {"date": oc.strftime("%Y-%m-%d"), "models": len(rows), "segments": segs,
             "speed_interval": [obs[iv["p"]].strftime("%Y-%m-%d"), oc.strftime("%Y-%m-%d")] if iv is not None else None}
     return rows, info
 
@@ -553,8 +562,9 @@ def main():
     mout = {"version": out["version"], "date": minfo["date"], "speed_interval": minfo["speed_interval"],
             "note": "세부모델별 시장 숫자(기획안 5.2.4). on = 판매중 확인 · price = 중앙 호가 · cut = 첫 호가보다 내린 매물 비율 · "
                     "sold90·dwell = 최근 90일 판매 대수·중위 체류일(5대 이상) · rate_w = 최근 판매속도 구간의 주간 판매율(시작 10대 이상) · "
-                    "weeks = 재고 소진 주수(1 ÷ 주간 판매율) · pidx = 신규 매물 시세(기준기간 = 100, 양쪽 10대 이상)",
-            "models": models}
+                    "weeks = 재고 소진 주수(1 ÷ 주간 판매율) · pidx = 신규 매물 시세(기준기간 = 100, 양쪽 10대 이상) · "
+                    "segments = 차급·국산수입별 같은 정의의 rate_w·weeks(시작 30대 이상)·dwell",
+            "segments": minfo["segments"], "models": models}
     with open(OUT_MODELS, "w", encoding="utf-8", newline="\n") as f:
         json.dump(mout, f, ensure_ascii=False, separators=(",", ":"))
         f.write("\n")
