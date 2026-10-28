@@ -293,3 +293,16 @@ select.filter-select.v2-need, .v2-in.v2-need { border-color: var(--accent); box-
 .v2-nmsg b { color: var(--tx-1); font-weight: 600; }
 .v2-warnt { color: var(--down); font-weight: 700; }
 .v2-cand { margin: 4px 4px 0 0; padding: 3px 10px; font-size: 12px; }
+
+/* 조건 칩 · 최근 산정 · 첫 화면 설명(엔카 벤치마크 G·D · 실사용 점검 P3, 2026-10-28) */
+.v2-cchips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 12px; }
+.v2-cchip { font-size: 12px; color: var(--tx-1); background: var(--bg-2); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; }
+.v2-cchip:hover { border-color: var(--line-hard); }
+.v2-recent { margin: 0 0 12px; font-size: 12px; }
+.v2-recent ul { margin: 6px 0; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: var(--r-md); }
+.v2-recent li { padding: 6px 10px; border-bottom: 1px solid var(--line-soft); line-height: 1.5; }
+.v2-recent li:last-child { border-bottom: 0; }
+.v2-recent li a { color: var(--tx-1); font-weight: 600; }
+.v2-recent li span { display: block; color: var(--tx-3); }
+.v2-intro p, .v2-intro ol { font-size: 13px; color: var(--tx-2); line-height: 1.7; margin: 8px 0 0; }
+.v2-intro ol { padding-left: 18px; list-style: decimal; }

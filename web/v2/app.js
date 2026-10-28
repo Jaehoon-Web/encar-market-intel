@@ -17,8 +17,8 @@
   var COEF_LEVEL = { '모델': '이 세부모델 자체 값', '차급': '같은 차급 평균 값(이 모델 표본이 없어서)', '시장': '시장 평균 값' };
   var SHOW = 30;                                            // 비교 매물 표 기본 행 수
   var KM_BANDS = [[0, 3e4, '3만 미만'], [3e4, 6e4, '3~6만'], [6e4, 1e5, '6~10만'], [1e5, 1.5e5, '10~15만'], [1.5e5, Infinity, '15만 이상']];
-  var X = {}, ENG = null, ISC = null, NM = null, GROUPS = {}, R = null, R0 = null, LAST = null, timer = 0, B = null, RV = null, MK = null, DV = null, MB = '';
-  var VIEW = { sort: 'sim', all: false, mode: 'one', condWarn: [], condOut: [], exKeep: {}, allGrades: false, nameText: '', nameMsg: '', nameCands: [] };      // mode: one(한 대 산정) · model(모델 요약) · batch(묶음 산정) · rates(⚙ 환산 비율)
+  var X = {}, ENG = null, ISC = null, NM = null, GROUPS = {}, R = null, R0 = null, recentTimer = 0, LAST = null, timer = 0, B = null, RV = null, MK = null, DV = null, MB = '';
+  var VIEW = { sort: 'sim', all: false, mode: 'one', condWarn: [], condOut: [], exKeep: {}, allGrades: false, nameText: '', nameMsg: '', nameCands: [], recentOpen: false };      // mode: one(한 대 산정) · model(모델 요약) · batch(묶음 산정) · rates(⚙ 환산 비율)
   var TIP = {                                                // 용어 설명(결과 카드·비교 매물 표의 ? — 마우스를 올리거나 누르면)
     est: '비슷한 엔카 매물(판매중 + 최근 3개월 판매)의 호가를 이 차 조건으로 맞춘 값(보정 후) 가운데 값입니다. 비슷한 매물일수록 크게 반영합니다. ' +
       '엔카 소매 호가 기준이라 실제 거래가와는 다릅니다. 범위는 보정 후 값의 가운데 50%입니다.',
@@ -33,6 +33,8 @@
     dwell: '엔카에 올라온 뒤 지난 날수(판매된 매물은 판매까지)',
     cut: '첫 호가보다 내린 금액'
   };
+  var DOM_ORDER = ['현대', '제네시스', '기아', '쉐보레(GM대우)', '르노코리아(삼성)', 'KG모빌리티(쌍용)', '기타 제조사'];   // 엔카 국산 제조사 순서
+  var RECENT = 'v2.recent';                                  // 최근 산정(이 브라우저에만)
   var MODES = ['model', 'batch', 'rates'];                  // 주소 view= 로 남는 화면
   var S = blank();
 
@@ -197,6 +199,12 @@
     return '<select class="filter-select" data-k="' + k + '"' + (off ? ' disabled' : '') + '>' +
       opts.map(function (o) { return opt(o[0], o[1], cur, o[2]); }).join('') + '</select>';
   }
+  function selG(k, first, groups, cur, off) {                // 묶음(optgroup)이 있는 선택 상자 — first = [값, 글] 맨 위 한 줄
+    return '<select class="filter-select" data-k="' + k + '"' + (off ? ' disabled' : '') + '>' + opt(first[0], first[1], cur) +
+      groups.filter(function (g) { return g.opts.length; }).map(function (g) {
+        return '<optgroup label="' + esc(g.label) + '">' + g.opts.map(function (o) { return opt(o[0], o[1], cur); }).join('') + '</optgroup>';
+      }).join('') + '</select>';
+  }
   function field(label, html) { return '<div class="v2-f"><span class="v2-l">' + label + '</span>' + html + '</div>'; }
   function seg(k, opts, cur, aria) {
     return '<div class="segmented" role="group" aria-label="' + aria + '">' + opts.map(function (o) {
@@ -213,9 +221,13 @@
     h += '<div class="v2-namefind"><div class="v2-text"><input class="v2-in" id="nameText" autocomplete="off" placeholder="차명으로 찾기 — 예: 더 뉴 그랜저 IG 2.5 프리미엄 2020" value="' +
       esc(VIEW.nameText) + '"><button type="button" class="v2-btn" data-act="findName">찾기</button></div>' +
       '<div class="v2-nmsg" id="nameMsg">' + (VIEW.nameMsg || '아래 다섯 칸을 차명 한 줄로 한 번에 채웁니다(연도를 적으면 등록 연도도)') + '</div></div>';
-    h += field('제조사', sel('mk', [['', '제조사 선택']].concat(X.idx.makers.map(function (m) {
-      return [m.name, m.name + ' · ' + total(m).toLocaleString() + '대'];
-    })), S.mk));
+    h += recentHtml() + chipsHtml();
+    var mlab = function (m) { return [m.name, m.name + ' · ' + total(m).toLocaleString() + '대']; };
+    var dom = X.idx.makers.filter(function (m) { return m.origin === '국산'; })
+      .sort(function (a, b) { return DOM_ORDER.indexOf(a.name) - DOM_ORDER.indexOf(b.name); });
+    var imp = X.idx.makers.filter(function (m) { return m.origin !== '국산'; }).sort(function (a, b) { return total(b) - total(a); });
+    h += field('제조사', selG('mk', ['', '제조사 선택'], [{ label: '국산', opts: dom.map(mlab) }, { label: '수입 · 많은 순', opts: imp.slice(0, 8).map(mlab) },
+      { label: '수입 · 가나다순', opts: imp.slice(8).sort(function (a, b) { return a.name.localeCompare(b.name, 'ko'); }).map(mlab) }], S.mk));
     h += field('모델', sel('grp', [['', mk ? '모델 선택' : '—']].concat((mk ? mk.groups.slice().sort(byN) : []).map(function (x) {
       return [x.name, x.name + ' · ' + x.n.toLocaleString() + '대'];
     })), S.grp, !mk));
@@ -233,10 +245,14 @@
     h += field('세부모델', sel('model', [['', G ? '세부모델 선택' : (g ? '불러오는 중…' : '—')]].concat(mopts), S.model, !G) +
       (S.model && S.y && !fits(S.model) ? '<p class="v2-help v2-bad">등록 ' + S.y + '년은 이 세대' + yrOf(S.mk, S.grp, S.model) +
         ' 기간 밖입니다 — 다른 세대인지 확인하세요</p>' : ''));
-    var grades = rows.length ? countBy(rows, fi.g, G.F.grades) : [];
-    h += field('등급', sel('grade', [['', S.model ? '등급 선택' : '—']].concat(grades.map(function (x) {
-      return [x[0], x[0] + ' · ' + x[1].toLocaleString() + '대'];
-    })), S.grade, !S.model));
+    var grades = rows.length ? countBy(rows, fi.g, G.F.grades) : [], gfuel = gradeFuel(G, rows), fuels = [];
+    grades.forEach(function (x) { var f = gfuel[x[0]] || '기타'; if (fuels.indexOf(f) < 0) fuels.push(f); });
+    var glab = function (x) { return [x[0], x[0] + ' · ' + x[1].toLocaleString() + '대']; };
+    h += field('등급', fuels.length > 1                       // 연료가 둘 이상이면 연료로 묶는다(엔카처럼) — 많은 연료부터
+      ? selG('grade', ['', '등급 선택'], fuels.map(function (f) {
+        return { label: f, opts: grades.filter(function (x) { return (gfuel[x[0]] || '기타') === f; }).map(glab) };
+      }), S.grade, !S.model)
+      : sel('grade', [['', S.model ? '등급 선택' : '—']].concat(grades.map(glab)), S.grade, !S.model));
     var trims = S.grade && rows.length ? countBy(rows.filter(function (r) { return G.F.grades[r[fi.g]] === S.grade; }), fi.t, G.F.trims)
       .filter(function (x) { return x[0]; }) : [];                // 주소로 열 때는 모델그룹 파일을 받기 전에도 그린다
     h += field('세부등급<em>선택</em>', sel('trim', [['', trims.length ? '상관없음' : '—']].concat(trims.map(function (x) {
@@ -265,7 +281,9 @@
     h += '<div class="v2-sect">수리 상태</div>';
     h += field('단순수리', seg('sr', [['auto', '자동'], ['yes', '있음'], ['no', '없음']], S.sr, '단순수리'));
     h += field('기계 결함<em>표시만 — 호가 영향이 거의 없음</em>', seg('mech', [['0', '없음'], ['1', '경미'], ['2', '결함']], S.mech, '기계 결함'));
-    h += field('수리 필요', '<div class="v2-chips">' + FIXES.map(function (f) { return chip('fix', f, f, S.fixes.indexOf(f) >= 0); }).join('') + '</div>');
+    h += field('수리 필요<em>기록용 — 값에는 아래 예상 수리비만 반영</em>', '<div class="v2-chips">' +
+      FIXES.map(function (f) { return chip('fix', f, f, S.fixes.indexOf(f) >= 0); }).join('') + '</div>' +
+      (S.fixes.length && !manNum(S.cost) ? '<p class="v2-help">고른 수리 항목은 값에 반영되지 않습니다 — 아래 예상 수리비를 넣으세요</p>' : ''));
     h += field('예상 수리비<em>시세·환산가에서 그대로 뺍니다</em>', '<div class="v2-unit"><input class="v2-in" data-k="cost" inputmode="numeric" autocomplete="off" placeholder="0" value="' + esc(S.cost) + '"><span>만원</span></div>');
 
     h += '<div class="v2-sect">비교 범위 · 환산</div>';
@@ -350,6 +368,46 @@
     changed();
   }
 
+  function gradeFuel(G, rows) {                              // 등급별 가장 흔한 연료
+    var fi = G && G.fi, fc = {}, out = {};
+    if (!rows.length || fi.fu == null) return out;
+    rows.forEach(function (r) { var g = G.F.grades[r[fi.g]], f = G.F.fuels[r[fi.fu]] || '기타'; (fc[g] = fc[g] || {})[f] = (fc[g][f] || 0) + 1; });
+    Object.keys(fc).forEach(function (g) { out[g] = Object.keys(fc[g]).sort(function (a, b) { return fc[g][b] - fc[g][a]; })[0]; });
+    return out;
+  }
+  function chipsHtml() {                                     // 고른 조건 한 줄(엔카 조건 칩) — 누르면 그 칸으로. 긴 입력 칸에서 지금 조건을 한눈에
+    var c = [], km = kmNum(S.km), cost = manNum(S.cost);
+    if (S.model) c.push(['model', S.mk + ' › ' + S.model]); else if (S.grp) c.push(['grp', S.mk + ' › ' + S.grp]); else if (S.mk) c.push(['mk', S.mk]);
+    if (S.grade) c.push(['grade', S.grade + (S.trim ? ' ' + S.trim : '')]);
+    if (S.y) c.push(['y', S.m ? S.y + '-' + pad(S.m) : S.y + '년']);
+    if (km != null) c.push(['km', (km / 1e4).toFixed(1) + '만km']);
+    if (S.color) c.push(['color', S.color]);
+    if (S.rent) c.push(['rent', '렌트']);
+    if (S.cond === '무사고') c.push(['cond', '무사고']);
+    if (S.cond === '입력') c.push(['cond', S.items.length ? ISC.summary(S.items.slice(0, 1)) + (S.items.length > 1 ? ' 외 ' + (S.items.length - 1) + '곳' : '') : '기록부(부위 없음)']);
+    if (cost) c.push(['cost', '수리비 ' + cost + '만']);
+    if (!c.length) return '';
+    return '<div class="v2-cchips">' + c.map(function (x) { return '<button type="button" class="v2-cchip" data-need="' + x[0] + '">' + esc(x[1]) + '</button>'; }).join('') +
+      '<button type="button" class="v2-link" data-act="reset">초기화</button></div>';
+  }
+  function recentList() { try { return JSON.parse(localStorage.getItem(RECENT) || '[]'); } catch (e) { return []; } }
+  function saveRecent() {                                    // 결과가 나온 차를 이 브라우저에 최근 10대로(같은 조건이면 맨 위로)
+    if (!R || !LAST || !S.model) return;
+    var hash = query(S, 'one'), list = recentList().filter(function (x) { return x.hash !== hash; });
+    list.unshift({ hash: hash, label: S.mk + ' ' + S.model + ' ' + S.grade + (S.trim ? ' ' + S.trim : ''), sub: regText() + ' · ' + (kmNum(S.km) / 1e4).toFixed(1) + '만km',
+      price: Math.round(R.price), conv: Math.round(R.converted), at: Date.now() });
+    try { localStorage.setItem(RECENT, JSON.stringify(list.slice(0, 10))); } catch (e) { /* 저장 못 해도 산정은 된다 */ }
+  }
+  function recentHtml() {                                    // 최근 산정(엔카 '최근 검색 조건') — 누르면 그 차를 다시 연다
+    var rl = recentList();
+    if (!rl.length) return '';
+    var when = function (t) { var d = new Date(t); return pad(d.getMonth() + 1) + '/' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+    return '<div class="v2-recent"><button type="button" class="v2-link" data-act="recent">최근 산정 ' + rl.length + '대 ' + (VIEW.recentOpen ? '▴' : '▾') + '</button>' +
+      (VIEW.recentOpen ? '<ul>' + rl.map(function (x) {
+        return '<li><a href="' + esc(x.hash) + '">' + esc(x.label) + '</a><span>' + esc(x.sub) + ' · 추정 ' + man(x.price) + '만 · 환산 ' + man(x.conv) + '만 · ' + when(x.at) + '</span></li>';
+      }).join('') + '</ul><button type="button" class="v2-link" data-act="recentClear">기록 지우기</button>' : '') + '</div>';
+  }
+
   function condMsgHtml() {                                   // 텍스트 읽기 결과 — 못 읽은 표기(반영 안 됨) · 계산에서 뺀 부위
     var h = '';
     if (VIEW.condWarn.length) h += '<span class="v2-bad">못 읽은 표기: ' + esc(VIEW.condWarn.join(', ')) + ' — 반영하지 않았습니다. 고쳐서 다시 읽어 주세요</span>';
@@ -428,8 +486,8 @@
     $('inp').querySelectorAll('[data-k]').forEach(function (el) { el.classList.toggle('v2-need', !!on[el.getAttribute('data-k')]); });
     $('inp').querySelectorAll('.v2-f').forEach(function (f) { f.classList.toggle('v2-needf', !!f.querySelector('.v2-need')); });   // 칸 이름 옆 '입력 필요'
   }
-  function focusNeed(k) {                                    // 남은 칸 안내를 누르면 그 입력 칸으로(아직 못 여는 칸이면 지금 채울 칸으로)
-    var el = $('inp').querySelector('[data-k="' + k + '"]');
+  function focusNeed(k) {                                    // 남은 칸 안내·조건 칩을 누르면 그 입력 칸으로(아직 못 여는 칸이면 지금 채울 칸으로)
+    var el = $('inp').querySelector('[data-k="' + k + '"], [data-chip="' + k + '"], [data-seg="' + k + '"]');
     if (!el || el.disabled) el = $('inp').querySelector('.v2-need');
     if (!el) return;
     el.scrollIntoView({ block: 'center' });                 // 바로 이동(부드러운 스크롤은 포커스와 겹치면 멈출 수 있다)
@@ -439,6 +497,7 @@
   function compute() { calc(); mbar(); }
 
   function calc() {
+    clearTimeout(recentTimer);
     var G = grp(), miss = missing(), km = kmNum(S.km), M = G && S.model && G.models[S.model];
     markMode(VIEW.mode);                                     // 탭은 고른 그대로 — 빈 칸이 있다고 모델 요약 탭으로 넘기지 않는다
     markNeed(miss);
@@ -464,6 +523,8 @@
     if (note) note.textContent = '자동: ' + auto.rate + '% (' + auto.source + (car['연료'] ? ' · ' + car['연료'] : '') + ')';
     LAST = { G: G, car: car, c: c };
     renderResult(G, car, c);
+    clearTimeout(recentTimer);
+    recentTimer = setTimeout(saveRecent, 2500);
     MB = bar('추정 <b>' + man(R.price) + '</b>만 · 환산 <b>' + man(R.converted) + '</b>만 · 신뢰도 ' + R.grade, '결과 보기 ↓');
   }
 
@@ -486,8 +547,12 @@
   function guide(miss) {
     $('res').innerHTML = miss.length ? needCard(miss) : '<div class="card"><div class="card-title">비교 매물을 불러오는 중…</div></div>';
   }
-  function needCard(miss) {                                  // 남은 칸만 이름으로(누르면 그 칸으로 간다)
-    return '<div class="card v2-needcard"><div class="card-title">' + (VIEW.mode === 'model' ? '모델 요약' : '한 대 산정') + '까지 남은 칸 ' +
+  function needCard(miss) {                                  // 남은 칸만 이름으로(누르면 그 칸으로 간다) · 처음 방문이면 사이트 설명을 위에
+    return (S.mk || VIEW.mode === 'model' ? '' : '<div class="card v2-intro"><div class="card-title">이 화면에서 하는 일</div><p>엔카에 올라온 비슷한 매물로 ' +
+      '이 차의 <b>시세(엔카 소매 호가)</b>와 <b>경매 예상가(환산가)</b>를 근거와 함께 냅니다.</p><ol><li>왼쪽 맨 위에 차명을 한 줄로 넣거나' +
+      '(예: 더 뉴 그랜저 IG 2.5 프리미엄 2020) 칸을 차례로 고르고</li><li>주행거리를 넣으면 바로 계산됩니다. 월·색상·성능 상태·수리비는 넣으면 더 정확해집니다.</li></ol>' +
+      '<p>여러 대는 <a class="v2-link" href="#/price?view=batch">묶음 산정</a>에 엑셀을 붙여 넣고, 시장 흐름은 <a class="v2-link" href="#/market">시장 시황</a>에서 봅니다.</p></div>') +
+      '<div class="card v2-needcard"><div class="card-title">' + (VIEW.mode === 'model' ? '모델 요약' : '한 대 산정') + '까지 남은 칸 ' +
       '<span class="hint">채우는 즉시 계산됩니다</span></div><div class="v2-needs">' + miss.map(function (x) {
         return '<button type="button" class="v2-needchip" data-need="' + x.keys[0] + '">' + esc(x.name) + '</button>';
       }).join('') + '</div>' +
@@ -510,7 +575,8 @@
       '<br><span class="sub">' + regText() + ' 등록 · ' + car['주행km'].toLocaleString('ko-KR') + 'km · ' + esc(S.color || '색상 상관없음') +
       (S.rent ? ' · 렌트' : '') + ' · ' + (c['상태'] === '미상' ? '상태 미상' : esc(c['사고라벨']) + ' · 성능 ' + c['성능등급'] + '등급 · 글로비스 ' +
         c['글로비스_종합평가점'] + '점·' + esc(c['글로비스_사고평가점'])) + '</span></div>' +
-      '<div class="v2-actions" style="margin:0"><button type="button" class="v2-btn" data-act="toBatch" title="이 차를 묶음 산정 목록에 한 줄로 더합니다. 단순수리·기계 결함·직접 뺀 매물·직접 넣은 환산 비율은 넘어가지 않습니다">묶음에 추가</button>' +
+      '<div class="v2-actions" style="margin:0">' + (batch().hasCar(batchCar()) ? '<button type="button" class="v2-btn" data-act="openBatch">묶음에 있음 · 묶음 산정 열기</button>' :
+        '<button type="button" class="v2-btn" data-act="toBatch" title="이 차를 묶음 산정 목록에 한 줄로 더합니다. 단순수리·기계 결함·직접 뺀 매물·직접 넣은 환산 비율은 넘어가지 않습니다">묶음에 추가</button>') +
       '<button type="button" class="v2-btn" data-act="xlsx">엑셀 내려받기</button></div></div>';
     if (VIEW.condWarn.length) h += '<div class="notebox v2-warnbox"><b>성능 상태 중 못 읽은 표기는 계산에 넣지 않았습니다:</b> ' + esc(VIEW.condWarn.join(', ')) +
       ' — 왼쪽 성능 상태에서 고쳐 다시 읽어 주세요.' + (S.items.length ? '' : ' 읽은 부위가 없어 상태 미상으로 계산했습니다.') + '</div>';
@@ -853,7 +919,8 @@
     }
     R.comps.forEach(function (x) { cr.push(line(x.row, x)); });
     modelRows(G, S.model).filter(function (r) { return S.ex.indexOf(String(r[fi.id])) >= 0; }).forEach(function (r) { cr.push(line(r, null)); });
-    XlsxWriter.download(fileSafe('시세산정_' + S.model + '_' + S.grade + '_' + today()) + '.xlsx', [
+    XlsxWriter.download(fileSafe('시세산정_' + S.model + '_' + S.grade + (S.trim ? '_' + S.trim : '') + '_' + (S.m ? S.y + '-' + pad(S.m) : S.y) + '_' +
+      (kmNum(S.km) / 1e4).toFixed(1) + '만km_' + today()) + '.xlsx', [
       { name: '산정 결과', rows: rows, header: true, widths: [32, 64] },
       { name: '비교 매물', rows: cr, header: true, freeze: true, money: [5, 15, 16, 17, 18],
         widths: [7, 11, 7, 11, 9, 10, 9, 18, 14, 8, 8, 12, 34, 10, 10, 10, 11, 11, 9, 7, 7, 8, 42] }]);
@@ -903,11 +970,14 @@
     }
     return B;
   }
-  function addToBatch(btn) {                                 // 한 대 산정 → 묶음 산정 목록(기획안 6장)
-    var n = batch().addCar({ name: S.mk + ' ' + S.model + ' ' + S.grade + (S.trim ? ' ' + S.trim : ''), reg: S.m ? S.y + '-' + pad(S.m) : S.y, year: S.y,
+  function batchCar() {                                     // 묶음 산정 한 줄로 넘길 이 차
+    return { name: S.mk + ' ' + S.model + ' ' + S.grade + (S.trim ? ' ' + S.trim : ''), reg: S.m ? S.y + '-' + pad(S.m) : S.y, year: S.y,
       km: S.km, color: S.color, cost: S.cost, rent: S.rent,
-      cond: S.cond === '미상' || !S.items.length && S.cond === '입력' ? '' : S.cond === '무사고' ? '무사고' : ISC.toText(S.items) });
-    btn.outerHTML = '<button type="button" class="v2-btn" data-act="openBatch">묶음 산정 열기 · ' + n + '대</button>';
+      cond: S.cond === '미상' || !S.items.length && S.cond === '입력' ? '' : S.cond === '무사고' ? '무사고' : ISC.toText(S.items) };
+  }
+  function addToBatch(btn) {                                 // 한 대 산정 → 묶음 산정 목록(기획안 6장) — 같은 차가 이미 있으면 더하지 않는다
+    var r = batch().addCar(batchCar());
+    btn.outerHTML = '<button type="button" class="v2-btn" data-act="openBatch">' + (r.dup ? '이미 묶음에 있음 · ' : '묶음 산정 열기 · ') + r.n + '대</button>';
   }
 
   function markMode(v) {
@@ -1023,6 +1093,8 @@
       if (chipK === 'fix') { toggle(S.fixes, v); renderInputs(); changed(); return; }
       if (act === 'parse') { parseCond(); return; }
       if (act === 'findName') { findName(); return; }
+      if (act === 'recent') { VIEW.recentOpen = !VIEW.recentOpen; renderInputs(); return; }
+      if (act === 'recentClear') { try { localStorage.removeItem(RECENT); } catch (e) { /* 지우지 못해도 산정은 된다 */ } VIEW.recentOpen = false; renderInputs(); return; }
       if (act === 'pickCand') {                                 // 차명 찾기 다른 후보 고르기
         var c = VIEW.nameCands[+b.getAttribute('data-i')], yi = yearIn(VIEW.nameText), text = yi ? yi.rest : VIEW.nameText;
         if (c) loadFiles([c.file]).then(function () { VIEW.nameCands = []; setModel(c, text, 'pick'); }).catch(fail);

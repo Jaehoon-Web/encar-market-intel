@@ -265,6 +265,33 @@
       return out;
     }
 
+    // 쉼표 없이 여러 부위를 한 칸에 적은 경우('후드 교환 좌앞휀더 판금', '후드X 좌앞휀더W') — 부위 이름이 두 번째로 나오는 낱말 앞에서 나눈다.
+    // 그 바로 앞의 좌우·앞뒤 낱말('좌측 앞 휀더')은 새 부위 쪽으로 붙인다
+    function splitParts(tok) {
+      function hasPart(w) {
+        var c = compact(w), i;
+        for (i = 0; i < aliases.length; i++) if (c.indexOf(aliases[i].c) >= 0) return true;
+        for (i = 0; i < OUTSIDE.length; i++) if (c.indexOf(OUTSIDE[i].c) >= 0) return true;
+        return false;
+      }
+      function sideDir(w) { var c = compact(w); return words.some(function (x) { return (x.type === 'side' || x.type === 'dir' || x.type === 'both') && x.c === c; }); }
+      var groups = [], cur = [], seen = false;
+      tok.trim().split(/\s+/).forEach(function (w) {
+        var p = hasPart(w);
+        if (p && seen) {
+          var k = cur.length;
+          while (k > 0 && sideDir(cur[k - 1])) k--;
+          groups.push(cur.slice(0, k).join(' '));
+          cur = cur.slice(k);
+          seen = false;
+        }
+        cur.push(w);
+        if (p) seen = true;
+      });
+      groups.push(cur.join(' '));
+      return groups.filter(function (g) { return g; });
+    }
+
     function parseText(text) {
       var res = { state: '입력', items: [], unknown: [], notes: [], outside: [] }, ignored = [];
       var s = text == null ? '' : String(text);
@@ -283,7 +310,15 @@
         if (NO_DAMAGE[compact(tok)]) { ignored.push(tok); return; }
         if (outside(tok)) { res.outside.push(tok); return; }
         var r = parseToken(tok, res.notes);
-        if (r) res.items = res.items.concat(r);
+        if (r) { res.items = res.items.concat(r); return; }
+        var parts = splitParts(tok), got = [], outs = [], ok = parts.length > 1;
+        if (ok) parts.forEach(function (p) {
+          if (!ok) return;
+          if (outside(p)) { outs.push(p); return; }
+          var q = parseToken(p, res.notes);
+          if (q) got = got.concat(q); else ok = false;
+        });
+        if (ok) { res.items = res.items.concat(got); res.outside = res.outside.concat(outs); }
         else res.unknown.push(tok);
       });
       if (!res.items.length && !res.unknown.length) res.state = '무사고';

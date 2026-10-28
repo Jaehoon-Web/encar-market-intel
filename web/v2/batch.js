@@ -678,7 +678,7 @@
 
     // 한 대 산정 [묶음에 추가](기획안 6장): 지금 붙여넣은 표의 열 구성에 맞춰 한 줄을 덧붙인다. 비어 있으면 기본 머리글로 시작
     var STD = ['차명', '최초등록', '주행거리', '색상', '성능 상태', '수리비', '렌트'];
-    function addCar(c) {                                     // c = { name, reg(YYYY-MM), year, km, color, cond, cost, rent } → 묶음 대수
+    function carLine(c) {                                    // c = { name, reg(YYYY-MM), year, km, color, cond, cost, rent } → 지금 묶음 글·열에 맞춘 한 줄
       var text = el ? $('bPaste').value : ((load('draft') || {}).text || '');
       var table = parseTSV(text);
       if (!table.length) { text = STD.join('\t'); table = [STD.slice()]; }
@@ -692,10 +692,19 @@
         return val[r] == null ? '' : val[r];
       });
       if (!used.name && roles.indexOf('grade') >= 0) cells[roles.indexOf('grade')] = c.name;
-      text = text.replace(/\s+$/, '') + '\n' + cells.map(function (v) { return String(v).replace(/[\t\r\n]+/g, ' '); }).join('\t');
-      if (el) { $('bPaste').value = text; run(); }
-      else save('draft', { text: text, roles: roles, header: header });
-      return parseTSV(text).length - (header ? 1 : 0);
+      return { text: text, roles: roles, header: header, line: cells.map(function (v) { return String(v).replace(/[\t\r\n]+/g, ' '); }).join('\t') };
+    }
+    function hasCar(c) {                                     // 같은 차(같은 줄)가 이미 묶음에 있나
+      var x = carLine(c);
+      return x.text.split(/\r?\n/).indexOf(x.line) >= 0;
+    }
+    function addCar(c) {                                     // → { n: 묶음 대수, dup: 이미 있어서 더하지 않음 }
+      var x = carLine(c), dup = x.text.split(/\r?\n/).indexOf(x.line) >= 0, text = dup ? x.text : x.text.replace(/\s+$/, '') + '\n' + x.line;
+      if (!dup) {
+        if (el) { $('bPaste').value = text; run(); }
+        else save('draft', { text: text, roles: x.roles, header: x.header });
+      }
+      return { n: parseTSV(text).length - (x.header ? 1 : 0), dup: dup };
     }
 
     function show(container) {
@@ -706,7 +715,7 @@
         if (d && d.text) { $('bPaste').value = d.text; run(); }
       }
     }
-    return { show: show, addCar: addCar, parseTSV: parseTSV, detect: detect };
+    return { show: show, addCar: addCar, hasCar: hasCar, parseTSV: parseTSV, detect: detect };
   }
 
   var api = { create: create, parseTSV: parseTSV, kmOf: kmOf, costOf: costOf, priceOf: priceOf, regOf: regOf, yearOf: yearOf, colorOf: colorOf, rentOf: rentOf };
