@@ -134,13 +134,17 @@
           (unit ? '<small>' + esc(unit) + '</small>' : '') + '</div><div class="v2-kv">' + (d ? '<b>' + esc(d) + '</b> ' : '') + esc(sub) + '</div></div>';
       };
       var sub = irr ? span + ' 평균 — ' + (p.days > IRREG[1] ? '공백이 길어 그사이 들어왔다 팔린 매물이 빠져 낮게 나옴' : '구간이 짧아 7일로 늘린 값') : span + ' · 7일 환산';
+      // 유입·판매·호가는 구간 값이라 간격이 5~16일이고 목록 누락 의심이 없는 직전 구간과만 비교 (83일 공백 평균과 비교하면 증감이 부풀어 보임)
+      var r = null;
+      if (!irr) for (var j = i - 1; j >= 0; j--) if (pts[j].new_w != null && pts[j].days >= IRREG[0] && pts[j].days <= IRREG[1] && !pts[j].sold_suspect) { r = pts[j]; break; }
+      var vs = r && r !== q ? ' · ' + md(r.date) + ' 구간 대비' : '';
       return '<div class="v2-cards v2-bcards">' +
         t('판매중 재고', (p.on || 0).toLocaleString('ko-KR'), '대', (q ? md(q.date) + ' 대비' : '') + ' · 상세 확인 매물', q && q.on != null ? delta(p.on, q.on, 0, '대') : '') +
-        t('주간 신규 유입', p.new_w != null ? p.new_w.toLocaleString('ko-KR') : '–', p.new_w != null ? '대' : '', p.new_w != null ? sub : '첫 수집', q && q.new_w != null && p.new_w != null ? delta(p.new_w, q.new_w, 0, '대') : '') +
-        t('주간 판매(추정)', p.sold_w != null ? p.sold_w.toLocaleString('ko-KR') : '–', p.sold_w != null ? '대' : '', p.sold_w != null ? sub + (p.sold_suspect ? ' · 목록 누락으로 부풀었을 수 있음' : '') : '첫 수집',
-          q && q.sold_w != null && p.sold_w != null ? delta(p.sold_w, q.sold_w, 0, '대') : '') +
-        t('신규 매물 중앙 호가', p.new_med != null ? man(p.new_med) : '–', p.new_med != null ? '만원' : '', '그 구간에 새로 등록된 매물의 첫 호가(구성에 따라 움직임)',
-          q && q.new_med != null && p.new_med != null ? delta(p.new_med, q.new_med, 0, '만') : '') + '</div>';
+        t('주간 신규 유입', p.new_w != null ? p.new_w.toLocaleString('ko-KR') : '–', p.new_w != null ? '대' : '', p.new_w != null ? sub + vs : '첫 수집', r && p.new_w != null ? delta(p.new_w, r.new_w, 0, '대') : '') +
+        t('주간 판매(추정)', p.sold_w != null ? p.sold_w.toLocaleString('ko-KR') : '–', p.sold_w != null ? '대' : '', p.sold_w != null ? sub + vs + (p.sold_suspect ? ' · 목록 누락으로 부풀었을 수 있음' : '') : '첫 수집',
+          r && p.sold_w != null ? delta(p.sold_w, r.sold_w, 0, '대') : '') +
+        t('신규 매물 중앙 호가', p.new_med != null ? man(p.new_med) : '–', p.new_med != null ? '만원' : '', '그 구간에 새로 등록된 매물의 첫 호가(구성에 따라 움직임)' + vs,
+          r && r.new_med != null && p.new_med != null ? delta(p.new_med, r.new_med, 0, '만') : '') + '</div>';
     }
 
     // ───── 트렌드: 지수 · 흐름(재고 / 유입·판매) ─────
