@@ -138,6 +138,7 @@ def plate_type(plate):
 
 
 def main():
+    sys.stdout.reconfigure(encoding="utf-8")   # 리포트의 '—' 등이 cp949 콘솔에서 출력 오류를 내지 않도록 (2026-10-28 실패 기록)
     t0 = datetime.datetime.now()
     os.makedirs(OUT, exist_ok=True)
 
