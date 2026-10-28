@@ -286,3 +286,10 @@ select.filter-select.v2-need, .v2-in.v2-need { border-color: var(--accent); box-
 .v2-mbar button span:last-child { flex-shrink: 0; font-weight: 600; }
 @media (min-width: 1024px) { .v2-mbar { display: none !important; } }
 @media (max-width: 1023px) { #app { padding-bottom: 76px; } }
+
+/* 차명 한 줄로 찾기(엔카 벤치마크 A, 2026-10-28) */
+.v2-namefind { margin: 0 0 14px; }
+.v2-nmsg { font-size: 12px; margin: 6px 0 0; color: var(--tx-3); line-height: 1.6; }
+.v2-nmsg b { color: var(--tx-1); font-weight: 600; }
+.v2-warnt { color: var(--down); font-weight: 700; }
+.v2-cand { margin: 4px 4px 0 0; padding: 3px 10px; font-size: 12px; }
