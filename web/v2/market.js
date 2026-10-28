@@ -101,7 +101,9 @@
       var p = pts[i], j = prevOf(pts, f, i), latest = p.date === lastDate();
       var tip = (latest ? '' : '마지막 값 ' + p.date + ' · ') + (j >= 0 ? pts[j].date + ' 대비' : '');
       var lab = f === '시황' && p.label ? ' <span class="v2-mlab ' + (p.label === '강세' ? 'up' : p.label === '약세' ? 'down' : '') + '">' + esc(p.label) + '</span>' : '';
-      return '<td class="num' + (latest ? '' : ' v2-dim') + '" title="' + esc(tip) + '"><b>' + f1(p[f]) + '</b>' + lab + (latest ? '' : '<small>' + md(p.date) + '</small>') +
+      var fix = f === '재고' && p.stock_fix;      // 전남광주가 빠진 회차: 실측 누락 대수를 더한 값
+      if (fix) tip += (tip ? ' · ' : '') + '전남광주 누락분 ' + p.stock_fix.toLocaleString('ko-KR') + '대를 더한 값';
+      return '<td class="num' + (latest ? '' : ' v2-dim') + '" title="' + esc(tip) + '"><b>' + f1(p[f]) + '</b>' + lab + (fix ? '<small>보정</small>' : '') + (latest ? '' : '<small>' + md(p.date) + '</small>') +
         '<small>' + (j >= 0 ? delta(p[f], pts[j][f], 1) : '') + '</small></td>';
     }
 
@@ -119,7 +121,9 @@
       });
       h += '</tbody></table></div><p class="v2-help">' + esc(MI.definitions['시황']) + '. 판매속도는 수집 간격이 5~16일인 구간만 계산합니다' +
         (series('전체|전체').some(function (p) { return p.date === lastDate() && p['판매속도'] != null; }) ? '' : ' — 지금은 공백 뒤 첫 회차라 판매속도·시황이 없고, 다음 주간 수집부터 나옵니다') +
-        '. 흐린 값은 그 지수의 마지막 값(날짜 표시)입니다.</p></div>';
+        '. 흐린 값은 그 지수의 마지막 값(날짜 표시)입니다.' +
+        (series('전체|전체').some(function (p) { return p.stock_fix; }) ? ' 재고의 "보정"은 엔카가 광주·전남 매물을 "전남광주"로 바꿔 목록에서 빠졌던 회차(7/29~)에 실측 누락 대수를 더한 값입니다.' : '') +
+        '</p></div>';
       return h;
     }
 
@@ -134,15 +138,28 @@
           (unit ? '<small>' + esc(unit) + '</small>' : '') + '</div><div class="v2-kv">' + (d ? '<b>' + esc(d) + '</b> ' : '') + esc(sub) + '</div></div>';
       };
       var sub = irr ? span + ' 평균 — ' + (p.days > IRREG[1] ? '공백이 길어 그사이 들어왔다 팔린 매물이 빠져 낮게 나옴' : '구간이 짧아 7일로 늘린 값') : span + ' · 7일 환산';
-      // 유입·판매·호가는 구간 값이라 간격이 5~16일이고 목록 누락 의심이 없는 직전 구간과만 비교 (83일 공백 평균과 비교하면 증감이 부풀어 보임)
-      var r = null;
-      if (!irr) for (var j = i - 1; j >= 0; j--) if (pts[j].new_w != null && pts[j].days >= IRREG[0] && pts[j].days <= IRREG[1] && !pts[j].sold_suspect) { r = pts[j]; break; }
-      var vs = r && r !== q ? ' · ' + md(r.date) + ' 구간 대비' : '';
+      // 유입·판매·호가는 구간 값이라 간격이 5~16일이고 목록 누락 의심이 없는 직전 구간과만 비교 (83일 공백 평균과 비교하면 증감이 부풀어 보임).
+      // 전남광주가 빠진 회차(jn_gap: 판매중·유입, jn_gap_sold: 판매)는 낮게 잡혀 기준으로 쓰지 않고, 그 회차 자체는 증감 대신 안내를 붙인다
+      var ref = function (bad) {                                       // 유입·호가는 jn_gap, 판매는 jn_gap_sold 회차를 건너뛴다
+        if (irr) return null;
+        for (var j = i - 1; j >= 0; j--) {
+          var x = pts[j];
+          if (x.new_w != null && x.days >= IRREG[0] && x.days <= IRREG[1] && !x.sold_suspect && !x[bad]) return x;
+        }
+        return null;
+      };
+      var r = ref('jn_gap'), rs = ref('jn_gap_sold');
+      var vsOf = function (x) { return x && x !== q ? ' · ' + md(x.date) + ' 구간 대비' : ''; }, vs = vsOf(r);
+      var JN = ' · 전남광주 매물이 빠져 실제보다 낮게 잡힘';
+      var onq = q && q.on != null && !p.jn_gap === !q.jn_gap;          // 전남광주가 빠진 회차와 다시 잡힌 회차는 판매중 재고를 비교하지 않음
       return '<div class="v2-cards v2-bcards">' +
-        t('판매중 재고', (p.on || 0).toLocaleString('ko-KR'), '대', (q ? md(q.date) + ' 대비' : '') + ' · 상세 확인 매물', q && q.on != null ? delta(p.on, q.on, 0, '대') : '') +
-        t('주간 신규 유입', p.new_w != null ? p.new_w.toLocaleString('ko-KR') : '–', p.new_w != null ? '대' : '', p.new_w != null ? sub + vs : '첫 수집', r && p.new_w != null ? delta(p.new_w, r.new_w, 0, '대') : '') +
-        t('주간 판매(추정)', p.sold_w != null ? p.sold_w.toLocaleString('ko-KR') : '–', p.sold_w != null ? '대' : '', p.sold_w != null ? sub + vs + (p.sold_suspect ? ' · 목록 누락으로 부풀었을 수 있음' : '') : '첫 수집',
-          r && p.sold_w != null ? delta(p.sold_w, r.sold_w, 0, '대') : '') +
+        t('판매중 재고', (p.on || 0).toLocaleString('ko-KR'), '대', (onq ? md(q.date) + ' 대비 · ' : q ? md(q.date) + '은 전남광주가 빠진 회차라 비교 안 함 · ' : '') + '상세 확인 매물' + (p.jn_gap ? JN : ''),
+          onq ? delta(p.on, q.on, 0, '대') : '') +
+        t('주간 신규 유입', p.new_w != null ? p.new_w.toLocaleString('ko-KR') : '–', p.new_w != null ? '대' : '', p.new_w != null ? sub + (p.jn_gap ? JN : vs) : '첫 수집',
+          r && p.new_w != null && !p.jn_gap ? delta(p.new_w, r.new_w, 0, '대') : '') +
+        t('주간 판매(추정)', p.sold_w != null ? p.sold_w.toLocaleString('ko-KR') : '–', p.sold_w != null ? '대' : '',
+          p.sold_w != null ? sub + (p.jn_gap_sold ? ' · 시작 목록에 전남광주 매물이 빠져 실제보다 낮게 잡힘' : vsOf(rs)) + (p.sold_suspect ? ' · 목록 누락으로 부풀었을 수 있음' : '') : '첫 수집',
+          rs && p.sold_w != null && !p.jn_gap_sold ? delta(p.sold_w, rs.sold_w, 0, '대') : '') +
         t('신규 매물 중앙 호가', p.new_med != null ? man(p.new_med) : '–', p.new_med != null ? '만원' : '', '그 구간에 새로 등록된 매물의 첫 호가(구성에 따라 움직임)' + vs,
           r && r.new_med != null && p.new_med != null ? delta(p.new_med, r.new_med, 0, '만') : '') + '</div>';
     }

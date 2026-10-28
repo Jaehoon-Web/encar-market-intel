@@ -19,6 +19,9 @@ market_index.py — 시황판 지수 (기획안 D4, 5.2.1): 시세·판매속도
               목록 누락으로 사라진 대수가 재고의 1%를 넘는 회차는 재고를 계산하지 않는다
   · 시황지수: 시세 · 판매속도 · (10000 ÷ 재고)의 기하평균. 102 이상 강세 / 98~102 보합 / 98 이하 약세
 세그먼트: 전체·국산·수입 × 전체·차급. 표본(신규 비교·시작 재고·재고 중 하나)이 300대 미만이면 low_sample
+수집 범위(D10 이음): 지수와 흐름은 기준기간 조회로 잡히던 매물('7월 범위')로만 센다. 2026-11 크롤러가 더 받는 국산 쉐보레·
+  기타 제조사·수입 브랜드(비친환경)·현대·기아 경기 기타 연료는 빼고(차종 비교에는 씀), '전남광주'는 7월에 광주·전남으로 잡히던
+  매물이라 넣는다. 7/29~D10 전 목록은 전남광주가 빠졌으므로 재고에 실측 누락 대수를 더하고(JN_ADD) 흐름에는 jn_gap 표시
 """
 import os, sys, json, datetime
 import numpy as np
@@ -47,11 +50,30 @@ MIN_N = 300
 OBS_FIX = {"2026-10-26": "2026-10-21"}   # 목록은 10/21 수집, 상세 수집이 10/26에 끝나 그날로 기록됨
 LOG_DOMESTIC_SHARE = 0.6936              # 2026-07-01 수집 로그(조회별 대수 + 친환경 추가분): 국산 143,473 / 206,868
 
+# 7월 범위 — 기준기간 크롤러 조회식으로 잡히는 매물. 현대·기아는 지역별(경기 비친환경만 연료 3종), 아래 제조사는 전부, 친환경은 전부
+JULY_MAKERS = {"제네시스", "KG모빌리티(쌍용)", "르노코리아(삼성)", "벤츠", "BMW", "아우디",
+               "볼보", "포르쉐", "렉서스", "도요타", "혼다", "포드", "랜드로버", "미니", "폭스바겐", "재규어",
+               "링컨", "캐딜락", "푸조", "마세라티", "페라리", "람보르기니", "벤틀리", "롤스로이스", "시트로엥",
+               "닛산", "인피니티", "쉐보레", "알파 로메오", "지프", "닷지", "크라이슬러", "사브"}
+JULY_GG_FUELS = {"가솔린", "디젤", "LPG(일반인 구입)"}
+GREEN_FUELS = {"하이브리드", "전기", "수소"}            # 상세 표의 친환경: 목록 친환경 조회로 잡혔거나(카테고리 eco) 이 연료
+# 전남광주 누락: 7/29 목록부터 엔카가 광주·전남 매물 대부분을 '전남광주'로 표시해, 지역별로 받던 제조사의 비친환경 매물이 빠졌다.
+# 목록에 이 매물이 JN_MIN대 미만인 회차(D10 크롤러 전)는 재고에 JN_ADD를 더한다 — 2026-10-28 D10 리허설 목록에서 센
+# 전남광주·지역별 제조사·비친환경 매물(구분·차급별). 10/21도 같은 값을 쓴다(한 주 사이 목록 전체 변화 1% 안팎)
+JN_START = "2026-07-29"
+JN_SPLIT = {"현대", "기아", "제네시스", "KG모빌리티(쌍용)", "벤츠", "BMW"}
+JN_MIN = 1000
+JN_ADD_DATE = "2026-10-28"
+JN_ADD = {("국산", "RV"): 528, ("국산", "SUV"): 2135, ("국산", "경차"): 474, ("국산", "대형"): 1362, ("국산", "소형"): 46,
+          ("국산", "스포츠"): 3, ("국산", "승합"): 291, ("국산", "준중형"): 525, ("국산", "중형"): 492, ("국산", "화물"): 234,
+          ("수입", "SUV"): 291, ("수입", "대형"): 203, ("수입", "소형"): 34, ("수입", "스포츠"): 39, ("수입", "승합"): 4,
+          ("수입", "준중형"): 64, ("수입", "중형"): 275}   # 합계 7,000 (국산 6,090 · 수입 910)
+
 
 def load():
     L = pd.read_parquet(os.path.join(PREP, "listings.parquet"),
                         columns=["상태", "첫관측일", "마지막관측일", "판매추정일", "엔카등록일", "등록연월", "첫가격", "현재가", "주행km",
-                                 "제조사", "모델그룹", "모델", "등급", "세부등급", "차급", "국산", "시도", "성능감가율", "색상계열", "번호판유형",
+                                 "제조사", "모델그룹", "모델", "등급", "세부등급", "차급", "국산", "시도", "카테고리", "연료", "연료_원문", "성능감가율", "색상계열", "번호판유형",
                                  "체류일", "더미가", "인수금의심", "주행의심", "핵심결측"])
     for c in ["첫관측일", "마지막관측일", "판매추정일", "엔카등록일"]:
         L[c] = pd.to_datetime(L[c], errors="coerce")
@@ -80,23 +102,57 @@ def pick(df, key):
     return df[m]
 
 
+# ───────── 7월 범위 (D10 수집 범위 확대 이음) ─────────
+def july_scope(maker, region, fuel, green):
+    """7월 범위 여부(목록·상세 공통) — 기준기간 크롤러 조회식으로 잡히는 매물. 전남광주는 7월의 광주·전남이라 지역 조건 없이 넣는다"""
+    hk = maker.isin(["현대", "기아"])
+    return (green | maker.isin(JULY_MAKERS) | (hk & ((region != "경기") | fuel.isin(JULY_GG_FUELS)))).values
+
+
+def scope_of(L):
+    green = L["카테고리"].fillna("").str.contains("eco") | L["연료"].isin(GREEN_FUELS)
+    return july_scope(L["제조사"], L["시도"], L["연료_원문"], green)
+
+
+def jn_add(key):
+    o, s = key
+    return float(sum(n for (o2, s2), n in JN_ADD.items() if o in ("전체", o2) and s in ("전체", s2)))
+
+
+def jn_gap_dates(LC, dates):
+    """전남광주가 빠진 목록 관측일 — JN_START 이후이면서 목록 실측의 전남광주(지역별 제조사·비친환경)가 JN_MIN대 미만이거나 기록 없음"""
+    have = LC["전남광주"].astype(float).groupby(LC["관측일"]).sum(min_count=1) if "전남광주" in LC else pd.Series(dtype=float)
+    return {o for o in dates if o >= JN_START and not have.get(o, np.nan) >= JN_MIN}
+
+
 # ───────── 목록 실측 대수 (ids_all.json → list_counts.csv 누적) ─────────
-def record_list_counts(L):
-    if not os.path.exists(IDS_ALL):
-        return pd.DataFrame(columns=["관측일", "origin", "seg", "대수"])
-    obs = datetime.date.fromtimestamp(os.path.getmtime(IDS_ALL)).isoformat()
-    with open(IDS_ALL, encoding="utf-8") as f:
-        ids = pd.DataFrame(json.load(f))
+def list_frame(ids, L):
+    """목록 매물 → origin·seg(상세 표의 제조사·모델 최빈값) · 7월 범위 · 전남광주 누락 대상(지역별 제조사·비친환경)"""
     mk = L.groupby("제조사")["origin"].agg(lambda s: s.mode().iat[0])
     seg = L.groupby(["제조사", "모델"])["seg"].agg(lambda s: s.mode().iat[0])
     cat = ids["category"].fillna("")
     org = ids["manufacturer"].map(mk)
     org = org.fillna(pd.Series(np.where(cat.str.contains("imported"), "수입", "국산"), index=ids.index))
     sg = pd.Series(pd.MultiIndex.from_arrays([ids["manufacturer"], ids["model"]]).map(seg), index=ids.index).fillna("기타")
-    now = (pd.DataFrame({"origin": org, "seg": sg}).groupby(["origin", "seg"]).size().rename("대수").reset_index()
-           .assign(관측일=obs)[["관측일", "origin", "seg", "대수"]])
+    green = ids["green_type"].eq("Y")
+    return pd.DataFrame({"origin": org, "seg": sg,
+                         "범위내": july_scope(ids["manufacturer"], ids["region"], ids["fuel_type"], green),
+                         "전남광주": (ids["region"].eq("전남광주") & ids["manufacturer"].isin(JN_SPLIT) & ~green).values})
+
+
+def record_list_counts(L):
+    cols = ["관측일", "origin", "seg", "대수", "범위내", "전남광주"]     # 범위내·전남광주는 2026-10-28 실행부터(이전 행은 빈칸)
+    if not os.path.exists(IDS_ALL):
+        return pd.DataFrame(columns=cols)
+    obs = datetime.date.fromtimestamp(os.path.getmtime(IDS_ALL)).isoformat()
+    with open(IDS_ALL, encoding="utf-8") as f:
+        ids = pd.DataFrame(json.load(f))
+    now = (list_frame(ids, L).groupby(["origin", "seg"])
+           .agg(대수=("범위내", "size"), 범위내=("범위내", "sum"), 전남광주=("전남광주", "sum")).reset_index()
+           .assign(관측일=obs)[cols])
     old = pd.read_csv(LIST_COUNTS, encoding="utf-8-sig") if os.path.exists(LIST_COUNTS) else now.iloc[0:0]
     out = pd.concat([old[old["관측일"] != obs], now], ignore_index=True).sort_values(["관측일", "origin", "seg"])
+    out[["범위내", "전남광주"]] = out[["범위내", "전남광주"]].astype("Int64")
     out.to_csv(LIST_COUNTS, index=False, encoding="utf-8-sig")
     return out
 
@@ -162,7 +218,9 @@ def speed(ivs, keys):
 
 
 # ───────── 재고 ─────────
-def stock(L, crawls, obs, total, LC, ivs, keys):
+def stock(L, crawls, obs, total, LC, ivs, keys, jn):
+    """회차·세그먼트별 (지수, 대수, 구성비 추정 여부, 전남광주 보정 대수). 목록 실측은 7월 범위 대수(없으면 전체),
+    전남광주가 빠진 회차(jn)는 JN_ADD를 더한다"""
     gap = {iv["c"]: iv["missing"] / iv["start_all"] for iv in ivs}
     lc_dates = set(LC["관측일"])
     tab = {}
@@ -172,8 +230,10 @@ def stock(L, crawls, obs, total, LC, ivs, keys):
             continue
         if o in lc_dates:                                                          # 목록 실측
             d = LC[LC["관측일"] == o]
+            d = d.assign(n=d["범위내"].astype(float).fillna(d["대수"]) if "범위내" in d else d["대수"])
             for key in keys:
-                tab[(key, c)] = (float(pick(d, key)["대수"].sum()), False)
+                fx = jn_add(key) if o in jn else 0.0
+                tab[(key, c)] = (float(pick(d, key)["n"].sum()) + fx, False, fx)
             continue
         on = L[(L["첫관측일"] <= c) & (L["마지막관측일"] >= c)]                     # 추정: 로그 국산 비율 × 상세 차급 구성
         share = {"국산": LOG_DOMESTIC_SHARE, "수입": 1 - LOG_DOMESTIC_SHARE}
@@ -189,7 +249,7 @@ def stock(L, crawls, obs, total, LC, ivs, keys):
                 v = float(total[c]) if key[1] == "전체" else part.get(("국산", key[1]), 0) + part.get(("수입", key[1]), 0)
             else:
                 v = part.get(key, 0.0)
-            tab[(key, c)] = (v, True)
+            tab[(key, c)] = (v, True, 0.0)
     base_dates = [c for c in crawls if BASE[0] <= obs[c].strftime("%Y-%m-%d") <= BASE[1]]
     out = {}
     for key in keys:
@@ -197,7 +257,7 @@ def stock(L, crawls, obs, total, LC, ivs, keys):
         if not b or np.mean(b) <= 0:
             continue
         bm = np.mean(b)
-        out[key] = {c: (tab[(key, c)][0] / bm * 100, tab[(key, c)][0], tab[(key, c)][1]) for c in crawls if (key, c) in tab}
+        out[key] = {c: (tab[(key, c)][0] / bm * 100,) + tab[(key, c)] for c in crawls if (key, c) in tab}
     return out
 
 
@@ -334,15 +394,20 @@ def build(L, crawls, obs, total, C):
     LC = record_list_counts(L)
     segs = sorted(s for s in L["seg"].unique() if s != "기타")
     keys = keys_of(segs)
+    Lu = L[scope_of(L)]                                                             # 지수·흐름은 7월 범위, 차종 비교는 전체
+    days = [obs[c].strftime("%Y-%m-%d") for c in crawls]
+    jn = jn_gap_dates(LC, days)
     ivs = intervals(L, crawls, obs)
+    ivu = intervals(Lu, crawls, obs) if len(Lu) < len(L) else ivs
     PF = price_frame(L, obs, C)
-    SP, ST, PR = speed(ivs, keys), stock(L, crawls, obs, total, LC, ivs, keys), price(PF, crawls, obs, keys)
-    FL = flows(L, crawls, obs, ivs, keys)
+    PFu = PF[PF.index.isin(Lu.index)]
+    SP, ST, PR = speed(ivu, keys), stock(Lu, crawls, obs, total, LC, ivu, keys, jn), price(PFu, crawls, obs, keys)
+    FL = flows(Lu, crawls, obs, ivu, keys)
     series = {}
     for key in keys:
         pts = []
-        for c in crawls:
-            e = {"date": obs[c].strftime("%Y-%m-%d")}
+        for i, c in enumerate(crawls):
+            e = {"date": days[i]}
             if c in PR.get(key, {}):
                 v, n = PR[key][c]
                 e["시세"], e["n_price"] = round(float(v), 1), n
@@ -350,19 +415,25 @@ def build(L, crawls, obs, total, C):
                 v, n0, n1 = SP[key][c]
                 e["판매속도"], e["n_start"], e["n_sold"] = round(float(v), 1), n0, n1
             if c in ST.get(key, {}):
-                v, n, est = ST[key][c]
+                v, n, est, fx = ST[key][c]
                 e["재고"], e["n_stock"] = round(float(v), 1), int(round(n))
                 if est: e["stock_est"] = True
+                if fx: e["stock_fix"] = int(round(fx))                                  # 전남광주 누락분을 더한 대수
             if all(k in e for k in ["시세", "판매속도", "재고"]) and e["재고"] > 0:
                 e["시황"] = round(float(np.exp(np.mean(np.log([e["시세"], e["판매속도"], 10000 / e["재고"]])))), 1)
                 e["label"] = "강세" if e["시황"] >= 102 else ("약세" if e["시황"] <= 98 else "보합")
             ns = [e[k] for k in ["n_price", "n_start", "n_stock"] if k in e]
             e["low_sample"] = bool(ns) and min(ns) < MIN_N
             e.update(FL.get(key, {}).get(c, {}))
+            if days[i] in jn and "on" in e:
+                e["jn_gap"] = True                                                      # 전남광주가 빠진 목록 → 판매중·유입 낮음
+            if i and days[i - 1] in jn and "sold" in e:
+                e["jn_gap_sold"] = True                                                 # 시작 목록에 전남광주가 빠짐 → 판매 낮음
             if len(e) > 2: pts.append(e)
         if pts:
             series[f"{key[0]}|{key[1]}"] = pts
-    gap = {iv["c"]: iv for iv in ivs}
+    gap = {iv["c"]: iv for iv in ivu}
+    out_n = (LC["대수"] - LC["범위내"].astype(float)).groupby(LC["관측일"]).sum(min_count=1) if "범위내" in LC else pd.Series(dtype=float)
     log = []
     for i, c in enumerate(crawls):
         g = (obs[c] - obs[crawls[i - 1]]).days if i else None
@@ -375,10 +446,19 @@ def build(L, crawls, obs, total, C):
             regs = sorted({x.split("·")[1] for x in iv["bad"]})
             notes.append(f"목록 누락 의심({'·'.join(regs)}, 상세 기준 약 {iv['missing']:,.0f}대) — 해당 칸 판매속도 제외"
                          + (", 재고 계산 제외" if iv["missing"] / iv["start_all"] > STOCK_GAP_MAX else ""))
-        if c.strftime("%Y-%m-%d") != obs[c].strftime("%Y-%m-%d"):
+        fx = ST.get(("전체", "전체"), {}).get(c, (0, 0, 0, 0))[3]
+        if days[i] in jn:
+            notes.append("전남광주 누락 — " + (f"재고에 {JN_ADD_DATE[5:].replace('-', '/')} 실측 {fx:,.0f}대를 더함, " if fx else "")
+                         + "판매중 재고·신규 유입은 그만큼 낮게 잡힘")
+        elif i and days[i - 1] in jn:
+            notes.append("전남광주 다시 수집 — 직전 회차와 판매중 재고·신규 유입 비교 주의, 판매는 시작 목록에 전남광주가 빠져 낮게 잡힘")
+        if out_n.get(days[i], 0) > 0:
+            notes.append(f"7월 범위 밖 {out_n[days[i]]:,.0f}대(국산 쉐보레 등)는 지수·흐름에서 뺌")
+        if c.strftime("%Y-%m-%d") != days[i]:
             notes.append(f"파이프라인 기록일 {c:%m/%d}")
-        log.append({"date": obs[c].strftime("%Y-%m-%d"), "crawl": c.strftime("%Y-%m-%d"), "gap_days": g, "note": " · ".join(notes),
-                    "list": int(total[c]), "detail": FL[("전체", "전체")][c]["on"]})          # 목록 매물 · 상세 확인 판매중(데이터 탭 수집 현황)
+        on_all = int(((L["첫관측일"] <= c) & (L["마지막관측일"] >= c)).sum())
+        log.append({"date": days[i], "crawl": c.strftime("%Y-%m-%d"), "gap_days": g, "note": " · ".join(notes),
+                    "list": int(total[c]), "detail": on_all})                            # 목록 매물 · 상세 확인 판매중(데이터 탭 수집 현황, 전체 범위)
     MS = model_stats(L, crawls, obs, ivs, PF)
     return series, log, LC, MS
 
@@ -392,10 +472,12 @@ def write_csvs(series, models):
             rows.append({"구분": o, "차급": s, "목록관측일": e["date"], "시세지수": e.get("시세"), "판매속도지수": e.get("판매속도"),
                          "재고지수": e.get("재고"), "시황지수": e.get("시황"), "시황": e.get("label"), "신규비교대수": e.get("n_price"),
                          "판매속도_시작재고": e.get("n_start"), "판매속도_판매": e.get("n_sold"), "목록재고": e.get("n_stock"),
-                         "재고_구성비추정": "예" if e.get("stock_est") else None, "표본적음": "예" if e.get("low_sample") else None,
+                         "재고_구성비추정": "예" if e.get("stock_est") else None, "재고_전남광주보정대수": e.get("stock_fix"),
+                         "표본적음": "예" if e.get("low_sample") else None,
                          "판매중재고_상세확인": e.get("on"), "구간일": e.get("days"), "신규유입": e.get("new"), "판매": e.get("sold"),
                          "신규유입_주": e.get("new_w"), "판매_주": e.get("sold_w"), "신규매물_중앙호가_만원": e.get("new_med"),
-                         "판매_누락의심": "예" if e.get("sold_suspect") else None})
+                         "판매_누락의심": "예" if e.get("sold_suspect") else None,
+                         "전남광주누락_판매중유입": "예" if e.get("jn_gap") else None, "전남광주누락_판매": "예" if e.get("jn_gap_sold") else None})
     pd.DataFrame(rows).to_csv(os.path.join(DL, "market_index.csv"), index=False, encoding="cp949", errors="replace")
     cols = ["maker", "group", "model", "seg", "origin", "on", "price", "cut", "sold90", "dwell", "rate_w", "weeks", "pidx"]   # 판매속도 구간이 없는 주에도 열은 그대로
     m = pd.DataFrame(models, columns=cols).rename(columns={"maker": "제조사", "group": "모델", "model": "세부모델", "seg": "차급", "origin": "국산수입",
@@ -411,10 +493,11 @@ def report(series, log, LC, L, crawls, obs):
     for key in ["전체|전체", "국산|전체", "수입|전체"]:
         lines += ["", f"[{key.split('|')[0]}] 날짜 · 시세 · 판매속도 · 재고 · 시황 (신규 비교 / 시작 재고 / 재고)"]
         for e in series.get(key, []):
-            lines.append(f"  {e['date']}  {e.get('시세', '—'):>6}  {e.get('판매속도', '—'):>6}  {e.get('재고', '—'):>6}{'*' if e.get('stock_est') else ' '}"
+            lines.append(f"  {e['date']}  {e.get('시세', '—'):>6}  {e.get('판매속도', '—'):>6}  {e.get('재고', '—'):>6}{'*' if e.get('stock_est') else '+' if e.get('stock_fix') else ' '}"
                          f"  {e.get('시황', '—'):>6} {e.get('label', '  '):<2}  ({e.get('n_price', 0):,} / {e.get('n_start', 0):,} / {e.get('n_stock', 0):,})")
     last = obs[crawls[-1]].strftime("%Y-%m-%d")
-    lines += ["", "  * 재고: 목록 실측이 없는 회차는 로그 국산 비율 × 상세 차급 구성으로 추정", "", f"[{last} 차급별 — 전체 기준]"]
+    lines += ["", "  * 재고: 목록 실측이 없는 회차는 로그 국산 비율 × 상세 차급 구성으로 추정",
+              f"  + 재고: 전남광주가 빠진 회차에 {JN_ADD_DATE} 실측 누락 대수를 더함(JN_ADD)", "", f"[{last} 차급별 — 전체 기준]"]
     for key, pts in series.items():
         o, s = key.split("|")
         if o != "전체" or s == "전체": continue
@@ -455,10 +538,14 @@ def main():
            "definitions": {
                "시세": "신규 매물(등록 7일 이내) 첫 호가를 기준기간의 같은 모델·등급·세부등급 신규 매물과 비교. 성능감가율·D3 계수(차령·주행·색상·렌트)로 조건을 맞춘 뒤 차이의 중앙값",
                "판매속도": "구간 판매 ÷ 시작 재고(7일 환산). 등록 후 경과일 구간별 판매율을 기준기간 재고 구성으로 가중. 간격 5~16일 구간만, 재등록 제외, 목록 누락 칸 제외",
-               "재고": "목록 매물 수(중복 제거) ÷ 기준기간 평균. 세그먼트는 목록 구성비로 나눔(stock_est = 구성비 추정)",
+               "재고": "목록 매물 수(중복 제거, 7월 범위) ÷ 기준기간 평균. 세그먼트는 목록 구성비로 나눔(stock_est = 구성비 추정). "
+                      "7/29~D10 전 목록은 전남광주가 빠져 실측 누락 대수를 더함(stock_fix = 더한 대수)",
+               "범위": "지수와 흐름은 기준기간 크롤러 조회로 잡히던 매물(7월 범위)로만 센다. 2026-11 크롤러가 더 받는 국산 쉐보레·기타 제조사·"
+                      "수입 브랜드(비친환경)·현대·기아 경기 기타 연료는 빼고(차종 비교에는 씀), 전남광주는 7월의 광주·전남이라 넣는다",
                "시황": "시세·판매속도·(10000÷재고)의 기하평균. 102 이상 강세, 98 이하 약세, 그 사이 보합",
                "흐름": "on = 판매중 확인 매물(상세 확인) · new = 직전 목록 관측일 뒤 엔카에 등록된 매물 · sold = 구간 판매(재등록 제외) · "
-                      "_w = 7일 환산 · new_med = 신규 매물 첫 호가 중앙값(30대 이상) · sold_suspect = 목록 누락으로 판매가 부풀었을 수 있음"},
+                      "_w = 7일 환산 · new_med = 신규 매물 첫 호가 중앙값(30대 이상) · sold_suspect = 목록 누락으로 판매가 부풀었을 수 있음 · "
+                      "jn_gap = 전남광주가 빠진 목록(판매중·유입 낮음) · jn_gap_sold = 시작 목록에 전남광주가 빠짐(판매 낮음)"},
            "crawls": log, "series": series}
     with open(OUT_JSON, "w", encoding="utf-8", newline="\n") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
