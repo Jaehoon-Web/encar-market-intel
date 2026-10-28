@@ -28,6 +28,14 @@
 | `status_server.py` / `status_dashboard.bat` | 진행 상황 대시보드(http://127.0.0.1:8790, 로그 읽기 전용) |
 | `logs/` | 실행 로그(자동 생성, git 제외) |
 
+### 수집 상태 파일 (`encar_output/`, 주간 캐시 삭제 대상 아님)
+| 파일 | 내용 |
+|------|------|
+| `list_query_totals.json` | 조회별 대수(첫 페이지 대수·받은 수, 회차 표시)와 급감·1만 건 상한·범위 점검 결과. 다음 회차 급감 판단의 기준값이다. 지우면 그 회차는 급감 점검 없이 진행한다 |
+| `details_failed.json` | 상세 실패 매물별 사유·횟수·상태 코드·최종 URL. 목록에 남아 있으면 다음 회차에 다시 받는다(3회까지). `--full` 때 함께 지워진다 |
+| `details_alias.json` | 재등록 광고(새 매물ID) → 상세가 저장된 원래 매물의 vehicleId |
+| `detail_fail_samples/` | 실패 사유별 HTML 표본(사유당 3개, 회차마다 덮어씀). 원인 확인용 |
+
 ## 1회 설정 — 작업 스케줄러 등록 (관리자 명령 프롬프트)
 ```cmd
 schtasks /Create /TN "EncarWeeklyUpdate" /TR "\"C:\개발작업\기타작업\encar_crawler\weekly_update.bat\"" /SC WEEKLY /D WED /ST 09:00 /F
