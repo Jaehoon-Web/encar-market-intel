@@ -189,6 +189,23 @@
 
     function wordSet(list) { var s = {}; list.forEach(function (w) { s[compact(w)] = true; }); return s; }
     var UNKNOWN_CELL = wordSet(P.unknown_cell), NO_DAMAGE = wordSet(P.no_damage_cell);
+    var OUTSIDE = (P.outside_parts || []).map(function (w) { var c = compact(w); return { c: c, re: spacedRe(c, 'i') }; })
+      .sort(function (a, b) { return b.c.length - a.c.length; });
+
+    // 성능점검 37곳 밖 부위(범퍼·램프·유리…)만 적힌 칸인가. 더 긴 성능점검 부위 이름이 맞으면 그쪽(휠 < 휠하우스), 그 이름과
+    // 상태·좌우·앞뒤·개수 말고 글자가 남으면 아니다 — 오타 '좌앞휠더 판금'을 휠로 읽어 조용히 빼지 않고 '못 읽음'으로 돌려준다
+    function outside(tok) {
+      var cs = compact(tok), o = null, i;
+      for (i = 0; i < OUTSIDE.length; i++) if (cs.indexOf(OUTSIDE[i].c) >= 0) { o = OUTSIDE[i]; break; }
+      if (!o) return false;
+      for (i = 0; i < aliases.length; i++) if (cs.indexOf(aliases[i].c) >= 0 && aliases[i].c.length >= o.c.length) return false;
+      var s = (' ' + tok.replace(/[()[\]{}<>]/g, ' ') + ' ').replace(o.re, ' ').replace(/\d+\s*(개|곳|짝|EA)/gi, ' ').replace(/[×*]\s*\d+/g, ' ');
+      words.forEach(function (w) {
+        var g = new RegExp(w.re.source, 'gi');
+        s = w.latin ? s.replace(g, function (all, pre) { return pre + ' '; }) : s.replace(g, ' ');
+      });
+      return !/[0-9A-Za-zㄱ-ㆎ가-힣]/.test(s);
+    }
 
     function parseToken(tok, notes) {
       var s = ' ' + tok.replace(/[()[\]{}<>]/g, ' ') + ' ', count = 1;
@@ -249,7 +266,7 @@
     }
 
     function parseText(text) {
-      var res = { state: '입력', items: [], unknown: [], notes: [] }, ignored = [];
+      var res = { state: '입력', items: [], unknown: [], notes: [], outside: [] }, ignored = [];
       var s = text == null ? '' : String(text);
       if (s.normalize) s = s.normalize('NFKC');   // 전각 문자 → 반각
       s = s.trim();
@@ -264,12 +281,14 @@
         tok = tok.trim();
         if (!tok) return;
         if (NO_DAMAGE[compact(tok)]) { ignored.push(tok); return; }
+        if (outside(tok)) { res.outside.push(tok); return; }
         var r = parseToken(tok, res.notes);
         if (r) res.items = res.items.concat(r);
         else res.unknown.push(tok);
       });
       if (!res.items.length && !res.unknown.length) res.state = '무사고';
       else ignored.forEach(function (t) { res.notes.push("'" + t + "' — 다른 부위가 함께 적혀 있어 무시"); });
+      res.outside.forEach(function (t) { res.notes.push("'" + t + "' — 성능점검 대상이 아니라 시세 계산에서 뺌(경매 평가에서는 감점될 수 있음)"); });
       return res;
     }
 

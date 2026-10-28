@@ -16,10 +16,19 @@
   var COLS = [['model', '세부모델', 's'], ['seg', '차급', 's'], ['on', '판매중', 'n'], ['price', '중앙 호가', 'n'], ['cut', '인하 매물', 'n'],
     ['sold90', '90일 판매', 'n'], ['dwell', '중위 체류', 'n'], ['rate_w', '주간 판매율', 'n'], ['weeks', '소진 주수', 'n'], ['pidx', '시세(7월=100)', 'n']];
 
+  // 차종 비교 설명 — 표 머리글과 같은 말로(market_models.json 의 note 는 CSV 열 이름 설명이라 화면에는 쓰지 않는다)
+  var MODEL_NOTE = '세부모델별 시장 숫자. 판매중 = 상세까지 확인한 판매중 매물 · 인하 매물 = 첫 호가보다 내린 매물 비율 · ' +
+    '90일 판매·중위 체류 = 최근 90일 판매 대수와 중위 체류일(5대 이상일 때) · 주간 판매율 = 최근 판매속도 구간의 주간 판매율(구간 시작 10대 이상) · ' +
+    '소진 주수 = 지금 재고가 다 팔리는 데 걸리는 주(1 ÷ 주간 판매율) · 시세(7월=100) = 새로 올라온 매물 시세(기준기간 = 100, 양쪽 10대 이상)';
+
   function create(ctx) {
-    var MI = ctx.X.mi, esc = ctx.esc, man = ctx.man, el = null, MM = null, mmWait = null, HAVE = {};
-    ctx.X.idx.makers.forEach(function (mk) {                 // 시세 산정에 비교 매물이 있는 세부모델(모델 요약으로 갈 수 있는 것)
-      mk.groups.forEach(function (g) { g.models.forEach(function (m) { HAVE[mk.name + '|' + g.name + '|' + m.name] = true; }); });
+    var MI = ctx.X.mi, esc = ctx.esc, man = ctx.man, el = null, MM = null, mmWait = null, HAVE = {}, YR = {};
+    ctx.X.idx.makers.forEach(function (mk) {                 // 시세 산정에 비교 매물이 있는 세부모델(모델 요약으로 갈 수 있는 것) · 연식 범위
+      mk.groups.forEach(function (g) { g.models.forEach(function (m) {
+        var k = mk.name + '|' + g.name + '|' + m.name;
+        HAVE[k] = true;
+        if (m.y0 && m.y1) YR[k] = m.y0 === m.y1 ? String(m.y0) : m.y0 + '~' + m.y1;
+      }); });
     });
     var V = { o: '전체', s: '전체', range: 'all', sort: 'on', dir: -1, q: '', shown: PAGE, table: false };
 
@@ -272,7 +281,9 @@
         '<span><i style="background:var(--tx-4);opacity:.4;border-radius:2px"></i>구간이 5~16일이 아닌 값(비교 주의)</span></div>' + flowChart(pts) + '</div>';
       h += '<div class="v2-actions"><button type="button" class="v2-btn" data-m="table">' + (V.table ? '표 닫기' : '표로 보기') + '</button></div>';
       if (V.table) h += dataTable(pts);
-      return h + '<p class="v2-help">' + esc(MI.definitions['흐름'] || '') + '. 재고지수는 목록 기준이라 위의 판매중 재고(상세 확인 기준)와 다릅니다.</p></div>';
+      return h + '<p class="v2-help">판매중 재고 = 상세 화면까지 확인한 판매중 매물 · 신규 유입 = 직전 수집 뒤 엔카에 새로 올라온 매물 · ' +
+        '판매(추정) = 그 사이 목록에서 사라진 매물(다시 올린 것은 뺌) · /주 = 7일로 환산한 값 · 신규 중앙 호가 = 새로 올라온 매물(30대 이상)의 첫 호가 가운데 값. ' +
+        '재고지수는 목록 기준이라 위의 판매중 재고(상세 확인 기준)와 다릅니다. 내려받은 CSV의 열 이름 설명은 데이터 탭에 있습니다.</p></div>';
     }
 
     function dataTable(pts) {
@@ -356,7 +367,8 @@
             (on ? (V.dir > 0 ? ' ↑' : ' ↓') : '') + '</button></th>';
         }).join('') + '</tr></thead><tbody>';
       list.slice(0, V.shown).forEach(function (m) {
-        var href = ctx.href({ mk: m.maker, grp: m.group, model: m.model }, 'model'), name = esc(m.maker + ' ' + m.model);
+        var yk = m.maker + '|' + m.group + '|' + m.model, href = ctx.href({ mk: m.maker, grp: m.group, model: m.model }, 'model'),
+          name = esc(m.maker + ' ' + m.model) + (YR[yk] ? ' <span class="v2-dim">(' + YR[yk] + ')</span>' : '');
         h += '<tr><td>' + (HAVE[m.maker + '|' + m.group + '|' + m.model] ? '<a class="v2-link" href="' + esc(href) + '">' + name + '</a>'
           : '<span title="성능점검 있는 비교 매물이 적어 시세 산정 대상이 아님">' + name + '</span>') + '</td><td>' + esc(m.seg + '·' + m.origin) + '</td>' +
           '<td class="num">' + m.on.toLocaleString() + '</td><td class="num">' + (m.price != null ? man(m.price) : '–') + '</td>' +
@@ -366,7 +378,7 @@
       });
       h += '</tbody></table></div>';
       if (list.length > V.shown) h += '<div class="v2-actions"><button type="button" class="v2-btn" data-m="more">' + Math.min(PAGE, list.length - V.shown) + '개 더 보기</button></div>';
-      return h + '<p class="v2-help">' + esc(MM.note) + '.</p>';
+      return h + '<p class="v2-help">' + esc(MODEL_NOTE) + '.</p>';
     }
     function exportModels() {
       var list = filtered();
@@ -376,7 +388,7 @@
           m.rate_w != null ? +(m.rate_w * 100).toFixed(2) : null, m.weeks != null ? m.weeks : null, m.pidx != null ? m.pidx : null];
       }));
       var info = [['항목', '값'], ['기준', MM.date + ' 목록'], ['구분', key().replace('|', ' ')], ['검색', V.q || '없음'],
-        ['판매율 구간', MM.speed_interval ? MM.speed_interval.join(' → ') : '없음(다음 주간 수집부터)'], ['설명', MM.note]];
+        ['판매율 구간', MM.speed_interval ? MM.speed_interval.join(' → ') : '없음(다음 주간 수집부터)'], ['설명', MODEL_NOTE]];
       XlsxWriter.download(ctx.fileSafe('차종비교_' + key().replace('|', '_') + '_' + ctx.today()) + '.xlsx', [
         { name: '차종 비교', rows: rows, header: true, freeze: true, money: [5, 6, 8], widths: [12, 14, 26, 8, 9, 10, 13, 13, 14, 10, 12, 12, 14] },
         { name: '설명', rows: info, header: true, widths: [14, 100] }]);

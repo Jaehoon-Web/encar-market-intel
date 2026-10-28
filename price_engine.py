@@ -218,23 +218,52 @@ def estimate_one(G, t, opts=None, detail=False):
     return r
 
 
+def _centers(bands, key, step):
+    """기준표 칸의 가운데 — 호가대는 구간 가운데 만원(마지막 열린 구간은 시작값), 차령은 구간 가운데 해(마지막은 시작 해)"""
+    out, lo = [], 0
+    for b in bands:
+        hi = b[key]
+        out.append(lo if hi is None else (lo + hi) / 2)
+        if hi is not None:
+            lo = hi + step
+    return out
+
+
+def _weights(cs, x):
+    """가운데 값 사이 위치 → [(칸, 가중치), …] (양 끝 밖은 끝 칸 그대로) — 사이트 price_engine.js weights 와 같은 계산"""
+    n = len(cs)
+    if x <= cs[0]:
+        return [(0, 1)]
+    if x >= cs[-1]:
+        return [(n - 1, 1)]
+    for j in range(n - 1):
+        if x < cs[j + 1]:
+            t = (x - cs[j]) / (cs[j + 1] - cs[j])
+            return [(j, 1 - t), (j + 1, t)]
+
+
 def conversion_rate(R, est, age_years, maker=None, model=None, fuel=None, team=None):
     """환산 비율(%)과 출처 — 직접 입력 → 팀 수정(모델) → 모델 예외(기준표 + 가감) → 호가대×차령 기준표
-    팀 수정(team_models: 모델별 비율, team_cells: 팀이 고친 기준표 칸)은 사이트 저장소(D6)에서 R에 합쳐 넣는다. 파일 R에는 없다"""
+    팀 수정(team_models: 모델별 비율, team_cells: 팀이 고친 기준표 칸)은 사이트 저장소(D6)에서 R에 합쳐 넣는다. 파일 R에는 없다
+    기준표는 칸 가운데 값 사이를 이어서 읽는다(보간) — 구간 경계에서 비율이 뛰어 조금 비싼 차의 환산가가 더 높게 나오던 문제(2026-10-28).
+    반올림은 사이트와 같게 round(x × 10) ÷ 10(같은 실수에 같은 짝수 반올림)"""
     if team is not None:
         return float(team), "직접 입력"
     for e in R.get("team_models") or []:
         if e["제조사"] == maker and e["모델"] == model and (not e.get("연료") or e["연료"] == fuel):
             return float(e["비율"]), "팀 수정(모델)"
-    pi = next(i for i, b in enumerate(R["price_bands"]) if b["max_manwon"] is None or est <= b["max_manwon"])
-    ai = next(i for i, b in enumerate(R["age_bands"]) if b["max_years"] is None or age_years <= b["max_years"])
-    cells = R.get("team_cells")
-    cell = cells[pi][ai] if cells and pi < len(cells) and ai < len(cells[pi]) else None
-    base = R["rates"][pi][ai] if cell is None else cell
+    cells, wa, base, team_used = R.get("team_cells"), _weights(_centers(R["age_bands"], "max_years", 1), age_years), 0, False
+    for pi, wp in _weights(_centers(R["price_bands"], "max_manwon", 0), est):
+        for ai, w in wa:
+            cell = cells[pi][ai] if cells and pi < len(cells) and ai < len(cells[pi]) else None
+            if cell is not None and wp * w > 0:
+                team_used = True
+            base += wp * w * (R["rates"][pi][ai] if cell is None else cell)
+    base = round(base * 10) / 10
     for e in R.get("model_exceptions", []):
         if e["제조사"] == maker and e["모델"] == model and (not e.get("연료") or e["연료"] == fuel):
-            return round(base + e["가감"], 1), "모델 예외"
-    return float(base), "호가대×차령 기준표" if cell is None else "기준표(팀 수정)"
+            return round((base + e["가감"]) * 10) / 10, "모델 예외"
+    return float(base), "기준표(팀 수정)" if team_used else "호가대×차령 기준표"
 
 
 def estimate_car(groups, R, car, opts=None):

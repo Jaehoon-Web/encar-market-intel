@@ -201,20 +201,39 @@
       return r;
     }
 
+    // 기준표 칸의 가운데 — 호가대는 구간 가운데 만원(마지막 열린 구간은 시작값), 차령은 구간 가운데 해(마지막은 시작 해)
+    function centers(bands, key, step) {
+      var out = [], lo = 0;
+      bands.forEach(function (b) { var hi = b[key]; out.push(hi == null ? lo : (lo + hi) / 2); if (hi != null) lo = hi + step; });
+      return out;
+    }
+    function weights(cs, x) {                                  // 가운데 값 사이 위치 → [[칸, 가중치], …] (양 끝 밖은 끝 칸 그대로)
+      var n = cs.length;
+      if (x <= cs[0]) return [[0, 1]];
+      if (x >= cs[n - 1]) return [[n - 1, 1]];
+      for (var j = 0; j < n - 1; j++) if (x < cs[j + 1]) { var t = (x - cs[j]) / (cs[j + 1] - cs[j]); return [[j, 1 - t], [j + 1, t]]; }
+    }
+
     // 환산 비율(%)과 출처 — 직접 입력 → 팀 수정(모델) → 모델 예외(기준표 + 가감) → 호가대×차령 기준표 (파이썬 conversion_rate 와 같음)
     //   팀 수정(R.team_models · R.team_cells = 팀이 고친 기준표 칸)은 rates_store.js 가 사이트 저장소(D6)에서 읽어 R에 합친다
+    //   기준표는 칸 가운데 값 사이를 이어서 읽는다(보간) — 구간 경계에서 비율이 뛰어 조금 비싼 차의 환산가가 더 높게 나오던 문제(2026-10-28)
     function conversionRate(est, ageYears, maker, model, fuel, team) {
       if (team != null) return { rate: +team, source: '직접 입력' };
       function hit(e) { return e['제조사'] === maker && e['모델'] === model && (!e['연료'] || e['연료'] === fuel); }
       var tm = (R.team_models || []).find(hit);
       if (tm) return { rate: +tm['비율'], source: '팀 수정(모델)' };
-      var pi = R.price_bands.findIndex(function (b) { return b.max_manwon == null || est <= b.max_manwon; });
-      var ai = R.age_bands.findIndex(function (b) { return b.max_years == null || ageYears <= b.max_years; });
-      var cell = R.team_cells && R.team_cells[pi] ? R.team_cells[pi][ai] : null;
-      var base = cell == null ? R.rates[pi][ai] : cell;
+      var wa = weights(centers(R.age_bands, 'max_years', 1), ageYears), base = 0, teamUsed = false;
+      weights(centers(R.price_bands, 'max_manwon', 0), est).forEach(function (p) {
+        wa.forEach(function (a) {
+          var cell = R.team_cells && R.team_cells[p[0]] ? R.team_cells[p[0]][a[0]] : null;
+          if (cell != null && p[1] * a[1] > 0) teamUsed = true;
+          base += p[1] * a[1] * (cell == null ? R.rates[p[0]][a[0]] : cell);
+        });
+      });
+      base = rint(base * 10) / 10;
       var ex = (R.model_exceptions || []).find(hit);
       if (ex) return { rate: rint((base + ex['가감']) * 10) / 10, source: '모델 예외' };
-      return { rate: base, source: cell == null ? '호가대×차령 기준표' : '기준표(팀 수정)' };
+      return { rate: base, source: teamUsed ? '기준표(팀 수정)' : '호가대×차령 기준표' };
     }
 
     /* 사이트 입력 형태: 모델, 등급, 세부등급, 등록연월(yyyymm), 주행km, 색상계열, 렌트, 성능({감가율, 등급} | null=상태 미상),

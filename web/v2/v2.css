@@ -267,3 +267,22 @@ select.filter-select.v2-need, .v2-in.v2-need { border-color: var(--accent); box-
 .v2-terms dl { margin: 0; }
 .v2-terms dt { font-size: 13px; font-weight: 700; color: var(--tx-1); margin-top: 10px; }
 .v2-terms dd { font-size: 13px; color: var(--tx-2); line-height: 1.65; margin: 2px 0 0; }
+
+/* 실사용 점검 보완(2026-10-28) — 용어 설명 ?, 못 읽은 표기 경고, 합계 제외, 휴대폰 안내 띠 */
+.v2-q { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; margin-left: 4px; border-radius: 50%;
+  border: 1px solid var(--line-hard); color: var(--tx-3); font-size: 10px; font-weight: 700; line-height: 1; cursor: help; vertical-align: 1px;
+  letter-spacing: 0; text-transform: none; }
+.v2-q:hover, .v2-q:focus { border-color: var(--tx-2); color: var(--tx-1); outline: none; }
+.v2-warnbox { border-left: 3px solid var(--down); background: var(--down-wash); font-size: 13px; line-height: 1.6; }
+.v2-off { opacity: .45; }
+.v2-off .v2-amt { text-decoration: line-through; }
+.v2-ynote { font-size: 11px; margin-top: 3px; }
+.v2-mbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); background: var(--tx-1);
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, .15); }
+.v2-mbar[hidden] { display: none; }
+.v2-mbar button { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 10px; color: var(--bg-1); font-size: 14px;
+  text-align: left; padding: 6px 2px; }
+.v2-mbar b { color: var(--bg-1); }
+.v2-mbar button span:last-child { flex-shrink: 0; font-weight: 600; }
+@media (min-width: 1024px) { .v2-mbar { display: none !important; } }
+@media (max-width: 1023px) { #app { padding-bottom: 76px; } }

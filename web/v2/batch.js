@@ -255,7 +255,12 @@
       r.R = ENG.estimateCar(G, r.car, { sold: true });
       if (!r.R) r.why.push('비교 매물 5대 미만');
     }
-    function needsCheck(r) { return !!r.best && ((r.conf === 'mid' || r.conf === 'low') || r.gconf === 'low'); }
+    function needsCheck(r) { return !!r.best && ((r.conf === 'mid' || r.conf === 'low') || r.gconf === 'low' || yearOut(r)); }
+    function yearOut(r) {                                    // 등록연도가 매칭한 모델 기간(±1년) 밖 — 다른 세대·다른 모델일 수 있다. 직접 고르면 그대로 쓴다
+      var b = r.best;
+      return !!(b && r.reg && r.conf !== 'fixed' && b.y0 && b.y1 && (r.reg.y < b.y0 - 1 || r.reg.y > b.y1 + 1));
+    }
+    function counted(r) { return !!r.R && !yearOut(r); }      // 합계에 넣는 차
 
     function run() {
       T.text = $('bPaste').value;
@@ -441,8 +446,10 @@
       var c = r.cond;
       if (c.unknown.length) return '<span class="v2-bad">못 읽음: ' + esc(c.unknown.join(', ')) + '</span>';
       if (c.state === '미상') return '<span class="v2-dim">미상</span>';
-      if (c.state === '무사고' && !c.items.length) return '무사고';
-      return '<span title="' + esc(ISC.summary(c.items)) + '">' + esc(r.c['사고라벨']) + ' · ' + r.c['성능등급'] + '등급</span>';
+      var out = c.outside && c.outside.length ? '<br><span class="v2-dim" title="성능점검 대상이 아니라 시세 계산에서 뺌(경매 평가에서는 감점될 수 있음)">계산 제외: ' +
+        esc(c.outside.join(', ')) + '</span>' : '';
+      if (c.state === '무사고' && !c.items.length) return '무사고' + out;
+      return '<span title="' + esc(ISC.summary(c.items)) + '">' + esc(r.c['사고라벨']) + ' · ' + r.c['성능등급'] + '등급</span>' + out;
     }
     function link(r) {
       return ctx.href({ mk: r.best.maker, grp: r.best.group, model: r.best.model, grade: r.grade, trim: r.trim, y: String(r.reg.y), m: String(r.reg.m),
@@ -484,15 +491,17 @@
       var h = '<tr class="' + (r.R ? '' : 'is-skip') + '"><td class="num v2-dim">' + r.no + '</td>';
       h += '<td class="v2-car">' + (r.plate ? '<b>' + esc(r.plate) + '</b>' + (r.rent ? ' <span class="v2-rent">렌트</span>' : '') + '<br>' : '') +
         '<span class="v2-src">' + esc(r.text || '—') + '</span></td>';
-      h += '<td class="v2-match"><div class="' + (!r.best ? 'v2-cbad' : warnM ? 'v2-cwarn' : '') + '">' + modelCell(r, i) + '</div>' +
+      h += '<td class="v2-match"><div class="' + (!r.best || yearOut(r) ? 'v2-cbad' : warnM ? 'v2-cwarn' : '') + '">' + modelCell(r, i) + '</div>' +
+        (yearOut(r) ? '<div class="v2-bad v2-ynote">등록 ' + r.reg.y + ' · 모델 ' + r.best.y0 + '~' + r.best.y1 + ' — 다른 모델인지 확인(합계 제외)</div>' : '') +
         (r.best ? '<div class="' + (r.gconf === 'low' ? 'v2-cwarn' : '') + '">' + gradeCell(r, i) + '</div>' : '') + '</td>';
       h += '<td>' + (r.reg ? r.reg.y + '-' + pad(r.reg.m) + (r.reg.guess ? '<sup title="월을 몰라 6월로 계산">*</sup>' : '') : '<span class="v2-bad">등록 없음</span>') +
         '<br>' + (r.km != null ? (r.km / 1e4).toFixed(1) + '만km' : '<span class="v2-bad">주행 없음</span>') + '</td>';
       h += '<td class="v2-cond">' + condCell(r) + '</td>';
       if (r.R) {
+        var off = yearOut(r) ? ' v2-off' : '';
         var act = r.actual != null ? '<br><span class="v2-act">실제 ' + man(r.actual) + ' (' + sgn((r.R.converted - r.actual) / r.actual * 100) + ')</span>' : '';
-        h += '<td class="num"><b class="v2-amt">' + man(r.R.price) + '</b><br><span class="v2-dim">' + man(r.R.range[0]) + '~' + man(r.R.range[1]) + '</span></td>' +
-          '<td class="num"><b class="v2-amt">' + man(r.R.converted) + '</b><br><span class="v2-dim">' + r.R.rate + '%</span>' + act + '</td>' +
+        h += '<td class="num' + off + '"><b class="v2-amt">' + man(r.R.price) + '</b><br><span class="v2-dim">' + man(r.R.range[0]) + '~' + man(r.R.range[1]) + '</span></td>' +
+          '<td class="num' + off + '"><b class="v2-amt">' + man(r.R.converted) + '</b><br><span class="v2-dim">' + r.R.rate + '%</span>' + act + '</td>' +
           '<td><span class="v2-gb ' + r.R.grade + '">' + r.R.grade + '</span> <span class="v2-dim">' + r.R.n + '대</span></td>' +
           '<td><a href="' + esc(link(r)) + '" target="_blank" rel="noopener">열기 ↗</a></td>';
       } else h += '<td colspan="4" class="v2-bad">' + esc(r.why.join(' · ')) + '</td>';
@@ -501,17 +510,18 @@
 
     function renderOut() {
       if (!rows.length) { $('bOut').innerHTML = ''; return; }
-      var done = rows.filter(function (r) { return r.R; }), sumP = 0, sumC = 0, cN = 0;
-      done.forEach(function (r) { sumP += r.R.price; sumC += r.R.converted; if (r.R.grade === 'C') cN++; });
-      var chk = rows.filter(needsCheck).length, skip = rows.length - done.length;
+      var done = rows.filter(function (r) { return r.R; }), sumP = 0, sumC = 0, cN = 0, off = done.filter(yearOut).length;
+      done.filter(counted).forEach(function (r) { sumP += r.R.price; sumC += r.R.converted; });
+      done.forEach(function (r) { if (r.R.grade === 'C') cN++; });
+      var chk = rows.filter(needsCheck).length, skip = rows.length - done.length, offNote = off ? ' · 차명 확인 ' + off + '대는 합계 제외' : '';
       var h = '<div class="card v2-headcard"><div class="v2-head">④ 결과 · ' + rows.length + '대<br><span class="sub">추정 시세는 엔카 호가 기준 · 환산가는 팀 환산 비율 적용 · ' +
         '"열기"는 그 차의 한 대 산정 화면(근거·비교 매물)</span></div><div class="v2-actions" style="margin:0">' +
         '<label class="v2-chk" style="margin:0"><input type="checkbox" data-b="only"' + (onlyCheck ? ' checked' : '') + '> 확인할 차만 보기</label>' +
         '<button type="button" class="v2-btn primary" data-b="xlsx"' + (done.length ? '' : ' disabled') + '>엑셀 내려받기</button></div></div>';
       h += '<div class="v2-cards v2-bcards">' +
         ctx.tile('산정', String(done.length), '대', skip ? '계산 안 됨 ' + skip + '대 · 이유는 표에' : '전부 계산됨') +
-        ctx.tile('추정 시세 합계', man(sumP), '만원', eok(sumP) + '만 · 엔카 호가 기준 · 수리비 반영') +
-        ctx.tile('환산가 합계', man(sumC), '만원', eok(sumC) + '만 · 팀 환산 비율 적용') +
+        ctx.tile('추정 시세 합계', man(sumP), '만원', eok(sumP) + '만 · 엔카 호가 기준 · 수리비 반영' + offNote) +
+        ctx.tile('환산가 합계', man(sumC), '만원', eok(sumC) + '만 · 팀 환산 비율 적용' + offNote) +
         ctx.tile('확인할 차', String(chk + skip), '대', '신뢰도 C ' + cN + '대 · 차명 확인 ' + chk + '대') + '</div>';
       var vs = verify();
       if (vs) h += verifyCard(vs);
@@ -537,13 +547,15 @@
       var CONF = { high: '확실', mid: '확인 권장', low: '확인 필요', fixed: '직접 고름', none: '못 찾음' };
       var base = location.href.split('#')[0], out = [head.concat(calc)];
       rows.forEach(function (r) {
-        var c = r.c, R = r.R, cond = r.cond.unknown.length ? '못 읽음: ' + r.cond.unknown.join(', ') : r.cond.state === '미상' ? '미상' : (r.cond.items.length ? ISC.summary(r.cond.items) : '무사고');
+        var c = r.c, R = r.R, cond = (r.cond.unknown.length ? '못 읽음: ' + r.cond.unknown.join(', ') : r.cond.state === '미상' ? '미상' : (r.cond.items.length ? ISC.summary(r.cond.items) : '무사고')) +
+          (r.cond.outside && r.cond.outside.length ? ' (계산 제외: ' + r.cond.outside.join(', ') + ')' : '');
+        var why = r.why.concat(yearOut(r) ? ['합계 제외 — 등록 ' + r.reg.y + '이 모델 기간 ' + r.best.y0 + '~' + r.best.y1 + ' 밖(차명 확인)'] : []);
         var line = r.cells.slice(0, nc).concat([r.best ? r.best.maker : null, r.best ? r.best.group : null, r.best ? r.best.model : null, r.grade || null, r.trim || null,
           CONF[r.conf] || r.conf, r.reg ? r.reg.y + '-' + pad(r.reg.m) + (r.reg.guess ? '(월 미상)' : '') : null, r.km, cond,
           c && c['상태'] !== '미상' ? c['사고라벨'] : null, c && c['상태'] !== '미상' ? c['성능등급'] : null, c && c['상태'] !== '미상' ? c['성능감가율'] : null,
           c && c['상태'] !== '미상' ? c['글로비스_종합평가점'] : null, c && c['상태'] !== '미상' ? c['글로비스_사고평가점'] : null, r.cost || null,
           R ? Math.round(R.price) : null, R ? Math.round(R.range[0]) : null, R ? Math.round(R.range[1]) : null, R ? R.rate : null, R ? Math.round(R.converted) : null,
-          R ? R.rateSource : null, R ? R.grade : null, R ? R.n : null, R ? R.stepName : null, r.why.join(' · ') || null, R ? base + link(r) : null]);
+          R ? R.rateSource : null, R ? R.grade : null, R ? R.n : null, R ? R.stepName : null, why.join(' · ') || null, R ? base + link(r) : null]);
         if (vs) line.push(r.actual != null ? r.actual : null, R && r.actual != null ? +((R.converted - r.actual) / r.actual * 100).toFixed(1) : null,
           R && r.actual != null ? +((1 - (r.actual + (r.cost || 0)) / R.est) * 100).toFixed(1) : null);
         out.push(line);
@@ -569,7 +581,7 @@
             x.outlier ? '예' : null, 'https://fem.encar.com/cars/detail/' + row[fi.id]]);
         });
       });
-      var done = rows.filter(function (r) { return r.R; }), sum = function (f) { return Math.round(done.reduce(function (s, r) { return s + f(r.R); }, 0)); };
+      var done = rows.filter(function (r) { return r.R; }), sum = function (f) { return Math.round(done.filter(counted).reduce(function (s, r) { return s + f(r.R); }, 0)); };
       var mi = X.mi.crawls || [];
       var info = [['항목', '값'], ['붙여넣은 차', rows.length + T.over], ['산정한 차', done.length], ['계산 안 된 차', rows.length + T.over - done.length],
         ['추정 시세 합계(만원)', { v: sum(function (R) { return R.price; }), money: true }], ['환산가 합계(만원)', { v: sum(function (R) { return R.converted; }), money: true }],
@@ -578,7 +590,9 @@
         ['비교 범위', '판매중 + 최근 3개월 판매'],
         ['열 지정', T.roles.map(function (role, c) { return role ? colName(c) + '=' + ROLE_NAME[role] : null; }).filter(Boolean).join(', ')],
         ['차명 확신', '확실 · 확인 권장 · 확인 필요 · 직접 고름 · 못 찾음 — 확인 권장·필요는 결과 시트에서 산정_세부모델을 확인하세요'],
-        ['최초등록', '연식만 있으면 그해 6월 등록으로 계산'], ['성능 상태', '빈칸은 상태 미상(성능 보정 없이 계산). 못 읽은 표기가 있으면 계산하지 않음'],
+        ['최초등록', '연식만 있으면 그해 6월 등록으로 계산'], ['성능 상태', '빈칸은 상태 미상(성능 보정 없이 계산). 못 읽은 표기가 있으면 계산하지 않음. ' +
+          '범퍼·램프·유리·휠·타이어처럼 성능점검 대상이 아닌 부위는 계산에서 뺌'],
+        ['합계', '등록연도가 매칭한 모델 기간(±1년) 밖인 차는 차명을 확인할 때까지 합계에서 뺌'],
         ['수리비', '단위 없이 1만 이상이면 원으로 보고 만원으로 바꿈. 추정 시세·환산가에서 그대로 뺌'],
         ['참고', '추정 시세는 엔카 호가 기준. 환산가는 팀 환산 비율(도·소매 갭 요약치)을 적용한 값']];
       if (vs) info.push(['실제 건 비교', vs.n + '대 · 오차 중위(절댓값) ' + vs.mdape.toFixed(1) + '% · 치우침 ' + sgn(vs.bias) + ' · ±10% 안 ' + Math.round(vs.within * 100) + '%'],

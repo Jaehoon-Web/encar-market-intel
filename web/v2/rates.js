@@ -155,6 +155,7 @@
       if (!el) return;
       el.innerHTML = head() + tableCard() + teamCard() + '<div class="v2-two-col">' + tryCard() + exCard() + '</div>' + logCard() +
         '<p class="v2-help">적용 순서: 한 대 산정에서 직접 넣은 비율 → 팀 수정(모델별) → 모델 예외(기준표 값 ± 가감) → 호가대×차령 기준표(팀이 고친 칸 우선). ' +
+          '기준표는 칸 가운데(호가대 가운데 만원 · 차령 가운데 해) 사이를 이어서 읽습니다 — 예: 추정 1,900만·6년이면 1~2천·2~3천, 5~6년·7~9년 네 칸을 거리만큼 섞어 씁니다. ' +
         '환산가 = 추정 시세 × (1 − 환산 비율) − 수리비.</p>';
       if (S.edit && $('rPw')) $('rPw').value = S.edit.password;   // 비밀번호는 화면 글(속성)에 남기지 않는다
       tryCalc();
