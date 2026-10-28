@@ -194,6 +194,8 @@ select.filter-select.v2-need, .v2-in.v2-need { border-color: var(--accent); box-
 .v2-mtx td.me { box-shadow: inset 0 0 0 2px var(--accent); background: var(--accent-wash); }
 .v2-sig { font-size: 13px; color: var(--tx-2); line-height: 1.9; }
 .v2-sig b { color: var(--tx-1); font-variant-numeric: tabular-nums; }
+/* 시세 추세(보강안 3단계) — 세부모델 흔들림 띠 범례 */
+.v2-legend i.v2-band { width: 14px; height: 10px; border-radius: 2px; background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent-line); }
 
 /* 묶음 산정(5.1.4) */
 .v2-grid[hidden], .v2-batch[hidden] { display: none !important; }
@@ -263,7 +265,7 @@ select.filter-select.v2-need, .v2-in.v2-need { border-color: var(--accent); box-
 .v2-log li { padding: 6px 0; border-bottom: 1px solid var(--line-soft); }
 .v2-log li:last-child { border-bottom: 0; }
 
-.card-title { word-break: keep-all; }                    /* 좁은 화면에서 제목이 글자 단위로 끊기지 않게 */
+.card-title { word-break: keep-all; flex-wrap: wrap; row-gap: 2px; }   /* 좁은 화면에서 제목이 글자 단위로 끊기지 않게 · 설명이 길면 제목을 줄이지 말고 다음 줄로 */
 
 /* 시장 시황(5.2) — 계열 색(검증한 범주 팔레트 1~3번 + 시황은 먹색). 같은 대상은 차트가 달라도 같은 색 */
 .v2-mk { --s-price: #2a78d6; --s-speed: #eb6834; --s-stock: #1baf7a; --s-cond: var(--tx-1); --s-new: #2a78d6; --s-sold: #eb6834; }
@@ -354,3 +356,62 @@ select.filter-select.v2-need, .v2-in.v2-need { border-color: var(--accent); box-
 .v2-recent li span { display: block; color: var(--tx-3); }
 .v2-intro p, .v2-intro ol { font-size: 13px; color: var(--tx-2); line-height: 1.7; margin: 8px 0 0; }
 .v2-intro ol { padding-left: 18px; list-style: decimal; }
+
+/* 한 장 요약(보강안 3단계, 기획 5.1.3-2 F) — 화면에서는 미리보기 창, 인쇄하면 이 한 장만(A4 세로, 여백 10mm → 본문 190 × 277mm) */
+body.v2-sheeton { overflow: hidden; }
+.v2-sheetdlg { position: fixed; inset: 0; z-index: 80; background: rgba(28, 25, 21, .55); overflow: auto; padding: 0 16px 32px; }
+.v2-sheetdlg .bar { position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; max-width: 210mm; margin: 0 auto 16px;
+  padding: 12px 16px; background: var(--bg-1); border-radius: 0 0 var(--r-md) var(--r-md); font-size: 13px; color: var(--tx-2); box-shadow: 0 2px 10px rgba(0, 0, 0, .15); }
+.v2-sheetdlg .bar b { color: var(--tx-1); }
+.v2-sheetdlg .bar label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--tx-1); }
+.v2-sheetdlg .bar input { width: 15px; height: 15px; accent-color: var(--accent); }
+.v2-sheetdlg .bar .hint { flex: 1 1 280px; font-size: 12px; color: var(--tx-3); line-height: 1.5; }
+.v2-page { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 10mm; background: #fff; box-shadow: 0 8px 30px rgba(0, 0, 0, .3); }
+.v2-sheet { width: 190mm; font-size: 11px; line-height: 1.45; color: var(--tx-1); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.v2-sheet .sh-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding-bottom: 7px; border-bottom: 2px solid var(--tx-1); }
+.v2-sheet .sh-eyebrow { font-size: 10px; font-weight: 700; letter-spacing: .08em; color: var(--accent); }
+.v2-sheet .sh-title { font-size: 17px; font-weight: 800; line-height: 1.3; margin-top: 1px; }
+.v2-sheet .sh-sub { font-size: 11px; color: var(--tx-2); margin-top: 2px; }
+.v2-sheet .sh-date { font-size: 10px; color: var(--tx-3); text-align: right; white-space: nowrap; line-height: 1.5; }
+.v2-sheet .sh-nums { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 10px; margin: 9px 0 6px; }
+.v2-sheet .sh-num { border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; }
+.v2-sheet .sh-num.main { border-color: var(--tx-1); }
+.v2-sheet .sh-num span { display: block; font-size: 10px; font-weight: 700; color: var(--tx-3); }
+.v2-sheet .sh-num b { display: block; font-family: var(--ff-display); font-size: 26px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.v2-sheet .sh-num b small { font-family: var(--ff-body); font-size: 11px; font-weight: 600; margin-left: 3px; color: var(--tx-2); }
+.v2-sheet .sh-num em { display: block; font-style: normal; font-size: 10px; color: var(--tx-2); line-height: 1.4; }
+.v2-sheet .sh-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.v2-sheet .sh-h { font-size: 12px; font-weight: 800; margin: 6px 0 1px; }
+.v2-sheet .sh-h span { font-size: 10px; font-weight: 400; color: var(--tx-3); margin-left: 4px; }
+.v2-sheet .v2-legend { font-size: 10px; gap: 4px 10px; margin: 2px 0; }
+.v2-sheet .v2-legend i { width: 8px; height: 8px; margin-right: 4px; }
+.v2-sheet .v2-legend i.v2-star { width: auto; height: auto; font-size: 11px; }
+.v2-sheet .v2-legend i.v2-dash { width: 14px; height: 0; }
+.v2-sheet .v2-legend i.v2-rng { width: 7px; height: 10px; }
+.v2-sheet .v2-chart text { font-size: 10px; }
+.v2-sheet .v2-chart text.lbl { font-size: 11px; }
+.v2-sheet .v2-fsub { font-size: 10px; margin: 6px 0 0; }
+.v2-flow.sh { grid-template-columns: 62px minmax(0, 1fr) 48px; column-gap: 8px; font-size: 11px; margin-top: 2px; }
+.v2-flow.sh > span { padding: 1px 0 0; border-bottom: 0; }
+.v2-flow.sh .trk { height: 14px; }
+.v2-flow.sh .trk i { top: 5px; height: 9px; }
+.v2-flow.sh .trk .tick { top: 3px; height: 13px; }
+.v2-flow.sh .why { grid-column: 1 / -1; font-size: 9.5px; line-height: 1.3; padding: 0 0 2px; border-bottom: 1px solid var(--line-soft); }
+.v2-sheet .sh-lines { display: grid; gap: 3px; margin: 8px 0 2px; padding: 6px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 10.5px; color: var(--tx-2); }
+.v2-sheet .sh-lines > div > b:first-child { display: inline-block; min-width: 54px; color: var(--tx-1); }
+.v2-sheet .sh-lines b { color: var(--tx-1); }
+.v2-sheet .sh-tbl { width: 100%; border-collapse: collapse; font-size: 10px; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.v2-sheet .sh-tbl th { text-align: left; font-size: 9.5px; font-weight: 700; color: var(--tx-3); padding: 2px 4px; border-bottom: 1px solid var(--tx-1); white-space: nowrap; }
+.v2-sheet .sh-tbl td { padding: 2px 4px; border-bottom: 1px solid var(--line-soft); white-space: nowrap; }
+.v2-sheet .sh-tbl .num { text-align: right; }
+.v2-sheet .sh-tbl .g { display: block; max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
+.v2-sheet .sh-after { font-size: 10.5px; color: var(--tx-2); line-height: 1.5; margin-top: 4px; }
+.v2-sheet .sh-foot { margin-top: 8px; padding-top: 5px; border-top: 1px solid var(--line); font-size: 9.5px; color: var(--tx-3); line-height: 1.5; overflow-wrap: anywhere; }
+@media print {
+  @page { size: A4 portrait; margin: 10mm; }
+  body.v2-sheeton { overflow: visible !important; background: #fff !important; }
+  body.v2-sheeton > *:not(.v2-sheetdlg) { display: none !important; }
+  body.v2-sheeton .v2-sheetdlg { position: static; inset: auto; padding: 0; background: none; overflow: visible; }
+  body.v2-sheeton .v2-sheetdlg .bar { display: none; }
+  body.v2-sheeton .v2-page { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; zoom: 1 !important; }
+}

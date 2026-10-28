@@ -47,6 +47,9 @@ BAND_NAMES = ["0-7", "8-14", "15-30", "31-60", "61-120", "121+"]
 ANOMALY_REL, ANOMALY_N = 3.0, 100     # 칸 사라짐이 평소의 3배 이상(시작 100대 이상)이면 목록 누락
 STOCK_GAP_MAX = 0.01                  # 누락 추정 대수가 상세 재고의 1%를 넘으면 그 회차 재고 제외
 MIN_N = 300
+TREND_MIN = 10                # 세부모델 시세 추세: 기준기간·회차 모두 신규 매물 10대 이상(차종 비교 pidx와 같은 기준)
+TREND_MERGE = 2               # 이틀 안에 잇달아 받은 회차(6/23·6/24)는 세부모델 추세에서 한 점으로
+SIG_FLOOR = 0.03              # 점 하나의 흔들림 계산에 쓰는 회차 안 퍼짐(로그)의 하한 — 같은 매매상 일괄 등록 등으로 표본이 덜 독립적인 것을 감안
 OBS_FIX = {"2026-10-26": "2026-10-21"}   # 목록은 10/21 수집, 상세 수집이 10/26에 끝나 그날로 기록됨
 LOG_DOMESTIC_SHARE = 0.6936              # 2026-07-01 수집 로그(조회별 대수 + 친환경 추가분): 국산 143,473 / 206,868
 
@@ -313,6 +316,50 @@ def price(d, crawls, obs, keys):
     return out
 
 
+def robust_sig(dev, groups):
+    """회차 안 퍼짐 — (dev − 그 회차 가운데 값)의 로버스트 σ(1.4826 × MAD). 점 하나의 흔들림 = 1.2533 × σ ÷ √n"""
+    r = dev - dev.groupby(groups).transform("median")
+    return max(SIG_FLOOR, 1.4826 * float(np.median(np.abs(r - np.median(r))))) if len(r) else None
+
+
+def price_sig(d, keys):
+    """세그먼트 시세지수의 회차 안 퍼짐 — 시세 산정 '시세 추세'의 차급 비교선 방향 판정용"""
+    out = {}
+    for key in keys:
+        g = pick(d, key)
+        s = robust_sig(g["dev"], g["첫관측일"])
+        if s is not None:
+            out[f"{key[0]}|{key[1]}"] = round(s, 4)
+    return out
+
+
+def model_trend(d):
+    """세부모델 회차별 시세지수(기준기간 = 100) — 시세 산정 '시세 추세'(기획 5.1.3-2 D).
+    회차 신규 매물의 잔차(dev) 가운데 값을 기준기간 전체 가운데 값과 비교(차종 비교 pidx와 같은 식). 기준기간·회차 모두 TREND_MIN대 이상인 점만.
+    → (날짜 목록, {제조사|모델: {ps: [[날짜 번호, 지수, 신규 대수], …], sig: 회차 안 퍼짐}})"""
+    days, per, start = sorted(d["obs"].unique()), {}, None
+    for o in days:                                                                 # 이틀 안에 잇단 회차는 앞 회차 날짜로 묶는다
+        if start is None or (pd.Timestamp(o) - pd.Timestamp(start)).days > TREND_MERGE:
+            start = o
+        per[o] = start
+    d = d.assign(key=d["제조사"] + "|" + d["모델"], per=d["obs"].map(per))
+    base = d[d["obs"].between(*BASE)].groupby("key")["dev"].agg(["median", "size"])
+    base = base.loc[base["size"] >= TREND_MIN, "median"]
+    d = d[d["key"].isin(base.index)]
+    g = d.groupby(["key", "per"])["dev"].agg(["median", "size"])
+    g = g[g["size"] >= TREND_MIN]
+    dates = sorted(set(per.values()))
+    di = {o: i for i, o in enumerate(dates)}
+    out = {}
+    for k, s in g.groupby(level=0):
+        if len(s) < 2:
+            continue
+        sub = d[d["key"] == k]
+        out[k] = {"ps": [[di[o], round(float(np.exp(m - base[k]) * 100), 1), int(n)] for (_, o), m, n in zip(s.index, s["median"], s["size"])],
+                  "sig": round(robust_sig(sub["dev"], sub["per"]), 4)}
+    return dates, out
+
+
 # ───────── 흐름 (핵심 숫자·트렌드, 기획안 5.2.2·5.2.3) ─────────
 def flows(L, crawls, obs, ivs, keys):
     """회차별 판매중 확인 재고 · 구간 신규 유입(직전 목록 관측일 뒤 엔카 등록) · 구간 판매(재등록 제외) · 신규 매물 중앙 호가.
@@ -469,7 +516,11 @@ def build(L, crawls, obs, total, C):
         log.append({"date": days[i], "crawl": c.strftime("%Y-%m-%d"), "gap_days": g, "note": " · ".join(notes),
                     "list": int(total[c]), "detail": on_all})                            # 목록 매물 · 상세 확인 판매중(데이터 탭 수집 현황, 전체 범위)
     MS = model_stats(L, crawls, obs, ivs, PF)
-    return series, log, LC, MS
+    tdates, MT = model_trend(PF)                                                   # 세부모델 추세는 차종 비교처럼 전체 범위(기준기간이 없으면 안 생김)
+    for r in MS[0]:
+        r.update(MT.get(f"{r['maker']}|{r['model']}", {}))
+    MS[1]["trend_dates"] = tdates
+    return series, log, LC, MS, price_sig(PFu, keys)
 
 
 def write_csvs(series, models):
@@ -541,7 +592,7 @@ def main():
     L, crawls, obs, total = load()
     with open(COEF, encoding="utf-8") as f:
         C = json.load(f)
-    series, log, LC, (models, minfo) = build(L, crawls, obs, total, C)
+    series, log, LC, (models, minfo), psig = build(L, crawls, obs, total, C)
     out = {"version": datetime.date.today().isoformat(), "base_period": list(BASE),
            "note": "엔카 매물로 계산한 시황 지수(기획안 5.2.1). 기준기간 = 100. 날짜는 목록 관측일. 매주 전체를 다시 계산한다",
            "definitions": {
@@ -554,8 +605,9 @@ def main():
                "시황": "시세·판매속도·(10000÷재고)의 기하평균. 102 이상 강세, 98 이하 약세, 그 사이 보합",
                "흐름": "on = 판매중 확인 매물(상세 확인) · new = 직전 목록 관측일 뒤 엔카에 등록된 매물 · sold = 구간 판매(재등록 제외) · "
                       "_w = 7일 환산 · new_med = 신규 매물 첫 호가 중앙값(30대 이상) · sold_suspect = 목록 누락으로 판매가 부풀었을 수 있음 · "
-                      "jn_gap = 전남광주가 빠진 목록(판매중·유입 낮음) · jn_gap_sold = 시작 목록에 전남광주가 빠짐(판매 낮음)"},
-           "crawls": log, "series": series}
+                      "jn_gap = 전남광주가 빠진 목록(판매중·유입 낮음) · jn_gap_sold = 시작 목록에 전남광주가 빠짐(판매 낮음)",
+               "price_sig": "세그먼트별 시세 회차 안 퍼짐(로그, 로버스트 σ). 회차 점의 흔들림 ≈ 지수 × 1.2533 × σ ÷ √n_price — 시세 산정 '시세 추세'의 방향 판정에 씀"},
+           "crawls": log, "series": series, "price_sig": psig}
     with open(OUT_JSON, "w", encoding="utf-8", newline="\n") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
         f.write("\n")
@@ -563,8 +615,10 @@ def main():
             "note": "세부모델별 시장 숫자(기획안 5.2.4). on = 판매중 확인 · price = 중앙 호가 · cut = 첫 호가보다 내린 매물 비율 · "
                     "sold90·dwell = 최근 90일 판매 대수·중위 체류일(5대 이상) · rate_w = 최근 판매속도 구간의 주간 판매율(시작 10대 이상) · "
                     "weeks = 재고 소진 주수(1 ÷ 주간 판매율) · pidx = 신규 매물 시세(기준기간 = 100, 양쪽 10대 이상) · "
-                    "segments = 차급·국산수입별 같은 정의의 rate_w·weeks(시작 30대 이상)·dwell",
-            "segments": minfo["segments"], "models": models}
+                    "segments = 차급·국산수입별 같은 정의의 rate_w·weeks(시작 30대 이상)·dwell · "
+                    "ps = 세부모델 회차별 시세지수 [trend_dates 번호, 지수, 신규 대수](기준기간·회차 모두 10대 이상, 이틀 안 회차는 한 점) · "
+                    "sig = 회차 안 퍼짐(로그, 로버스트 σ, 하한 0.03) — 점의 흔들림 ≈ 지수 × 1.2533 × sig ÷ √신규 대수",
+            "trend_dates": minfo["trend_dates"], "segments": minfo["segments"], "models": models}
     with open(OUT_MODELS, "w", encoding="utf-8", newline="\n") as f:
         json.dump(mout, f, ensure_ascii=False, separators=(",", ":"))
         f.write("\n")
