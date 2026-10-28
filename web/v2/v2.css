@@ -357,6 +357,50 @@ select.filter-select.v2-need, .v2-in.v2-need { border-color: var(--accent); box-
 .v2-intro p, .v2-intro ol { font-size: 13px; color: var(--tx-2); line-height: 1.7; margin: 8px 0 0; }
 .v2-intro ol { padding-left: 18px; list-style: decimal; }
 
+/* 묶음 요약 그림(보강안 4단계, 기획 5.1.3-2 H) — 차량별 추정 범위 막대(이름 | 막대 | 값) · 차급·신뢰도별 대수·합계 */
+.v2-bsumwrap { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 8px 28px; align-items: start; }
+@media (max-width: 1100px) { .v2-bsumwrap { grid-template-columns: minmax(0, 1fr); } }
+.v2-bsum { display: grid; grid-template-columns: minmax(120px, 36%) minmax(0, 1fr) auto; column-gap: 12px; align-items: center; font-size: 12px; margin-top: 6px; }
+.v2-bsum .k { display: flex; align-items: center; gap: 6px; min-width: 0; height: 24px; }
+.v2-bsum .k .v2-gb { width: 18px; height: 18px; font-size: 11px; border-radius: 4px; flex: none; }
+.v2-bsum .k .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--tx-1); }
+.v2-bsum .k small { color: var(--tx-3); font-size: 11px; }
+.v2-bsum .off { opacity: .55; }
+.v2-bsum .trk { position: relative; height: 24px; cursor: pointer; }
+.v2-bsum .trk:hover { background: var(--bg-2); }
+.v2-bsum .trk i { position: absolute; top: 50%; pointer-events: none; }
+.v2-bsum .trk i.g { top: 0; bottom: 0; width: 1px; background: var(--line-soft); }
+.v2-bsum .trk i.rng { height: 8px; margin-top: -4px; border-radius: 4px; min-width: 3px; }
+.v2-bsum .trk i.rng.A { background: var(--up); }
+.v2-bsum .trk i.rng.B { background: var(--info); }
+.v2-bsum .trk i.rng.C { background: var(--warn); }
+.v2-bsum .trk.off i.rng { background: none; box-shadow: inset 0 0 0 1.5px var(--tx-3); }
+.v2-bsum .trk i.es { width: 3px; height: 16px; margin: -8px 0 0 -1.5px; border-radius: 1px; background: var(--tx-1); box-shadow: 0 0 0 1px var(--bg-1); }
+.v2-bsum .trk i.cv { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; border: 2px solid var(--tx-2); background: var(--bg-1); }
+.v2-bsum .trk i.ac { width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px;
+  background: linear-gradient(45deg, transparent 40%, var(--down) 40% 60%, transparent 60%), linear-gradient(-45deg, transparent 40%, var(--down) 40% 60%, transparent 60%); }
+.v2-bsum .v { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--tx-1); }
+.v2-bsum .v small { color: var(--tx-3); margin-left: 6px; }
+.v2-bsum .ax { position: relative; height: 20px; border-top: 1px solid var(--line-hard); }
+.v2-bsum .ax i { position: absolute; top: 4px; transform: translateX(-50%); font-style: normal; font-size: 11px; color: var(--tx-3); white-space: nowrap; }
+.v2-bsum .ax-u { font-size: 11px; color: var(--tx-3); text-align: right; }
+.v2-legend i.v2-brng { width: 20px; height: 8px; border-radius: 4px; background: linear-gradient(to right, var(--up) 0 33%, var(--info) 33% 66%, var(--warn) 66%); }
+.v2-legend i.v2-best { width: 3px; height: 14px; border-radius: 1px; background: var(--tx-1); vertical-align: -3px; }
+.v2-legend i.v2-bcv { width: 9px; height: 9px; border: 2px solid var(--tx-2); background: var(--bg-1); }
+.v2-legend i.v2-bac { width: 11px; height: 11px; border-radius: 0;
+  background: linear-gradient(45deg, transparent 40%, var(--down) 40% 60%, transparent 60%), linear-gradient(-45deg, transparent 40%, var(--down) 40% 60%, transparent 60%); }
+@media (max-width: 640px) {                                /* 휴대폰: 이름·값 한 줄, 막대는 그 아래 전체 폭 */
+  .v2-bsum { grid-template-columns: minmax(0, 1fr) auto; grid-auto-flow: row dense; }
+  .v2-bsum .k { height: 20px; }
+  .v2-bsum .trk, .v2-bsum .ax { grid-column: 1 / -1; }
+  .v2-bsum .trk { height: 18px; margin-bottom: 6px; }
+}
+.v2-bseg th, .v2-bseg td { padding: 7px 8px; font-size: 13px; white-space: nowrap; }
+.v2-bseg th { font-size: 11px; position: static; }
+.v2-bseg td.gr { font-size: 12px; color: var(--tx-2); }
+.v2-bseg .v2-gb { width: 18px; height: 18px; font-size: 11px; border-radius: 4px; margin-right: 2px; vertical-align: -1px; }
+.v2-bseg tr.tot td { font-weight: 700; color: var(--tx-1); border-top: 1px solid var(--line-hard); }
+
 /* 한 장 요약(보강안 3단계, 기획 5.1.3-2 F) — 화면에서는 미리보기 창, 인쇄하면 이 한 장만(A4 세로, 여백 10mm → 본문 190 × 277mm) */
 body.v2-sheeton { overflow: hidden; }
 .v2-sheetdlg { position: fixed; inset: 0; z-index: 80; background: rgba(28, 25, 21, .55); overflow: auto; padding: 0 16px 32px; }

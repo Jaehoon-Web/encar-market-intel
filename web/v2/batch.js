@@ -343,6 +343,24 @@
         '<datalist id="bModels">' + MODELS.map(function (m) { return '<option value="' + esc(m.label) + '"></option>'; }).join('') + '</datalist>';
       el.addEventListener('click', onClick);
       el.addEventListener('change', onChange);
+      var tip = document.getElementById('tip');                // 요약 그림 말풍선 — 한 대 산정과 같은 #tip
+      if (tip) {
+        el.addEventListener('mouseover', function (e) {
+          var t = e.target.closest && e.target.closest('[data-tip]');
+          if (!t) return;
+          tip.textContent = t.getAttribute('data-tip');
+          tip.hidden = false;
+        });
+        el.addEventListener('mousemove', function (e) {
+          if (tip.hidden) return;
+          tip.style.left = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8) + 'px';
+          tip.style.top = Math.min(e.clientY + 14, window.innerHeight - tip.offsetHeight - 8) + 'px';
+        });
+        el.addEventListener('mouseout', function (e) {
+          var t = e.target.closest && e.target.closest('[data-tip]');
+          if (t && !(e.relatedTarget && t.contains(e.relatedTarget))) tip.hidden = true;
+        });
+      }
       $('bPaste').addEventListener('paste', function () { setTimeout(run, 0); });
     }
 
@@ -488,7 +506,7 @@
 
     function rowHtml(r, i) {                                 // 한 행 = 차(번호판·붙여넣은 글) · 매칭(세부모델/등급) · 등록·주행 · 성능 · 결과
       var warnM = r.conf === 'mid' || r.conf === 'low';
-      var h = '<tr class="' + (r.R ? '' : 'is-skip') + '"><td class="num v2-dim">' + r.no + '</td>';
+      var h = '<tr data-no="' + r.no + '" class="' + (r.R ? '' : 'is-skip') + '"><td class="num v2-dim">' + r.no + '</td>';
       h += '<td class="v2-car">' + (r.plate ? '<b>' + esc(r.plate) + '</b>' + (r.rent ? ' <span class="v2-rent">렌트</span>' : '') + '<br>' : '') +
         '<span class="v2-src">' + esc(r.text || '—') + '</span></td>';
       h += '<td class="v2-match"><div class="' + (!r.best || yearOut(r) ? 'v2-cbad' : warnM ? 'v2-cwarn' : '') + '">' + modelCell(r, i) + '</div>' +
@@ -508,7 +526,117 @@
       return h + '</tr>';
     }
 
+    // ───── 묶음 요약 그림(보강안 4단계, 기획 5.1.3-2 H · Q60) — 차량별 추정 범위 막대(정렬) + 차급·신뢰도별 대수·합계 ─────
+    var sumSort = 'price', sumAll = false, SUM_SHOW = 40, GRADES = ['A', 'B', 'C'];
+    function segOf(r) {                                      // 차급 이름(국산 대형) — 비교 매물 파일의 세부모델 차급
+      var G = GROUPS[r.best.file], M = G && G.models[r.best.model], s = (M && M.seg || '').split('·');
+      return s[1] ? s[1] + ' ' + s[0] : '기타';
+    }
+    function nice(a, z, n) {                                 // 보기 좋은 눈금(app.js niceTicks 와 같은 방식)
+      var span = z - a, step = Math.pow(10, Math.floor(Math.log(span / n) / Math.LN10)), e = span / n / step;
+      if (e >= 7.5) step *= 10; else if (e >= 3.5) step *= 5; else if (e >= 1.5) step *= 2;
+      var t = [];
+      for (var v = Math.ceil(a / step) * step; v <= z; v += step) t.push(Math.round(v / step) * step);
+      return t;
+    }
+    function logTicks(a, z) {                                // 로그 눈금: 1·2·5 × 10ⁿ
+      var t = [];
+      for (var k = Math.floor(Math.log(a) / Math.LN10); Math.pow(10, k) <= z; k++) {
+        [1, 2, 5].forEach(function (m) { var v = m * Math.pow(10, k); if (v >= a && v <= z) t.push(v); });
+      }
+      return t;
+    }
+    function relWidth(r) { return (r.R.range[1] - r.R.range[0]) / r.R.price; }
+    function aggregate(done) {                               // 차급·신뢰도별 대수·합계(합계에 넣는 차만) — 요약 표와 엑셀 '요약' 시트
+      var cnt = done.filter(counted), by = {}, order = [], gr = {};
+      var z = function () { return { n: 0, A: 0, B: 0, C: 0, p: 0, c: 0, e: 0, er: 0 }; }, tot = z();
+      cnt.forEach(function (r) {
+        var s = segOf(r), R = r.R, add = function (b) { b.n++; b[R.grade]++; b.p += R.price; b.c += R.converted; b.e += R.est; b.er += R.est * R.rate; };
+        if (!by[s]) { by[s] = z(); order.push(s); }
+        add(by[s]); add(tot); add(gr[R.grade] = gr[R.grade] || z());
+      });
+      order.sort(function (a, b) { return by[b].n - by[a].n || by[b].p - by[a].p; });
+      return { order: order, by: by, tot: tot, gr: gr, off: done.length - cnt.length };
+    }
+
+    function sumChart(done) {
+      var list = done.slice();
+      if (sumSort === 'price') list.sort(function (a, b) { return b.R.price - a.R.price; });
+      else if (sumSort === 'width') list.sort(function (a, b) { return relWidth(b) - relWidth(a); });
+      var shown = sumAll ? list : list.slice(0, SUM_SHOW), lo = Infinity, hi = -Infinity;
+      list.forEach(function (r) {                            // 눈금은 묶음 전체 기준(펼쳐도 그대로)
+        lo = Math.min(lo, r.R.range[0], r.R.converted, r.actual != null ? r.actual : Infinity);
+        hi = Math.max(hi, r.R.range[1], r.R.price, r.actual != null ? r.actual : -Infinity);
+      });
+      var raw = [lo, hi], log = lo > 0 && hi / lo > 4;        // 값 차이가 4배를 넘는 묶음(여러 차종)은 로그 눈금 — 싼 차의 범위도 보이게
+      if (log) { lo *= 0.92; hi *= 1.06; } else { var gap = (hi - lo) * 0.04 || hi * 0.05; lo = Math.max(0, lo - gap); hi += gap; }
+      var f = log ? Math.log : function (v) { return v; }, f0 = f(lo), f1 = f(hi);
+      var pc = function (v) { return ((f(v) - f0) / (f1 - f0) * 100).toFixed(2) + '%'; }, tk = log ? logTicks(lo, hi) : nice(lo, hi, 5);
+      var grid = tk.map(function (t) { return '<i class="g" style="left:' + pc(t) + '"></i>'; }).join('');
+      var h = '<div class="v2-bsum">';
+      shown.forEach(function (r) {
+        var R = r.R, off = yearOut(r), cond = r.cond.state === '미상' ? '상태 미상' : r.c['사고라벨'];
+        var tip = '행 ' + r.no + (r.plate ? ' · ' + r.plate : '') + '\n' + r.best.model + ' ' + r.grade + (r.trim ? ' ' + r.trim : '') + '\n' + r.reg.y + '-' + pad(r.reg.m) + ' · ' +
+          (r.km / 1e4).toFixed(1) + '만km · ' + cond + '\n추정 ' + man(R.price) + '만(범위 ' + man(R.range[0]) + '~' + man(R.range[1]) + ') · 신뢰도 ' + R.grade + '(비교 ' + R.n + '대)' +
+          '\n환산 ' + man(R.converted) + '만(' + R.rate + '%)' + (r.actual != null ? '\n실제 낙찰 ' + man(r.actual) + '만(환산가 ' + sgn((R.converted - r.actual) / r.actual * 100) + ')' : '') +
+          (off ? '\n차명 확인 필요 — 합계 제외' : '') + '\n누르면 아래 표의 그 행으로';
+        h += '<span class="k' + (off ? ' off' : '') + '"><span class="v2-gb ' + R.grade + '">' + R.grade + '</span><span class="nm">' +
+          esc((r.plate ? r.plate + ' ' : '') + r.best.model + ' ' + r.grade) + ' <small>' + String(r.reg.y).slice(2) + '년 · ' + (r.km / 1e4).toFixed(1) + '만' +
+          (off ? ' · 합계 제외' : '') + '</small></span></span>' +
+          '<span class="trk' + (off ? ' off' : '') + '" data-bs="' + r.no + '" data-tip="' + esc(tip) + '">' + grid +
+          '<i class="rng ' + R.grade + '" style="left:' + pc(R.range[0]) + ';width:' + ((f(R.range[1]) - f(R.range[0])) / (f1 - f0) * 100).toFixed(2) + '%"></i>' +
+          '<i class="cv" style="left:' + pc(R.converted) + '"></i><i class="es" style="left:' + pc(R.price) + '"></i>' +
+          (r.actual != null ? '<i class="ac" style="left:' + pc(r.actual) + '"></i>' : '') + '</span>' +
+          '<span class="v' + (off ? ' off' : '') + '"><b>' + man(R.price) + '</b><small>' + man(R.converted) + '</small></span>';
+      });
+      h += '<span></span><span class="ax">' + tk.map(function (t) { return '<i style="left:' + pc(t) + '">' + man(t) + '</i>'; }).join('') + '</span><span class="ax-u">만원</span></div>';
+      if (log) h += '<p class="v2-help">묶음 안 값 차이가 커서(' + man(raw[0]) + '만 ~ ' + man(raw[1]) + '만) 눈금을 로그(비율)로 그렸습니다 — 같은 너비 = 같은 비율.</p>';
+      if (list.length > SUM_SHOW) h += '<div class="v2-actions"><button type="button" class="v2-btn" data-b="sumAll">' + (sumAll ? '처음 ' + SUM_SHOW + '대만 보기' : '전체 ' + list.length + '대 보기') + '</button></div>';
+      return h;
+    }
+
+    function sumTable(ag) {
+      var gb = function (b) { return GRADES.map(function (g) { return b[g] ? '<span class="v2-gb ' + g + '">' + g + '</span>' + b[g] : ''; }).filter(Boolean).join(' '); };
+      var row = function (name, b, tot) {
+        return '<tr' + (tot ? ' class="tot"' : '') + '><td>' + esc(name) + '</td><td class="num">' + b.n + '</td><td class="gr">' + gb(b) + '</td><td class="num">' + man(b.p) +
+          '</td><td class="num">' + man(b.c) + '</td><td class="num">' + (b.e ? (b.er / b.e).toFixed(1) + '%' : '–') + '</td></tr>';
+      };
+      var h = '<div class="v2-ssub">차급별 <span class="hint">합계에 넣는 차 · 만원</span></div><div class="v2-tablewrap"><table class="t v2-bseg"><thead><tr><th>차급</th><th class="num">대수</th>' +
+        '<th>신뢰도</th><th class="num">추정 시세 합계</th><th class="num">환산가 합계</th><th class="num">평균 환산 비율</th></tr></thead><tbody>' +
+        ag.order.map(function (s) { return row(s, ag.by[s]); }).join('') + row('합계', ag.tot, true) + '</tbody></table></div>';
+      h += '<div class="v2-ssub">신뢰도별</div><div class="v2-tablewrap"><table class="t v2-bseg"><thead><tr><th>신뢰도</th><th class="num">대수</th><th class="num">추정 시세 합계</th>' +
+        '<th class="num">환산가 합계</th><th class="num">추정 시세 비중</th></tr></thead><tbody>' + GRADES.filter(function (g) { return ag.gr[g]; }).map(function (g) {
+          var b = ag.gr[g];
+          return '<tr><td><span class="v2-gb ' + g + '">' + g + '</span> ' + { A: '믿을 만함', B: '조건을 조금 넓힘', C: '참고값' }[g] + '</td><td class="num">' + b.n + '</td><td class="num">' + man(b.p) +
+            '</td><td class="num">' + man(b.c) + '</td><td class="num">' + (ag.tot.p ? Math.round(b.p / ag.tot.p * 100) + '%' : '–') + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+      return h + '<p class="v2-help">평균 환산 비율은 추정 시세로 가중한 값입니다. ' + (ag.off ? '차명 확인이 필요한 ' + ag.off + '대(등록연도가 모델 기간 밖)는 합계에서 뺐습니다. ' : '') +
+        '신뢰도 C는 같은 세부모델 전체로 넓혀 찾은 참고값이라, 합계 중 C 비중이 크면 "열기"로 근거를 확인하세요.</p>';
+    }
+
+    function sumCard(done) {
+      if (!done.length) return '';
+      var hasAct = done.some(function (r) { return r.actual != null; }), skip = rows.length - done.length;
+      return '<div class="card"><div class="v2-tools"><div class="card-title">묶음 요약 <span class="hint">차량별 추정 범위 · 굵은 숫자 = 추정 시세, 작은 숫자 = 환산가(만원)</span></div>' +
+        '<div class="segmented" role="group" aria-label="요약 그림 정렬">' + [['price', '시세 높은 순'], ['row', '행 순서'], ['width', '범위 넓은 순']].map(function (o) {
+          return '<button type="button" data-b="sumSort" data-v="' + o[0] + '" class="' + (sumSort === o[0] ? 'on' : '') + '">' + o[1] + '</button>';
+        }).join('') + '</div></div><div class="v2-bsumwrap"><div>' +
+        '<div class="v2-legend"><span><i class="v2-brng"></i>추정 범위(25~75%) · 색 = 신뢰도</span><span><i class="v2-best"></i>추정 시세</span><span><i class="v2-bcv"></i>환산가</span>' +
+        (hasAct ? '<span><i class="v2-bac"></i>실제 낙찰가</span>' : '') + '</div>' + sumChart(done) +
+        (skip ? '<p class="v2-help">계산 안 된 ' + skip + '대는 그림·표에서 뺐습니다(이유는 아래 표).</p>' : '') + '</div><div>' + sumTable(aggregate(done)) + '</div></div></div>';
+    }
+    function focusRow(no) {                                  // 요약 그림에서 누른 차 → 아래 결과 표의 그 행(확인할 차만 보기면 풀고)
+      var tr = el.querySelector('tr[data-no="' + no + '"]');
+      if (!tr && onlyCheck) { onlyCheck = false; renderOut(); tr = el.querySelector('tr[data-no="' + no + '"]'); }
+      if (!tr) return;
+      el.querySelectorAll('tr.is-hl').forEach(function (x) { x.classList.remove('is-hl'); });
+      tr.classList.add('is-hl');
+      tr.scrollIntoView({ block: 'center' });
+    }
+
     function renderOut() {
+      var tipEl = document.getElementById('tip');
+      if (tipEl) tipEl.hidden = true;                        // 다시 그리면 가리키던 칸이 사라지므로 말풍선도 닫는다
       if (!rows.length) { $('bOut').innerHTML = ''; return; }
       var done = rows.filter(function (r) { return r.R; }), sumP = 0, sumC = 0, cN = 0, off = done.filter(yearOut).length;
       done.filter(counted).forEach(function (r) { sumP += r.R.price; sumC += r.R.converted; });
@@ -525,6 +653,7 @@
         ctx.tile('확인할 차', String(chk + skip), '대', '신뢰도 C ' + cN + '대 · 차명 확인 ' + chk + '대') + '</div>';
       var vs = verify();
       if (vs) h += verifyCard(vs);
+      h += sumCard(done);
       var shown = rows.map(function (r, i) { return [r, i]; }).filter(function (x) { return !onlyCheck || !x[0].R || needsCheck(x[0]) || x[0].R.grade === 'C'; });
       h += '<div class="card"><div class="v2-tablewrap"><table class="t v2-tbl v2-btbl"><thead><tr><th class="num">행</th>' +
         '<th>차(붙여넣은 글)</th><th>매칭 — 세부모델 / 등급·세부등급</th><th>등록 · 주행</th><th>성능</th>' +
@@ -582,6 +711,15 @@
         });
       });
       var done = rows.filter(function (r) { return r.R; }), sum = function (f) { return Math.round(done.filter(counted).reduce(function (s, r) { return s + f(r.R); }, 0)); };
+      var ag = aggregate(done), B = function (t) { return { v: t, bold: true }; }, mw = function (v) { return { v: Math.round(v), money: true }; };
+      var sumRows = [[B('차급별 — 합계에 넣는 차만' + (ag.off ? '(차명 확인 ' + ag.off + '대 제외)' : ''))],
+        ['차급', '대수', '신뢰도 A', '신뢰도 B', '신뢰도 C', '추정 시세 합계(만원)', '환산가 합계(만원)', '평균 환산 비율(%)'].map(B)];
+      ag.order.forEach(function (sg) { var b = ag.by[sg]; sumRows.push([sg, b.n, b.A, b.B, b.C, mw(b.p), mw(b.c), b.e ? +(b.er / b.e).toFixed(1) : null]); });
+      sumRows.push([B('합계'), ag.tot.n, ag.tot.A, ag.tot.B, ag.tot.C, mw(ag.tot.p), mw(ag.tot.c), ag.tot.e ? +(ag.tot.er / ag.tot.e).toFixed(1) : null],
+        [], [B('신뢰도별')], ['신뢰도', '대수', '추정 시세 합계(만원)', '환산가 합계(만원)', '추정 시세 비중(%)'].map(B));
+      GRADES.forEach(function (g) { var b = ag.gr[g]; if (b) sumRows.push([g, b.n, mw(b.p), mw(b.c), ag.tot.p ? +(b.p / ag.tot.p * 100).toFixed(1) : null]); });
+      sumRows.push([], ['평균 환산 비율 = 추정 시세로 가중한 환산 비율 · 신뢰도 A = 비교 매물 10대 이상, 조건을 거의 넓히지 않음, 범위 ±8% 안 · ' +
+        'B = 조건을 조금 넓힘 · C = 같은 세부모델 전체로 넓힌 참고값']);
       var mi = X.mi.crawls || [];
       var info = [['항목', '값'], ['붙여넣은 차', rows.length + T.over], ['산정한 차', done.length], ['계산 안 된 차', rows.length + T.over - done.length],
         ['추정 시세 합계(만원)', { v: sum(function (R) { return R.price; }), money: true }], ['환산가 합계(만원)', { v: sum(function (R) { return R.converted; }), money: true }],
@@ -600,6 +738,7 @@
       var widths = head.map(function () { return 14; }).concat([10, 12, 20, 18, 14, 10, 12, 11, 30, 12, 8, 10, 10, 10, 10, 12, 12, 12, 10, 12, 16, 7, 9, 22, 24, 40], vs ? [14, 12, 14] : []);
       XlsxWriter.download(ctx.fileSafe('묶음산정_' + ctx.today()) + '.xlsx', [
         { name: '결과', rows: out, header: true, freeze: true, money: money, widths: widths },
+        { name: '요약', rows: sumRows, widths: [34, 8, 10, 10, 10, 20, 20, 18] },
         { name: '비교 매물', rows: cmp, header: true, freeze: true, money: [7, 14, 15], widths: [6, 30, 7, 11, 7, 11, 9, 10, 9, 18, 14, 8, 12, 34, 10, 11, 7, 42] },
         { name: '산정 기준', rows: info, header: true, widths: [22, 90] }]);
     }
@@ -637,9 +776,13 @@
 
     // ───── 이벤트 ─────
     function onClick(e) {
+      var bs = e.target.closest('[data-bs]');
+      if (bs) { focusRow(bs.getAttribute('data-bs')); return; }
       var b = e.target.closest('button[data-b]');
       if (!b) return;
       var a = b.getAttribute('data-b'), k = +b.getAttribute('data-k');
+      if (a === 'sumSort') { sumSort = b.getAttribute('data-v'); renderOut(); return; }
+      if (a === 'sumAll') { sumAll = !sumAll; renderOut(); return; }
       if (a === 'run') run();
       else if (a === 'sample') sample();
       else if (a === 'clear') { $('bPaste').value = ''; run(); }
