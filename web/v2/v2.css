@@ -463,7 +463,7 @@ body.v2-sheeton { overflow: hidden; }
 /* 휴대폰 폭 위쪽 탭 — 탭 다섯 개(약 420px)가 로고 옆 200px 남짓에 다 들어가지 않아 로고 아래 한 줄로 내린다(v2-navrow) */
 @media (max-width: 639px) {
   header > div { flex-wrap: wrap; height: auto !important; column-gap: 12px !important; row-gap: 0 !important; }
-  header > div > .brand-mark { height: 44px; }
+  header > div > .brand-mark { height: 44px; align-items: center; }   /* 기본(baseline)이면 글자가 44px 칸 맨 위에 붙는다 */
   header nav { order: 3; flex: 0 0 calc(100% + 32px); margin: 0 -16px; padding: 0 6px; border-top: 1px solid var(--line); }
   header .nav-tab { height: 42px; padding: 0 10px; font-size: 13.5px; }
   header .nav-tab.on::after { left: 8px; right: 8px; }

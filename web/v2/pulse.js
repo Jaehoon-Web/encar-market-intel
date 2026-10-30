@@ -17,6 +17,8 @@
   var TIP = {                                                // 용어 설명(? 말풍선)
     on: '엔카 상세 화면까지 확인한 판매중 매물 수입니다(목록 관측일 기준).',
     fresh: '직전 목록 뒤 엔카에 새로 올라온 매물입니다. 목록 간격이 7일이 아니면 7일 기준으로 맞춘 값입니다.',
+    other: '지난 목록에는 없었지만 엔카 등록일이 지난 목록을 받은 날이거나 그보다 앞선 매물입니다(지난 목록을 받은 뒤 같은 날 올라온 매물, 등록하고 한참 뒤에 ' +
+      '목록에 나타난 매물 등). 신규 유입에는 세지 않으므로 판매중 재고 변화 = 신규 유입 − 판매 + 그 밖 유입입니다.',
     sold: '판매는 거래를 직접 확인한 값이 아니라 추정입니다. 지난 목록에 있다가 이번 목록에서 사라진 매물을 판매로 셉니다(다시 올린 매물은 뺌). ' +
       '판매자가 그냥 내린 매물도 섞일 수 있습니다.',
     rate: '주간 판매율 = 지난주 판매중이던 매물 가운데 한 주 동안 팔린(목록에서 사라진) 비율입니다. 목록 간격이 7일이 아니면 7일 기준으로 맞춥니다.',
@@ -181,9 +183,15 @@
     function weekFoot() {
       return P.weekly && P.days !== 7 ? '구간이 ' + P.days + '일이라 /주 값은 7일 기준으로 맞춘 값입니다.' : '';
     }
+    function otherIn(g) {                                     // 판매중 재고 변화 − (신규 − 판매) = 지난 목록에 없던 예전 등록 매물(신규 유입에 세지 않음)
+      if (!P.weekly || g.on_prev == null || g.new_w == null || g.sold_w == null) return null;
+      return g.on - g.on_prev - Math.round((g.new_w - g.sold_w) * P.days / 7);   // /주 값을 구간 대수로 되돌림(7일이면 그대로)
+    }
     function stockTile(g) {
+      var o = otherIn(g);
       return tile('판매중 재고', TIP.on, cnt(g.on), '대', deltaLine(g.on, g.on_prev, 'pct', 'on', '지난주 ' + cnt(g.on_prev) + '대 대비'),
-        row('신규 유입', TIP.fresh, g.new_w != null ? '<b>' + cnt(g.new_w) + '</b>대/주' : '–', vs(g.new_w, g.new_w_prev, 'pct', 'fresh')), weekFoot());
+        row('신규 유입', TIP.fresh, g.new_w != null ? '<b>' + cnt(g.new_w) + '</b>대/주' : '–', vs(g.new_w, g.new_w_prev, 'pct', 'fresh')) +
+        (o != null ? row('그 밖 유입', TIP.other, '<b>' + (o > 0 ? '+' : o < 0 ? '−' : '') + cnt(Math.abs(o)) + '</b>대' + (P.days !== 7 ? '(약)' : '')) : ''), weekFoot());
     }
     function soldTile(g) {
       return tile('판매(추정)', TIP.sold, cnt(g.sold_w), g.sold_w != null ? '대/주' : '', deltaLine(g.sold_w, g.sold_w_prev, 'pct', 'sold', '지난주 ' + cnt(g.sold_w_prev) + '대 대비'),

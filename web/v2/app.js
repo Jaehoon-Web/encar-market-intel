@@ -1200,19 +1200,47 @@
       (unit ? '<small>' + esc(unit) + '</small>' : '') + '</div><div class="v2-kv">' + esc(sub || '') + '</div></div>';
   }
 
+  function segCut(seg) {                                     // 차급 인하 매물 비율 = 같은 차급·구분 세부모델 인하 비율의 판매중 대수 가중(모델 리포트와 같은 식)
+    if (!X.mm || !seg) return null;
+    if (!X.mmCut) {
+      var a = {};
+      X.mmCut = {};
+      X.mm.models.forEach(function (m) {
+        if (m.cut == null || !m.on) return;
+        var c = a[m.seg + '·' + m.origin] || (a[m.seg + '·' + m.origin] = [0, 0]);
+        c[0] += m.cut * m.on; c[1] += m.on;
+      });
+      Object.keys(a).forEach(function (k) { X.mmCut[k] = a[k][0] / a[k][1]; });
+    }
+    return X.mmCut[seg] != null ? X.mmCut[seg] : null;
+  }
+  function modelMarket(G) {                                  // 모델 요약의 판매 숫자 — 모델 리포트와 같은 market_models(엔카 판매중 전체) 기준
+    var seg = G.models[S.model] && G.models[S.model].seg, mm = X.mmBy && X.mmBy[G.F.maker + '|' + S.model] || null;
+    var thin = !mm || mm.on < 100, w = function (r) { return r >= 1.15 ? '빠름' : r <= 0.87 ? '느림' : '비슷'; };
+    return { mm: mm, sg: X.mm && X.mm.segments && X.mm.segments[seg] || {}, sc: segCut(seg), loading: !X.mmBy,
+      word: function (r) { return thin ? '' : ' · ' + w(r); } };   // 판매중 100대 미만은 빠름·느림을 붙이지 않는다(모델 리포트와 같은 기준)
+  }
+
   function summary(G, miss) {
-    var st = modelStats(G), M = st.M, F = G.F;
+    var st = modelStats(G), M = st.M, F = G.F, K = modelMarket(G), mm = K.mm, sg = K.sg;
     var h = (miss.length ? needCard(miss) : '') +
       '<div class="card v2-headcard"><div class="v2-head">' + esc(F.maker + ' ' + S.model) + ' · 모델 요약' + (miss.length ? ' <span class="v2-ref">참고</span>' : '') +
-      '<br><span class="sub">비교 가능 매물 기준 · 기준 ' + dataDate() + '</span></div><div class="v2-actions" style="margin:0">' +
-      '<a class="v2-btn" href="' + esc(reportHref(S.mk, S.grp, S.model)) + '">모델 리포트에서 자세히 →</a>' +
+      '<br><span class="sub">판매중·체류일·인하·판매율은 모델 리포트와 같은 기준 · 최근 판매·시세표·등급별은 비교 가능 매물 · 기준 ' + dataDate() + '</span></div>' +
+      '<div class="v2-actions" style="margin:0"><a class="v2-btn" href="' + esc(reportHref(S.mk, S.grp, S.model)) + '">모델 리포트에서 자세히 →</a>' +
       '<button type="button" class="v2-btn" data-act="xlsxModel">엑셀 내려받기</button></div></div>';
+    var iv = X.mm && X.mm.speed_interval, dc = mm && mm.cut != null && K.sc != null ? Math.round(mm.cut * 100) - Math.round(K.sc * 100) : null;
     h += '<div class="v2-cards">' +
-      tile('판매중', (M.onsale_all != null ? M.onsale_all : st.on.length).toLocaleString(), '대', '비교 가능(성능점검 있음) ' + st.on.length.toLocaleString() + '대') +
-      tile('최근 3개월 판매', st.sold.length.toLocaleString(), '대', '목록에서 사라진 매물(재등록 제외)') +
-      tile('중위 체류일', st.dw != null ? String(Math.round(st.dw)) : '–', st.dw != null ? '일' : '', st.seg.dwell != null ? '차급 평균 ' + st.seg.dwell + '일' : '') +
-      tile('가격 인하 매물', st.cut != null ? (st.cut * 100).toFixed(1) : '–', st.cut != null ? '%' : '', st.seg.cut != null ? '차급 평균 ' + (st.seg.cut * 100).toFixed(1) + '%' : '') +
-      tile('2주 판매율', '–', '', '주간 수집이 쌓이면 제공') + '</div>';
+      tile('판매중', (mm ? mm.on : M.onsale_all != null ? M.onsale_all : st.on.length).toLocaleString(), '대', '비교 가능(성능점검 있음) ' + st.on.length.toLocaleString() + '대') +
+      tile('최근 3개월 판매', st.sold.length.toLocaleString(), '대', '비교 가능 매물 중 목록에서 사라진 매물(재등록 제외)') +
+      (mm ? tile('중위 체류일', mm.dwell != null ? String(mm.dwell) : '–', mm.dwell != null ? '일' : '',
+          mm.dwell == null ? '최근 90일 판매가 5대 미만' : sg.dwell ? '차급 ' + sg.dwell + '일' + K.word(sg.dwell / mm.dwell) : '차급 값 없음') +
+        tile('가격 인하 매물', mm.cut != null ? String(Math.round(mm.cut * 100)) : '–', mm.cut != null ? '%' : '',
+          K.sc == null ? '차급 값 없음' : '차급 ' + Math.round(K.sc * 100) + '%' + (mm.on < 100 ? '' : ' · ' + (dc ? Math.abs(dc) + '%p ' + (dc > 0 ? '많음' : '적음') : '같음')))
+      : tile('중위 체류일', st.dw != null ? String(Math.round(st.dw)) : '–', st.dw != null ? '일' : '', K.loading ? '불러오는 중…' : '비교 가능 매물 기준(시장 숫자 없음)') +   // 시장 숫자 파일이 없거나 이 모델이 없으면 비교 가능 매물로
+        tile('가격 인하 매물', st.cut != null ? String(Math.round(st.cut * 100)) : '–', st.cut != null ? '%' : '', K.loading ? '불러오는 중…' : '비교 가능 매물 기준')) +
+      tile('주간 판매율', mm && mm.rate_w != null ? (mm.rate_w * 100).toFixed(1) : '–', mm && mm.rate_w != null ? '%' : '',
+        K.loading ? '불러오는 중…' : !mm ? '시장 숫자 없음' : mm.rate_w == null ? (iv ? '구간 시작 판매중이 10대 미만' : '주간 수집 구간이 아직 없음')
+          : (sg.rate_w ? '차급 ' + (sg.rate_w * 100).toFixed(1) + '%' + K.word(mm.rate_w / sg.rate_w) : '차급 값 없음') + (iv ? ' · ' + mmdd(iv[0]) + '→' + mmdd(iv[1]) : '')) + '</div>';
     h += matrixCard(st) + '<div class="v2-two-col">' + gradeCard(st) + trendCard(G) + '</div>';
     $('res').innerHTML = h;
   }
@@ -1248,7 +1276,7 @@
     });
     h += '</tbody></table></div>';
     if (st.grades.length > 20) h += '<p class="v2-help">판매중이 많은 20개 등급만 보여 줍니다(엑셀에는 전체).</p>';
-    return h + '<p class="v2-help">2주 판매율은 주간 수집이 쌓이면 붙입니다.</p></div>';
+    return h + '</div>';
   }
 
   function fillFromCell(i, j) {                              // 시세표 칸 → 한 대 산정 입력
@@ -1313,11 +1341,16 @@
   function exportModel() {
     var G = grp();
     if (!G || !S.model) return;
-    var st = modelStats(G), F = G.F;
-    var info = [['항목', '값'], ['모델', F.maker + ' ' + S.model], ['판매중(전체)', st.M.onsale_all], ['판매중(비교 가능)', st.on.length],
-      ['최근 3개월 판매', st.sold.length], ['중위 체류일', st.dw != null ? Math.round(st.dw) : null], ['차급 평균 체류일', st.seg.dwell],
-      ['가격 인하 매물 비율(%)', st.cut != null ? +(st.cut * 100).toFixed(1) : null], ['차급 평균 가격 인하 비율(%)', st.seg.cut != null ? +(st.seg.cut * 100).toFixed(1) : null],
-      ['데이터 기준', '엔카 ' + dataDate(true)], ['비교 매물 파일', F.version], ['참고', '판매중 호가 기준. 시세표 칸은 5대 미만이면 비움']];
+    var st = modelStats(G), F = G.F, K = modelMarket(G), mm = K.mm || {}, sg = K.sg, iv = X.mm && X.mm.speed_interval;
+    var r1 = function (v) { return v == null ? null : +(v * 100).toFixed(1); };   // 비율 → % 소수 1자리(화면 카드와 같은 반올림)
+    var info = [['항목', '값'], ['모델', F.maker + ' ' + S.model], ['판매중(전체)', K.mm ? mm.on : st.M.onsale_all], ['판매중(비교 가능)', st.on.length],
+      ['최근 3개월 판매(비교 가능)', st.sold.length],
+      ['주간 판매율(%)', r1(mm.rate_w)], ['차급 주간 판매율(%)', r1(sg.rate_w)], ['판매율 구간', iv ? iv[0] + '→' + iv[1] : null],
+      ['중위 체류일(최근 90일 판매)', K.mm ? mm.dwell : st.dw != null ? Math.round(st.dw) : null], ['차급 중위 체류일', K.mm ? sg.dwell : st.seg.dwell],
+      ['가격 인하 매물 비율(%)', K.mm ? r1(mm.cut) : r1(st.cut)], ['차급 가격 인하 비율(%)', K.mm ? r1(K.sc) : r1(st.seg.cut)],
+      ['데이터 기준', '엔카 ' + dataDate(true)], ['비교 매물 파일', F.version],
+      ['참고', (K.mm ? '판매중·판매율·체류일·인하 비율은 모델 리포트와 같은 기준(엔카 판매중 전체). ' : '시장 숫자가 없어 체류일·인하 비율은 비교 가능 매물 기준. ') +
+        '최근 3개월 판매·시세표·등급별은 비교 가능 매물(성능점검 있음). 시세표 칸은 5대 미만이면 비움']];
     var mx = [['최초등록 \\ 주행'].concat(KM_BANDS.map(function (b) { return b[2] + ' 중앙 호가'; }), KM_BANDS.map(function (b) { return b[2] + ' 대수'; }))];
     st.years.forEach(function (y, i) {
       mx.push([y + '년'].concat(st.cells[i].map(function (c) { return c.n >= 5 ? Math.round(c.med) : null; }), st.cells[i].map(function (c) { return c.n; })));

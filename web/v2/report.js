@@ -540,6 +540,11 @@
       var line = md(e.d) + ' 판매중 매물은 <b>' + n0(e.on) + '대</b>' + (e.days != null && e.days <= IRREG[1] ? '로 ' + md(pv.d) + '보다 ' +
         (e.on === pv.on ? '변화가 없습니다' : n0(Math.abs(e.on - pv.on)) + '대 ' + (e.on > pv.on ? '늘었습니다' : '줄었습니다')) : '입니다') + '.';
       if (e.nw != null) line += ' 신규는 주 <b>' + fmtW(e.nw) + '대</b>, 판매는 주 <b>' + fmtW(e.sd) + '대</b>입니다' + (reg(e.days) ? '' : '(구간 ' + e.days + '일 — 참고)') + '.';
+      if (e.nw != null && e.days <= IRREG[1]) {              // 판매중 변화 − (신규 − 판매) — 신규에 세지 않는 예전 등록 매물(마켓 펄스 '그 밖 유입'과 같은 식)
+        var other = e.on - pv.on - Math.round((e.nw - e.sd) * e.days / 7);
+        if (other > 0) line += ' 판매중 변화에는 지난 목록에 없던 예전 등록 매물 <b>' + n0(other) + '대</b>도 들어 있습니다(신규에 세지 않음).';
+        else if (other < 0) line += ' 판매로 세지 않고 판매중에서 빠진 매물 <b>' + n0(-other) + '대</b>도 있습니다.';
+      }
       var vs;
       if (reg(e.days) && reg(pv.days) && pv.nw != null) vs = '지난 구간(' + md(pv.d) + ')보다 신규 ' + arrow(e.nw - pv.nw) + ', 판매 ' + arrow(e.sd - pv.sd) + '입니다.';
       else vs = '<span class="v2-pill">짧음</span> 신규·판매의 지난주 대비는 ' + (pv.days == null ? md(pv.d) + '이 첫 수집이라' : pv.days > IRREG[1] ? md(pv.d) + '이 ' + pv.days + '일 공백 뒤 첫 회차라' :
