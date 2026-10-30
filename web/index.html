@@ -2,9 +2,9 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8" />
-<title>엔카 인텔 — 중고차 시세 산정 · 시장 시황</title>
+<title>엔카 인텔 — 중고차 시세 산정 · 마켓 펄스 · 모델 리포트 · 시장 시황</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<meta name="description" content="엔카 매물로 대상 차의 시세를 근거와 함께 추정하고 팀 환산가를 낸다. 묶음 산정, 시장 시황 지수, 차종 비교, 데이터 내려받기" />
+<meta name="description" content="엔카 매물로 중고차 시세를 근거와 함께 추정한다. 묶음 산정, 마켓 펄스(이번 주 시장), 모델 리포트(잔존율·감가 곡선), 시장 시황 지수, 차종 비교, 데이터 내려받기" />
 <script>
   // 이전 사이트 즐겨찾기(#/overview 등)는 이전 사이트로 — 2026-10-27 교체(이전 사이트는 old.html)
   // 새 사이트를 연 채로 즐겨찾기를 누르면 페이지가 다시 읽히지 않으므로 해시가 바뀔 때도 본다
@@ -29,6 +29,9 @@
 </script>
 <link rel="stylesheet" href="styles.css" />
 <link rel="stylesheet" href="v2/v2.css" />
+<link rel="stylesheet" href="v2/pulse.css" />
+<link rel="stylesheet" href="v2/report.css" />
+<link rel="stylesheet" href="v2/quad.css" />
 </head>
 <body class="font-sans antialiased">
 
@@ -41,6 +44,8 @@
     </a>
     <nav class="flex items-center gap-0 overflow-x-auto no-scrollbar">
       <a class="nav-tab on" href="#/price" id="navPrice">시세 산정</a>
+      <a class="nav-tab" href="#/pulse" id="navPulse">마켓 펄스</a>
+      <a class="nav-tab" href="#/report" id="navReport">모델 리포트</a>
       <a class="nav-tab" href="#/market" id="navMarket">시장 시황</a>
       <a class="nav-tab" href="#/data" id="navData">데이터</a>
     </nav>
@@ -58,8 +63,8 @@
 </main>
 
 <footer class="mt-16 py-10 text-center" style="border-top:1px solid var(--line);">
-  <div class="eyebrow mb-2">ENCAR MARKET INTEL · 중고차 시세 산정 · 시장 시황</div>
-  <div class="text-[11px]" style="color:var(--tx-4);">추정 시세는 엔카 호가 기준입니다. 환산가는 팀 환산 비율(도·소매 갭 요약치)을 적용한 값입니다. · <a href="old.html" style="color:var(--tx-3);">이전 사이트</a></div>
+  <div class="eyebrow mb-2">ENCAR MARKET INTEL · 중고차 시세 산정 · 마켓 펄스 · 모델 리포트 · 시장 시황</div>
+  <div class="text-[11px]" style="color:var(--tx-4);">추정 시세는 엔카 호가 기준입니다. <span id="footConv">환산가는 팀 환산 비율(도·소매 갭 요약치)을 적용한 값입니다. </span>· <a href="old.html" style="color:var(--tx-3);">이전 사이트</a></div>
 </footer>
 
 <div class="v2-tip" id="tip" hidden></div>
@@ -73,6 +78,8 @@
 <script src="v2/batch.js"></script>
 <script src="v2/rates.js"></script>
 <script src="v2/market.js"></script>
+<script src="v2/pulse.js"></script>
+<script src="v2/report.js"></script>
 <script src="v2/data.js"></script>
 <script src="v2/app.js"></script>
 <!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "897cb30d18b04fd692372d916c4b9b35"}'></script><!-- End Cloudflare Web Analytics -->

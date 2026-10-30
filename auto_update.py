@@ -188,8 +188,26 @@ def main():
         except Exception as e:
             log("비교 매물 파일 실패(무시하고 계속): %s" % e)
 
+        # 2.91) 마켓 펄스(이번 주 숫자·주목 모델·요약 → web/data/pulse.json, 시황 지수 다음) — 실패해도 배포는 계속
+        try:
+            run([PY, "pulse_data.py"], "마켓 펄스(pulse_data.py)")
+        except Exception as e:
+            log("마켓 펄스 실패(무시하고 계속): %s" % e)
+
+        # 2.92) 모델 리포트(잔존율·주간 흐름·인하·이상 의심 매물 → web/data/report, 비교 매물 파일 다음) — 실패해도 배포는 계속
+        try:
+            run([PY, "model_report.py"], "모델 리포트(model_report.py)")
+        except Exception as e:
+            log("모델 리포트 실패(무시하고 계속): %s" % e)
+
         # 3) 사이트 데이터 빌드
         run([PY, "build_data.py"], "사이트 빌드(build_data.py)")
+
+        # 3.1) 사이트 점검(파일 날짜·모양·'환산' 문구 등) — 결과는 로그에만, 실패해도 배포는 계속(2.91·2.92가 실패해 묵은 파일이 남으면 여기서 보임)
+        try:
+            run(["node", os.path.join("tools", "site_check.mjs")], "사이트 점검(site_check.mjs)")
+        except Exception as e:
+            log("사이트 점검 실패(배포는 계속, 로그 확인): %s" % e)
 
         # 4) Git 배포
         git_deploy(args.full)

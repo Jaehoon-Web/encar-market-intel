@@ -1,0 +1,76 @@
+/* 마켓 펄스(pulse.js, 기획안 5.5.1) — 기존 카드·표·말풍선 클래스 위에 이 화면 요소만(.v2-pulse 안). 휴대폰 375px 에서 가로로 넘치지 않게 */
+
+.v2-pulse { word-break: keep-all; overflow-wrap: anywhere; }   /* 한글이 글자 단위로 끊기지 않게(넘칠 만큼 긴 말만 끊음) */
+
+/* ① 위쪽 줄 — 제목 · 전체·국산·수입 · '짧음'과 이유 */
+.v2-pulse .v2-ptop { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.v2-pulse .v2-ptitle { margin: 0; font-size: 18px; font-weight: 700; color: var(--tx-1); line-height: 1.4; word-break: keep-all; }
+.v2-pulse .v2-ptitle span { font-size: 13px; font-weight: 500; color: var(--tx-2); margin-left: 4px; }
+.v2-pulse .v2-pshortline { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; color: var(--tx-3); line-height: 1.55; }
+.v2-pulse .v2-pshortline b { color: var(--tx-2); }
+.v2-pulse .v2-pshort { cursor: help; white-space: nowrap; letter-spacing: 0; text-transform: none; }
+.v2-pulse .v2-pshort:focus { outline: 2px solid var(--accent-line); outline-offset: 1px; }
+
+/* ② 숫자 4묶음 — 넓으면 네 칸, 중간 두 칸, 휴대폰 한 칸 */
+.v2-pulse .v2-pcards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+@media (min-width: 600px) { .v2-pulse .v2-pcards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1200px) { .v2-pulse .v2-pcards { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.v2-pulse .v2-pcard { min-width: 0; }
+.v2-pulse .v2-pcard .v2-big { margin-top: 10px; }
+.v2-pulse .v2-pcard .v2-big .v2-mlab { font-family: var(--ff-body); vertical-align: 8px; margin-left: 8px; }
+.v2-pulse .v2-pdelta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 8px; font-size: 12px; color: var(--tx-3); line-height: 1.5; }
+.v2-pulse .v2-pd { font-weight: 700; color: var(--tx-1); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.v2-pulse .v2-prows { margin-top: 12px; }
+.v2-pulse .v2-prow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 10px; padding: 7px 0;
+  border-top: 1px solid var(--line-soft); font-size: 13px; }
+.v2-pulse .v2-prow .k { color: var(--tx-2); white-space: nowrap; }
+.v2-pulse .v2-prow .v { color: var(--tx-2); text-align: right; font-variant-numeric: tabular-nums; }
+.v2-pulse .v2-prow .v b { color: var(--tx-1); }
+.v2-pulse .v2-pfoot { margin: 8px 0 0; font-size: 12px; color: var(--tx-3); line-height: 1.55; }
+
+/* 같은 매물 내림·그대로·올림 막대 — 칸 사이 2px 틈, 양 끝만 둥글게 */
+.v2-pulse .v2-pstack { display: flex; gap: 2px; height: 10px; margin: 2px 0 6px; }
+.v2-pulse .v2-pstack i { display: block; min-width: 2px; height: 100%; }
+.v2-pulse .v2-pstack i:first-child { border-radius: 4px 0 0 4px; }
+.v2-pulse .v2-pstack i:last-child { border-radius: 0 4px 4px 0; }
+.v2-pulse .v2-pstack i:only-child { border-radius: 4px; }
+.v2-pulse .v2-pkey { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.v2-pulse .v2-pstack .dn, .v2-pulse .v2-pkey.dn { background: var(--down); }
+.v2-pulse .v2-pstack .flat { background: var(--bg-3); }
+.v2-pulse .v2-pstack .up, .v2-pulse .v2-pkey.up { background: var(--up); }
+
+/* ③ 이번 주 요약 — 참고(notes) */
+.v2-pulse .v2-notes { margin-top: 6px; }
+.v2-pulse .v2-pnotes { margin: 0 0 0 18px; list-style: disc; font-size: 12px; color: var(--tx-3); line-height: 1.7; }
+
+/* ④ 주목할 모델 · ⑥ 매물 경고의 모델 줄 — 이름(링크) | 값, 아래 줄에 비교 기준 */
+.v2-pulse .v2-pmv { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px 28px; }
+@media (min-width: 720px) { .v2-pulse .v2-pmv { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1280px) { .v2-pulse .v2-pmv { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.v2-pulse .v2-pmv > section, .v2-pulse .v2-pwarn > section { min-width: 0; }
+.v2-pulse .v2-plist { list-style: none; margin: 0; padding: 0; }
+.v2-pulse .v2-plist li { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 10px; align-items: baseline; padding: 7px 0;
+  border-bottom: 1px solid var(--line-soft); font-size: 13px; }
+.v2-pulse .v2-plist li:last-child { border-bottom: 0; }
+.v2-pulse .v2-plist .v2-link, .v2-pulse .v2-plist .nm { min-width: 0; word-break: keep-all; overflow-wrap: anywhere; }
+.v2-pulse .v2-plist .v { font-weight: 700; color: var(--tx-1); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.v2-pulse .v2-plist small { grid-column: 1 / -1; margin-top: 1px; font-size: 12px; color: var(--tx-3); line-height: 1.45; }
+.v2-pulse .v2-pnone { margin: 6px 0 0; font-size: 13px; color: var(--tx-3); line-height: 1.6; }
+
+/* ⑤ 차급별 이번 주 — 표는 .v2-tablewrap 안에서만 가로 스크롤 */
+.v2-pulse .v2-ptbl { min-width: 720px; }
+.v2-pulse .v2-ptbl th { vertical-align: bottom; }
+.v2-pulse .v2-ptbl th .v2-q { vertical-align: 0; }
+.v2-pulse .v2-ptbl th .v2-pshort { font-size: 11px; padding: 0 6px; margin-left: 2px; }
+.v2-pulse .v2-ptbl td { vertical-align: top; }
+.v2-pulse .v2-ptbl td b { font-weight: 600; color: var(--tx-1); font-variant-numeric: tabular-nums; }
+.v2-pulse .v2-ptbl td small { display: block; margin-top: 1px; font-size: 11px; color: var(--tx-3); line-height: 1.4; }
+.v2-pulse .v2-ptbl tr.v2-ptot td { background: var(--bg-2); }
+.v2-pulse .v2-ptbl tr.v2-ptot td b, .v2-pulse .v2-ptbl tr.v2-ptot .v2-link { font-weight: 700; }
+.v2-pulse .v2-ptbl tr.v2-plow td b, .v2-pulse .v2-ptbl tr.v2-plow .v2-link { color: var(--tx-3); font-weight: 500; }
+
+/* ⑥ 매물 경고 — 이상 의심 | 오래 안 팔리는 */
+.v2-pulse .v2-pwarn { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px 32px; margin-top: 12px; }
+@media (min-width: 720px) { .v2-pulse .v2-pwarn { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.v2-pulse .v2-pwarn .v2-big { margin-top: 8px; }
+.v2-pulse .v2-pwarn .v2-kv { margin-top: 4px; }

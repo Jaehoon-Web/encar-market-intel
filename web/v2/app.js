@@ -18,6 +18,7 @@
   var SHOW = 10;                                            // 비교 매물 표 기본 행 수(인터뷰 Q40 — 그림 먼저, 표는 10행 + 펼치기)
   var KM_BANDS = [[0, 3e4, '3만 미만'], [3e4, 6e4, '3~6만'], [6e4, 1e5, '6~10만'], [1e5, 1.5e5, '10~15만'], [1.5e5, Infinity, '15만 이상']];
   var X = {}, ENG = null, ISC = null, NM = null, GROUPS = {}, R = null, R0 = null, recentTimer = 0, LAST = null, timer = 0, B = null, RV = null, MK = null, DV = null, MB = '';
+  var PV = null, RP = null;                                  // 마켓 펄스(pulse.js) · 모델 리포트(report.js)
   var VIEW = { sort: 'sim', all: false, mode: 'one', condWarn: [], condOut: [], exKeep: {}, allGrades: false, nameText: '', nameMsg: '', nameCands: [], recentOpen: false,
     posx: 'km', hl: null };                                  // posx: 내 차 위치 그림 가로축(km·age) · hl: 그림에서 누른 비교 매물 ID      // mode: one(한 대 산정) · model(모델 요약) · batch(묶음 산정) · rates(⚙ 환산 비율)
   var TIP = {                                                // 용어 설명(결과 카드·비교 매물 표의 ? — 마우스를 올리거나 누르면)
@@ -43,7 +44,7 @@
       '매물마다 보정이 달라서 생깁니다. 환산가는 추정 시세에 환산 비율을 적용한 경매 예상가입니다.',
     trend: '시세지수는 그 회차에 새로 올라온 매물(등록 7일 이내)의 첫 호가를 7월 초(7/1~7/15) 같은 모델·등급 매물과 비교한 값입니다. 차령·주행·색상·성능을 맞추므로 ' +
       '시간에 따른 자연 감가는 빠집니다(100보다 낮으면 같은 조건의 차가 7월 초보다 싸게 나온다는 뜻). 세부모델 점은 신규 매물 10대 이상인 회차만 찍고, 옅은 띠는 표본 수로 생기는 ' +
-      '흔들림(95%)입니다. 방향은 최근 4주 기울기가 흔들림의 2배를 넘을 때만 오름·내림으로 씁니다. 회색 점선은 같은 차급(국산·수입 구분) 전체입니다.'
+      '흔들림의 2배 범위입니다(흔들림 = 신규 매물 수로 생기는 표준오차, 마켓 펄스·시장 시황과 같은 뜻). 방향은 최근 4주 기울기가 흔들림의 2배를 넘을 때만 오름·내림으로 씁니다. 회색 점선은 같은 차급(국산·수입 구분) 전체입니다.'
   };
   var DOM_ORDER = ['현대', '제네시스', '기아', '쉐보레(GM대우)', '르노코리아(삼성)', 'KG모빌리티(쌍용)', '기타 제조사'];   // 엔카 국산 제조사 순서
   var RECENT = 'v2.recent';                                  // 최근 산정(이 브라우저에만)
@@ -1052,18 +1053,19 @@
       dir: Math.abs(d) >= Math.max(0.5, 2 * se) ? (d > 0 ? '오름' : '내림') : '보합' };
   }
 
-  function trendData(G) {                                    // 시세 추세 숫자(카드·한 장 요약·엑셀 분석 시트) — 점마다 흔들림 se = 지수 × 1.2533 × σ ÷ √신규 대수
-    var M = G.models[S.model], seg = (M && M.seg || '').split('·'), sname = seg[1] + ' ' + seg[0], skey = seg[1] + '|' + seg[0];
+  function trendData(G) { var M = G.models[S.model]; return trendDataOf(G.F.maker, S.model, M && M.seg); }
+  function trendDataOf(maker, model, segStr) {               // 시세 추세 숫자(카드·한 장 요약·엑셀 분석 시트·모델 리포트) — 점마다 흔들림 se = 지수 × 1.2533 × σ ÷ √신규 대수
+    var seg = (segStr || '').split('·'), sname = seg[1] + ' ' + seg[0], skey = seg[1] + '|' + seg[0];
     var has = function (p) { return p['시세'] != null; }, raw = (X.mi.series[skey] || []).filter(has);
     if (raw.length < 2) { sname = seg[1] + ' 전체'; skey = seg[1] + '|전체'; raw = (X.mi.series[skey] || []).filter(has); }
     var ssig = (X.mi.price_sig || {})[skey] || 0.075;
     var sp = raw.map(function (p) { var n = p.n_price || 1; return { date: p.date, t: dayN(p.date), v: p['시세'], n: n, se: p['시세'] * 1.2533 * ssig / Math.sqrt(n) }; });
-    var mm = X.mmBy && X.mmBy[G.F.maker + '|' + S.model], dates = X.mm && X.mm.trend_dates || [];
+    var mm = X.mmBy && X.mmBy[maker + '|' + model], dates = X.mm && X.mm.trend_dates || [];
     var mp = mm && mm.ps ? mm.ps.map(function (q) { var d = dates[q[0]]; return { date: d, t: dayN(d), v: q[1], n: q[2], se: q[1] * 1.2533 * mm.sig / Math.sqrt(q[2]) }; }) : [];
     var cr = X.mi.crawls || [], latest = cr.length ? cr[cr.length - 1].date : sp.length ? sp[sp.length - 1].date : null, t1 = latest ? dayN(latest) : 0;
     var run = sp.length ? sp[sp.length - 1] : null;          // 지금 이어지는 매주 수집의 첫 회차 → 4주 방향이 나오는 날
     for (var i = sp.length - 1; i > 0 && sp[i].t - sp[i - 1].t <= TR_GAP; i--) run = sp[i - 1];
-    return { sname: sname, sp: sp, mp: mp, mm: mm, latest: latest, t1: t1, loading: !X.mmBy,
+    return { model: model, sname: sname, sp: sp, mp: mp, mm: mm, latest: latest, t1: t1, loading: !X.mmBy,
       dm: mp.length >= 2 ? trendDir(mp, t1) : null, ds: sp.length >= 2 ? trendDir(sp, t1) : null, from4: run ? run.t + 28 : null };
   }
 
@@ -1096,7 +1098,7 @@
     var xy = function (p, v) { return px(p.t).toFixed(1) + ',' + py(v == null ? p.v : v).toFixed(1); };
     var lm = T.mp[T.mp.length - 1], ls = T.sp[T.sp.length - 1];
     var h = '<svg class="v2-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' +
-      esc('시세지수 추이(7월 초 = 100)' + (lm ? ' — ' + S.model + ' ' + lm.v.toFixed(1) : '') + (ls ? ', ' + T.sname + ' ' + ls.v.toFixed(1) : '')) + '">';
+      esc('시세지수 추이(7월 초 = 100)' + (lm ? ' — ' + T.model + ' ' + lm.v.toFixed(1) : '') + (ls ? ', ' + T.sname + ' ' + ls.v.toFixed(1) : '')) + '">';
     var ticks = niceTicks(lo, hi, 4);
     ticks.forEach(function (v) {
       h += '<line x1="' + L + '" x2="' + (W - RR) + '" y1="' + py(v).toFixed(1) + '" y2="' + py(v).toFixed(1) + '" stroke="var(--line)" stroke-width="1"/>' +
@@ -1112,7 +1114,7 @@
       m = Date.UTC(dm.getUTCFullYear(), dm.getUTCMonth() + 1, 1) / 864e5;
     }
     h += '<line x1="' + L + '" x2="' + (W - RR) + '" y1="' + (H - B) + '" y2="' + (H - B) + '" stroke="var(--line-hard)" stroke-width="1"/>';
-    trRuns(T.mp).forEach(function (r) {                      // 세부모델 흔들림 띠(95%) — 점 하나뿐인 구간은 세로 막대로
+    trRuns(T.mp).forEach(function (r) {                      // 세부모델 흔들림 2배 띠(1.96·se) — 점 하나뿐인 구간은 세로 막대로
       if (r.length > 1) h += '<polygon points="' + r.map(function (p) { return xy(p, p.v + 1.96 * p.se); }).concat(r.slice().reverse().map(function (p) { return xy(p, p.v - 1.96 * p.se); })).join(' ') +
         '" fill="var(--accent-wash)" stroke="none"/>';
       else h += '<line x1="' + px(r[0].t).toFixed(1) + '" x2="' + px(r[0].t).toFixed(1) + '" y1="' + py(r[0].v + 1.96 * r[0].se).toFixed(1) + '" y2="' + py(r[0].v - 1.96 * r[0].se).toFixed(1) +
@@ -1137,7 +1139,7 @@
     });
     grp.forEach(function (g, i) {
       var xa = i ? (px(grp[i - 1].t1) + px(g.t0)) / 2 : L - 4, xb = i < grp.length - 1 ? (px(g.t1) + px(grp[i + 1].t0)) / 2 : W, tip = [];
-      T.mp.forEach(function (p) { if (p.t >= g.t0 && p.t <= g.t1) tip.push(mmdd(p.date) + ' ' + S.model + ' ' + p.v.toFixed(1) + '(신규 ' + p.n + '대 · 흔들림 ±' + (1.96 * p.se).toFixed(1) + ')'); });
+      T.mp.forEach(function (p) { if (p.t >= g.t0 && p.t <= g.t1) tip.push(mmdd(p.date) + ' ' + T.model + ' ' + p.v.toFixed(1) + '(신규 ' + p.n + '대 · 흔들림 ±' + p.se.toFixed(1) + ')'); });
       T.sp.forEach(function (p) { if (p.t >= g.t0 && p.t <= g.t1) tip.push(mmdd(p.date) + ' ' + T.sname + ' ' + p.v.toFixed(1) + '(신규 ' + p.n.toLocaleString('ko-KR') + '대)'); });
       h += '<rect x="' + xa.toFixed(1) + '" y="' + TT + '" width="' + Math.max(4, xb - xa).toFixed(1) + '" height="' + (H - TT - B) + '" fill="transparent" data-tip="' + esc(tip.join('\n')) + '"/>';
     });
@@ -1146,14 +1148,15 @@
 
   function dirPill(D) { return D ? '<span class="v2-pill ' + (D.dir === '오름' ? 'up' : D.dir === '내림' ? 'dn' : '') + '">' + D.dir + ' ' + signedF(D.d) + '</span>' : '—'; }
 
-  function trendCard(G) {
-    var T = trendData(G), mp = T.mp, sp = T.sp, D = mp.length >= 2 ? T.dm : T.ds, short = !D || D.short;
+  function trendCard(G) { var M = G.models[S.model]; return trendCardOf(G.F.maker, S.model, M && M.seg, chartW(620, 360)); }
+  function trendCardOf(maker, model, seg, W) {               // 시세 추세 카드 — 시세 산정과 모델 리포트(report.js, ctx.trendCard)가 같이 쓴다
+    var T = trendDataOf(maker, model, seg), mp = T.mp, sp = T.sp, D = mp.length >= 2 ? T.dm : T.ds, short = !D || D.short;
     var h = '<div class="card"><div class="card-title">시세 추세' + q(TIP.trend) +
       (short && (sp.length >= 2 || mp.length) ? ' <span class="v2-pill" title="매주 수집이 4주가 안 돼 방향을 짧은 기간으로 봅니다">짧음</span>' : '') +
       ' <span class="hint">' + (mp.length ? '세부모델 vs ' : '') + esc(T.sname) + ' · 시세지수(7월 초 = 100)</span></div>';
     if (sp.length < 2 && !mp.length) return h + '<p class="v2-kv">추세 데이터가 아직 부족합니다.</p></div>';
-    h += '<div class="v2-legend">' + (mp.length ? '<span><i class="v2-lkey" style="background:var(--accent)"></i>' + esc(S.model) + '</span>' : '') +
-      (sp.length ? '<span><i class="v2-dash"></i>' + esc(T.sname) + '</span>' : '') + (mp.length ? '<span><i class="v2-band"></i>표본 흔들림(95%)</span>' : '') + '</div>' + trendSvg(T, chartW(620, 360));
+    h += '<div class="v2-legend">' + (mp.length ? '<span><i class="v2-lkey" style="background:var(--accent)"></i>' + esc(model) + '</span>' : '') +
+      (sp.length ? '<span><i class="v2-dash"></i>' + esc(T.sname) + '</span>' : '') + (mp.length ? '<span><i class="v2-band"></i>흔들림 2배 범위</span>' : '') + '</div>' + trendSvg(T, W);
     var lm = mp[mp.length - 1], ls = sp[sp.length - 1], txt;
     if (lm) txt = mmdd(lm.date) + ' 세부모델 <b>' + lm.v.toFixed(1) + '</b>' + (ls && ls.date === lm.date ? ' · ' + esc(T.sname) + ' <b>' + ls.v.toFixed(1) + '</b> — 7월 초 대비 차급보다 <b>' +
       Math.abs(lm.v - ls.v).toFixed(1) + '</b> ' + (lm.v >= ls.v ? '높음' : '낮음') : '') + (T.latest && lm.date !== T.latest ? ' (' + mmdd(T.latest) + '은 신규 매물이 10대 미만이라 비움)' : '') + '.';
@@ -1164,7 +1167,7 @@
       : (D.short ? '방향(짧음) ' + mmdd(D.a.date) + '→' + mmdd(D.z.date) + ' ' + D.weeks + '주' : '최근 4주(' + mmdd(D.a.date) + '→' + mmdd(D.z.date) + ')') + ': ' +
         (mp.length ? '세부모델 ' + dirPill(T.dm) + ' · ' : '') + esc(T.sname) + ' ' + dirPill(T.ds) + (D.short && T.from4 ? ' — 4주 방향은 ' + dayStr(T.from4) + '부터' : '');
     return h + '<p class="v2-kv">' + txt + '</p><p class="v2-kv">' + dl + '</p>' +
-      '<p class="v2-help">' + (mp.length ? '옅은 띠 = 신규 매물 수로 생기는 흔들림(95%). ' : '') + '방향은 표본 흔들림보다 크게 움직였을 때만 오름·내림으로 씁니다.</p></div>';
+      '<p class="v2-help">' + (mp.length ? '옅은 띠 = 신규 매물 수로 생기는 흔들림의 2배 범위. ' : '') + '방향은 흔들림의 2배보다 크게 움직였을 때만 오름·내림으로 씁니다.</p></div>';
   }
 
   // ───── 모델 요약 (5.1.5) ─────
@@ -1201,7 +1204,9 @@
     var st = modelStats(G), M = st.M, F = G.F;
     var h = (miss.length ? needCard(miss) : '') +
       '<div class="card v2-headcard"><div class="v2-head">' + esc(F.maker + ' ' + S.model) + ' · 모델 요약' + (miss.length ? ' <span class="v2-ref">참고</span>' : '') +
-      '<br><span class="sub">비교 가능 매물 기준 · 기준 ' + dataDate() + '</span></div><button type="button" class="v2-btn" data-act="xlsxModel">엑셀 내려받기</button></div>';
+      '<br><span class="sub">비교 가능 매물 기준 · 기준 ' + dataDate() + '</span></div><div class="v2-actions" style="margin:0">' +
+      '<a class="v2-btn" href="' + esc(reportHref(S.mk, S.grp, S.model)) + '">모델 리포트에서 자세히 →</a>' +
+      '<button type="button" class="v2-btn" data-act="xlsxModel">엑셀 내려받기</button></div></div>';
     h += '<div class="v2-cards">' +
       tile('판매중', (M.onsale_all != null ? M.onsale_all : st.on.length).toLocaleString(), '대', '비교 가능(성능점검 있음) ' + st.on.length.toLocaleString() + '대') +
       tile('최근 3개월 판매', st.sold.length.toLocaleString(), '대', '목록에서 사라진 매물(재등록 제외)') +
@@ -1343,12 +1348,12 @@
     else rows.push(['판매된 비교 매물이 적어 생략(구간마다 ' + POS_MIN + '대 이상 필요)', sd.pn]);
     if (sd.cut) rows.push(['판매중 인하 매물 비율(%)', f1(sd.cut.share * 100), null, '첫 호가보다 내린 매물'], ['인하 폭 중앙(만원)', mw(sd.cut.med)]);
     rows.push([], [B('시세 추세 — 시세지수(7월 초 = 100) · 신규 매물(등록 7일 이내) 첫 호가를 같은 조건으로 맞춰 비교')],
-      [B('목록 관측일'), B('세부모델 지수'), B('세부모델 신규(대)'), B('세부모델 흔들림(±, 95%)'), B(td.sname + ' 지수'), B(td.sname + ' 신규(대)')]);
+      [B('목록 관측일'), B('세부모델 지수'), B('세부모델 신규(대)'), B('세부모델 흔들림(±, 표준오차)'), B(td.sname + ' 지수'), B(td.sname + ' 신규(대)')]);
     var dates = [];
     td.mp.concat(td.sp).forEach(function (p) { if (dates.indexOf(p.date) < 0) dates.push(p.date); });
     dates.sort().forEach(function (dt) {
       var m = td.mp.find(function (p) { return p.date === dt; }), s = td.sp.find(function (p) { return p.date === dt; });
-      rows.push([dt, m ? m.v : null, m ? m.n : null, m ? f1(1.96 * m.se) : null, s ? s.v : null, s ? s.n : null]);
+      rows.push([dt, m ? m.v : null, m ? m.n : null, m ? f1(m.se) : null, s ? s.v : null, s ? s.n : null]);
     });
     if (!td.mp.length) rows.push(['세부모델 선 없음 — 7월 초나 회차별 신규 매물이 10대 미만']);
     var D = td.mp.length ? td.dm : td.ds;
@@ -1553,16 +1558,38 @@
     } else compute();
   }
 
-  // ───── 화면 고르기: #/market = 시장 시황(market.js) · #/data = 데이터(data.js) · 그 밖 = 시세 산정 ─────
+  // ───── 화면 고르기: #/pulse = 마켓 펄스(pulse.js) · #/report = 모델 리포트(report.js) · #/market = 시장 시황(market.js) · #/data = 데이터(data.js) · 그 밖 = 시세 산정 ─────
+  var PAGES = { pulse: '#/pulse', report: '#/report', market: '#/market', data: '#/data' };
   function route() {
-    var h0 = location.hash, page = h0.indexOf('#/market') === 0 ? 'market' : h0.indexOf('#/data') === 0 ? 'data' : 'price', market = page === 'market';
+    var h0 = location.hash, page = 'price';
+    Object.keys(PAGES).forEach(function (k) { if (h0.indexOf(PAGES[k]) === 0) page = k; });
+    var market = page === 'market', qs = function () { var i = h0.indexOf('?'); return new URLSearchParams(i >= 0 ? h0.slice(i + 1) : ''); };
     $('priceView').hidden = page !== 'price';
     $('mbar').hidden = true;
     $('marketView').hidden = page !== 'market';
     $('dataView').hidden = page !== 'data';
-    $('navPrice').classList.toggle('on', page === 'price');
-    $('navMarket').classList.toggle('on', page === 'market');
-    $('navData').classList.toggle('on', page === 'data');
+    $('pulseView').hidden = page !== 'pulse';
+    $('reportView').hidden = page !== 'report';
+    var fc = $('footConv');                                  // 아래 '환산가는 …' 안내는 시세 산정에서만(마켓 펄스·모델 리포트는 외부에도 보여 주는 화면)
+    if (fc) fc.hidden = page !== 'price';
+    [['navPrice', 'price'], ['navPulse', 'pulse'], ['navReport', 'report'], ['navMarket', 'market'], ['navData', 'data']].forEach(function (n) {
+      var a = $(n[0]);
+      if (a) a.classList.toggle('on', page === n[1]);
+      if (a && page === n[1]) {                               // 휴대폰 폭에서 탭 줄이 넘치면 지금 탭이 보이게 가로로만 민다
+        var nav = a.parentNode, l = a.offsetLeft - nav.offsetLeft;
+        if (l < nav.scrollLeft || l + a.offsetWidth > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = l - (nav.clientWidth - a.offsetWidth) / 2;
+      }
+    });
+    if (page === 'pulse') {
+      if (!PV) PV = V2Pulse.create(subCtx('#/pulse', 'navPulse'));
+      PV.show($('pulseView'), qs());
+      return Promise.resolve();
+    }
+    if (page === 'report') {
+      if (!RP) RP = V2Report.create(subCtx('#/report', 'navReport'));
+      RP.show($('reportView'), qs());
+      return Promise.resolve();
+    }
     if (page === 'data') {
       if (!DV) DV = V2Data.create({ X: X, esc: esc, getJSON: getJSON, root: ROOT });
       DV.show($('dataView'));
@@ -1570,7 +1597,7 @@
     }
     if (market) {
       if (!MK) {
-        MK = V2Market.create({ X: X, esc: esc, man: man, getJSON: getJSON, fileSafe: fileSafe, today: today,
+        MK = V2Market.create({ X: X, esc: esc, man: man, getJSON: getJSON, fileSafe: fileSafe, today: today, reportHref: reportHref, mm: function () { return X.mmWait; },
           href: function (s, mode) { return query(Object.assign(blank(), s), mode || 'one'); },
           hash: function (st) {                              // 시장 시황 상태도 주소에(공유·새로 고침)
             var q = new URLSearchParams();
@@ -1578,6 +1605,7 @@
             if (st.s !== '전체') q.set('s', st.s);
             if (st.range !== 'all') q.set('range', st.range);
             if (st.sort !== 'on' || st.dir !== -1) { q.set('sort', st.sort); q.set('dir', st.dir > 0 ? '1' : '-1'); }
+            if (st.qx && st.qx !== 'rv') q.set('qx', st.qx);   // 사분면 가로축(기본 잔존가치는 생략)
             var str = q.toString();
             history.replaceState(null, '', '#/market' + (str ? '?' + str : ''));
             $('navMarket').setAttribute('href', '#/market' + (str ? '?' + str : ''));   // 시세 산정에 갔다 와도 보던 그대로
@@ -1593,12 +1621,66 @@
     return loadGroup().then(function () { renderInputs(); applyMode(); });
   }
 
+  function reportHref(mk, grp, model) {                      // 모델 리포트 주소(마켓 펄스·시장 시황·모델 요약에서 링크)
+    var q = new URLSearchParams();
+    if (mk) q.set('mk', mk);
+    if (grp) q.set('grp', grp);
+    if (model) q.set('model', model);
+    var str = q.toString();
+    return '#/report' + (str ? '?' + str : '');
+  }
+  function subCtx(path, navId) {                             // 마켓 펄스·모델 리포트에 넘기는 데이터·도우미
+    return { X: X, esc: esc, man: man, pct: pct, signed: signed, getJSON: getJSON, fileSafe: fileSafe, today: today, root: ROOT, bindTips: bindTips,
+      mm: function () { return X.mmWait; },                  // market_models.json(Promise) — X.mm·X.mmBy 도 채워진다
+      reportHref: reportHref,
+      priceHref: function (s, mode) { return query(Object.assign(blank(), s), mode || 'model'); },   // 시세 산정(기본은 모델 요약)
+      trendCard: function (maker, model, seg, W) { return trendCardOf(maker, model, seg, W); },   // 시세 산정과 같은 '시세 추세' 카드(HTML)
+      hash: function (q) {                                   // 화면 상태를 주소에(공유·새로 고침) — 위쪽 탭도 그 주소로
+        var str = q ? q.toString() : '';
+        history.replaceState(null, '', path + (str ? '?' + str : ''));
+        var a = $(navId);
+        if (a) a.setAttribute('href', path + (str ? '?' + str : ''));
+      } };
+  }
+  function bindTips(el) {                                    // [data-tip] 말풍선(#tip) — 마우스는 따라다니고, 키보드·휴대폰은 초점 아래
+    var tip = $('tip');
+    if (!tip || el.getAttribute('data-tips')) return;
+    el.setAttribute('data-tips', '1');
+    el.addEventListener('mouseover', function (e) {
+      var t = e.target.closest && e.target.closest('[data-tip]');
+      if (!t) return;
+      tip.textContent = t.getAttribute('data-tip');
+      tip.hidden = false;
+    });
+    el.addEventListener('mousemove', function (e) {
+      if (tip.hidden) return;
+      tip.style.left = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8) + 'px';
+      tip.style.top = Math.min(e.clientY + 14, window.innerHeight - tip.offsetHeight - 8) + 'px';
+    });
+    el.addEventListener('mouseout', function (e) {
+      var t = e.target.closest && e.target.closest('[data-tip]');
+      if (t && !(e.relatedTarget && t.contains(e.relatedTarget))) tip.hidden = true;
+    });
+    el.addEventListener('focusin', function (e) {
+      var t = e.target.getAttribute && e.target.getAttribute('data-tip');
+      if (!t) return;
+      var b = e.target.getBoundingClientRect();
+      tip.textContent = t;
+      tip.hidden = false;
+      tip.style.left = Math.max(8, Math.min(b.left, window.innerWidth - tip.offsetWidth - 8)) + 'px';
+      tip.style.top = (b.bottom + 6) + 'px';
+    });
+    el.addEventListener('focusout', function () { tip.hidden = true; });
+  }
+
   function layout() {
     $('app').innerHTML = '<div id="priceView"><div class="v2-mode">' + seg('mode', [['one', '한 대 산정'], ['model', '모델 요약'], ['batch', '묶음 산정'], ['rates', '⚙ 환산 비율']], VIEW.mode, '산정 방식') + '</div>' +
       '<div class="v2-grid" id="grid"><aside class="card v2-input" id="inp" aria-label="대상 차 조건"></aside><section class="v2-result" id="res" aria-live="polite"></section></div>' +
       '<section class="v2-batch" id="batch" aria-label="묶음 산정" hidden></section>' +
       '<section class="v2-batch v2-rates" id="ratesView" aria-label="환산 비율 설정" hidden></section>' +
       '<div class="v2-mbar" id="mbar" hidden></div></div>' +
+      '<section class="v2-batch v2-pulse" id="pulseView" aria-label="마켓 펄스" hidden></section>' +
+      '<section class="v2-batch v2-report" id="reportView" aria-label="모델 리포트" hidden></section>' +
       '<section class="v2-batch v2-mk" id="marketView" aria-label="시장 시황" hidden></section>' +
       '<section class="v2-batch" id="dataView" aria-label="데이터" hidden></section>';
     var inp = $('inp'), res = $('res'), tip = $('tip');
@@ -1738,11 +1820,12 @@
         S = fromHash();
         layout();
         marketLine();
-        getJSON('market_models.json').then(function (j) {    // 세부모델 시세(시세 추세 한 줄) — 늦게 와도 되므로 따로
+        X.mmWait = getJSON('market_models.json').then(function (j) {   // 세부모델 시장 숫자(시세 추세·판매 속도·모델 리포트) — 늦게 와도 되므로 따로
           X.mm = j; X.mmBy = {};
           j.models.forEach(function (m) { X.mmBy[m.maker + '|' + m.model] = m; });
           if (!$('priceView').hidden && (VIEW.mode === 'one' || VIEW.mode === 'model') && S.model) compute();
-        }).catch(function () { X.mmBy = {}; });
+          return j;
+        }).catch(function () { X.mmBy = {}; return null; });
         return route();
       })
       .catch(fail);

@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <title>시세 산정 — 엔카 인텔</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<meta name="description" content="엔카 매물로 대상 차의 시세를 근거와 함께 추정하고 팀 환산가를 내는 도구" />
+<meta name="description" content="엔카 매물로 중고차 시세를 근거와 함께 추정하고 이번 주 시장·모델별 잔존가치를 보는 도구" />
 <meta name="robots" content="noindex" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css" />
 <script src="https://cdn.tailwindcss.com"></script>
@@ -21,6 +21,9 @@
 </script>
 <link rel="stylesheet" href="../styles.css" />
 <link rel="stylesheet" href="v2.css" />
+<link rel="stylesheet" href="pulse.css" />
+<link rel="stylesheet" href="report.css" />
+<link rel="stylesheet" href="quad.css" />
 </head>
 <body class="font-sans antialiased">
 
@@ -33,6 +36,8 @@
     </a>
     <nav class="flex items-center gap-0 overflow-x-auto no-scrollbar">
       <a class="nav-tab on" href="#/price" id="navPrice">시세 산정</a>
+      <a class="nav-tab" href="#/pulse" id="navPulse">마켓 펄스</a>
+      <a class="nav-tab" href="#/report" id="navReport">모델 리포트</a>
       <a class="nav-tab" href="#/market" id="navMarket">시장 시황</a>
       <a class="nav-tab" href="#/data" id="navData">데이터</a>
     </nav>
@@ -51,7 +56,7 @@
 
 <footer class="mt-16 py-10 text-center" style="border-top:1px solid var(--line);">
   <div class="eyebrow mb-2">ENCAR MARKET INTEL · 시세 산정 (기본 주소와 같은 화면)</div>
-  <div class="text-[11px]" style="color:var(--tx-4);">추정 시세는 엔카 호가 기준입니다. 환산가는 팀 환산 비율(도·소매 갭 요약치)을 적용한 값입니다.</div>
+  <div class="text-[11px]" style="color:var(--tx-4);">추정 시세는 엔카 호가 기준입니다. <span id="footConv">환산가는 팀 환산 비율(도·소매 갭 요약치)을 적용한 값입니다.</span></div>
 </footer>
 
 <div class="v2-tip" id="tip" hidden></div>
@@ -64,6 +69,8 @@
 <script src="batch.js"></script>
 <script src="rates.js"></script>
 <script src="market.js"></script>
+<script src="pulse.js"></script>
+<script src="report.js"></script>
 <script src="data.js"></script>
 <script src="app.js"></script>
 </body>

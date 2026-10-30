@@ -1,0 +1,33 @@
+/* 시장 시황 차종 사분면(market.js, 기획안 5.5.3) — 기존 클래스는 덮어쓰지 않고 .v2-quad 접두사만 */
+.v2-quad .v2-tools { align-items: flex-start; }
+.v2-quad .segmented button[disabled] { color: var(--tx-4); cursor: default; }
+.v2-quad .v2-chart { touch-action: manipulation; }
+.v2-quad .v2-chart text.v2-quad-ax { fill: var(--tx-2); font-weight: 600; }
+.v2-quad .v2-chart text.v2-quad-base { fill: var(--tx-1); font-weight: 700; }
+.v2-quad .v2-chart text.v2-quad-ql { fill: var(--tx-3); font-size: 12px; font-weight: 700; }
+.v2-quad .v2-chart text.v2-quad-nm { fill: var(--tx-1); font-weight: 600; }
+.v2-quad .v2-chart text.v2-halo { pointer-events: none; }
+.v2-quad-hit { cursor: pointer; }
+.v2-quad-hl { fill: none; stroke: var(--tx-1); stroke-width: 2; pointer-events: none; }
+.v2-quad .v2-legend i.v2-quad-lcl { background: none; border: 1px dashed var(--tx-2); box-sizing: border-box; }
+
+/* 네 칸 요약: 대수 + 판매중이 많은 모델 3개 */
+.v2-quad-sum { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 8px; margin-top: 12px; }
+.v2-quad-sum > div { min-width: 0; border: 1px solid var(--line); border-radius: var(--r-md); padding: 8px 10px; font-size: 12px; color: var(--tx-2); line-height: 1.55; }
+.v2-quad-sum > div.q0 { background: var(--up-wash); }
+.v2-quad-sum > div.q3 { background: var(--down-wash); }
+.v2-quad-sum b { color: var(--tx-1); font-size: 13px; }
+.v2-quad-sum small { color: var(--tx-3); font-size: 11px; margin-left: 2px; }
+.v2-quad-names { margin-top: 2px; overflow-wrap: anywhere; }
+.v2-quad-names .v2-link { font-weight: 600; }
+
+/* 점 말풍선(#tip 안) */
+.v2-quad-tr { white-space: normal; }
+.v2-quad-tr b { font-variant-numeric: tabular-nums; }
+.v2-quad-tsub { color: rgba(255, 255, 255, 0.72); font-size: 11px; margin-top: 2px; white-space: normal; }
+
+/* 차종 비교 표 — 시세 1주 오름·내림, 행 끝 '모델 요약' 작은 링크 */
+.v2-quad-up { color: var(--up); font-weight: 600; }
+.v2-quad-dn { color: var(--down); font-weight: 600; }
+.v2-quad-mini { font-size: 12px; color: var(--info); white-space: nowrap; }
+.v2-quad-mini:hover { text-decoration: underline; }

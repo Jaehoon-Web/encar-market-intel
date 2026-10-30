@@ -1,0 +1,77 @@
+/* 모델 리포트(report.js, 기획안 5.5.2) — 기존 카드·표·말풍선 클래스 위에 이 화면 요소만(.v2-report 안). 휴대폰 375px 에서 가로로 넘치지 않게 */
+
+.v2-report {
+  --rp-c0: var(--accent);                                   /* 이 모델(시세 추세 카드와 같은 색) */
+  --rp-c1: #2a78d6; --rp-c2: #1baf7a; --rp-c3: #eda100;     /* 겹쳐 본 모델 1~3 — 검증한 범주 팔레트(색약 구분 통과) + 선·점 모양도 다름 */
+  --rp-seg: var(--tx-3);                                    /* 동급 가운데 값(점선) */
+  --rp-stock: #1baf7a; --rp-new: #2a78d6; --rp-sold: #eb6834;   /* 판매중·신규·판매 — 시장 시황과 같은 색 */
+  word-break: keep-all; overflow-wrap: anywhere;            /* 한글이 글자 단위로 끊기지 않게(넘칠 만큼 긴 말만 끊음) */
+}
+.v2-report .rp-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+.v2-report .card { min-width: 0; }
+
+/* ① 모델 고르기 — 넓으면 한 줄(제조사 | 모델 | 세부모델 | 이름 찾기), 중간 세 칸 + 찾기, 휴대폰 한 칸씩 */
+.v2-report .rp-sels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(240px, 1.3fr); gap: 8px; margin-top: 12px; align-items: center; }
+.v2-report .rp-sels select.filter-select { min-width: 0; text-overflow: ellipsis; padding-right: 28px; }
+.v2-report .rp-find { display: flex; gap: 6px; min-width: 0; }
+.v2-report .rp-find .v2-in { flex: 1 1 auto; min-width: 0; }
+@media (max-width: 1100px) {
+  .v2-report .rp-sels { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .v2-report .rp-find { grid-column: 1 / -1; }
+}
+@media (max-width: 640px) { .v2-report .rp-sels { grid-template-columns: minmax(0, 1fr); } }
+.v2-report .rp-pick .v2-help { margin-top: 10px; }
+
+/* 고르기 전 — 판매중 많은 세부모델 바로가기 */
+.v2-report .rp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.v2-report .rp-chip { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; max-width: 100%; padding: 5px 12px; font-size: 13px; font-weight: 600;
+  color: var(--tx-1); background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-pill); text-decoration: none; line-height: 1.4; }
+.v2-report .rp-chip:hover, .v2-report .rp-chip:focus-visible { border-color: var(--accent); background: var(--accent-wash); outline: none; }
+.v2-report .rp-chip small { font-size: 11px; font-weight: 500; color: var(--tx-3); white-space: nowrap; }
+
+/* ② 머리 */
+.v2-report .v2-headcard .v2-head { min-width: 0; flex: 1 1 320px; }
+
+/* ③ 동급 대비 지표 6개 — 넓으면 여섯 칸, 중간 세 칸씩 두 줄, 휴대폰 두 칸씩 세 줄(칸이 남지 않게) */
+.v2-report .rp-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (min-width: 640px) { .v2-report .rp-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 1180px) { .v2-report .rp-tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+.v2-report .rp-tiles .card { padding: 16px; }
+.v2-report .rp-tiles .eyebrow { display: flex; align-items: center; flex-wrap: wrap; }
+.v2-report .rp-tiles .v2-kv { font-size: 12px; }
+.v2-report .rp-tiles .v2-pill { font-size: 11px; padding: 1px 7px; margin-left: 2px; white-space: nowrap; }
+@media (max-width: 400px) {
+  .v2-report .rp-tiles { gap: 10px; }
+  .v2-report .rp-tiles .card { padding: 12px; }
+  .v2-report .rp-tiles .v2-mid { font-size: 30px; }
+}
+
+/* ④ 감가 곡선 — 범례(선 모양 + 점 모양) · 겹쳐 보기 */
+.v2-report .rp-legend { align-items: center; gap: 6px 16px; margin: 4px 0 8px; }
+.v2-report .rp-lg { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.v2-report .rp-lg > span { min-width: 0; }
+.v2-report .rp-key { width: 26px; height: 12px; flex: none; overflow: visible; }
+.v2-report .rp-x { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex: none; border-radius: 50%;
+  border: 1px solid var(--line-hard); background: var(--bg-1); color: var(--tx-2); font-size: 13px; line-height: 1; cursor: pointer; }
+.v2-report .rp-x:hover, .v2-report .rp-x:focus-visible { border-color: var(--tx-2); color: var(--tx-1); background: var(--bg-2); outline: none; }
+.v2-report .rp-cmp { margin-top: 10px; }
+.v2-report .rp-cmp select.filter-select { max-width: 520px; text-overflow: ellipsis; padding-right: 28px; }
+
+/* 그림 — 마우스 올림 칸(그 연차·회차 값 말풍선) */
+.v2-report .v2-chart .rp-col { cursor: crosshair; }
+.v2-report .v2-chart .rp-col:hover { fill: rgba(28, 25, 21, 0.05); }
+.v2-report .v2-chart text.rp-ptitle { fill: var(--tx-2); font-weight: 600; }
+
+/* ⑤ 잔존율 표 · ⑧ 매물 목록 — 표는 .v2-tablewrap 안에서만 가로 스크롤 */
+.v2-report .rp-tbl { min-width: 760px; }
+.v2-report .rp-ltbl { min-width: 720px; }
+.v2-report .rp-tbl td, .v2-report .rp-ltbl td { vertical-align: top; }
+.v2-report .rp-tbl td small, .v2-report .rp-ltbl td small { display: block; margin-top: 1px; font-size: 11px; font-weight: 500; color: var(--tx-3); line-height: 1.4; }
+.v2-report .rp-tbl tr.rp-thin td { color: var(--tx-3); }
+.v2-report .rp-tbl tr.rp-thin td b { color: var(--tx-2); font-weight: 600; }
+.v2-report .rp-tbl tr.rp-none td:first-child { color: var(--tx-3); }   /* 이 모델 값이 없는 연차(동급·겹쳐 본 모델만) — 이 모델 칸을 흐리게 */
+.v2-report .rp-tbl tr.rp-none td.rp-me { color: var(--tx-4); }
+.v2-report .rp-ltbl .v2-link { white-space: nowrap; }
+
+/* ⑦ 가격 인하 행동 — 이 모델 | 동급 막대 */
+.v2-report .v2-hrow .k { min-width: 0; }
