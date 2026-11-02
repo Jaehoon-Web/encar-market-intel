@@ -59,7 +59,7 @@ function compare(title, list, run, numF, exactF) {
 const t0 = Date.now();
 compare('매물 단위 산정', cases, c => {
   const r = eng.estimate(grp(c.f), c.m, { grade: c.grade, trim: c.trim, age: c.age, km: c.km, rent: c.rent, color: c.color,
-    dep: c.dep, perf: c.perf, excludeId: c.id });
+    dep: c.dep, perf: c.perf, excludeId: c.id, dv: c.dv, se: c.se, us: c.us });   // 구동·인승·용도(절반만)
   if (!r) return null;
   const cv = eng.conversionRate(r.est, c.yrs, c.maker, c.m, c.fuel);
   return Object.assign(r, { rate: cv.rate, src: cv.source });

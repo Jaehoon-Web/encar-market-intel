@@ -34,7 +34,8 @@
       mk.groups.forEach(function (g) {
         g.models.forEach(function (m) {
           var o = { mk: mk.name, grp: g.name, model: m.name, file: g.file, origin: mk.origin, y0: m.y0, y1: m.y1,
-            on: m.onsale_all != null ? m.onsale_all : m.onsale || 0 };   // 판매중 — report/index.json 이 오면 그 값으로 바꾼다
+            on: m.onsale_all != null ? m.onsale_all : m.onsale || 0,   // 판매중 — report/index.json 이 오면 그 값으로 바꾼다
+            alias: (m.en || []).map(function (e) { return e[1]; }).filter(Boolean) };   // 붙은 엔카 원래 이름(이름 찾기, 기획 v2.23)
           KEY[mk.name + '|' + m.name] = o;
           NAMES[mk.name + ' ' + m.name] = o;
           LIST.push(o);
@@ -160,6 +161,11 @@
       var M = makerOf(V.mk);
       if (V.mk && !M) V.msg = '주소의 제조사 "' + V.mk + '"를 찾지 못했습니다. 아래에서 다시 고르세요.';
       if (!M) V.mk = V.grp = V.model = '';
+      var old = M && ((V.model && !KEY[V.mk + '|' + V.model]) || (!V.model && V.grp && !groupOf(M, V.grp))) ? ctx.legacy({ mk: V.mk, grp: V.grp, model: V.model }) : null;
+      if (old) {                                                           // 엔카 이름으로 된 옛 주소 → 경매 이름(기획 v2.23 Q109)
+        V.msg = '예전 엔카 이름 「' + old.from + '」을 경매 이름 「' + old.to + '」으로 바꿔 열었습니다.';
+        V.grp = old.grp; V.model = old.model || '';
+      }
       if (M && V.model && !inGroup(groupOf(M, V.grp), V.model)) {          // 모델그룹이 없거나 틀리면 세부모델로 찾는다
         var o = KEY[V.mk + '|' + V.model];
         if (o) V.grp = o.grp; else { V.msg = '"' + V.model + '" 세부모델을 찾지 못했습니다. 아래에서 다시 고르세요.'; V.model = ''; }
@@ -167,7 +173,13 @@
       if (M && V.grp && !groupOf(M, V.grp)) { V.msg = '"' + V.grp + '" 모델을 찾지 못했습니다. 아래에서 다시 고르세요.'; V.grp = V.model = ''; }
       var me = V.mk + '|' + V.model;
       V.cmp = [];
-      p.getAll('cmp').forEach(function (k) { if (KEY[k] && k !== me && V.cmp.indexOf(k) < 0 && V.cmp.length < MAX_CMP) V.cmp.push(k); });
+      p.getAll('cmp').forEach(function (k) {
+        if (!KEY[k]) {                                                     // 겹쳐 보기의 엔카 이름도 경매 이름으로
+          var i = k.indexOf('|'), c = i > 0 ? ctx.legacy({ mk: k.slice(0, i), grp: '', model: k.slice(i + 1) }) : null;
+          if (c && c.model) k = k.slice(0, i) + '|' + c.model;
+        }
+        if (KEY[k] && k !== me && V.cmp.indexOf(k) < 0 && V.cmp.length < MAX_CMP) V.cmp.push(k);
+      });
     }
     function params() {
       var p = new URLSearchParams();
@@ -219,8 +231,14 @@
     function norm(s) { return String(s).toUpperCase().replace(/[\s·\-_()]+/g, ''); }
     function best(raw) {                                     // 이름 찾기: 붙여 쓴 글 포함 → 낱말 모두 포함, 판매중 많은 순
       var qn = norm(raw), toks = raw.split(/\s+/).map(norm).filter(Boolean);
-      var hit = LIST.filter(function (o) { return norm(o.mk + o.model).indexOf(qn) >= 0 || norm(o.model).indexOf(qn) >= 0; });
-      if (!hit.length) hit = LIST.filter(function (o) { var t = norm(o.mk + o.grp + o.model); return toks.every(function (k) { return t.indexOf(k) >= 0; }); });
+      var hit = LIST.filter(function (o) {                    // 경매 이름 또는 붙은 엔카 이름(그랜저 하이브리드 (GN7) → 디 올뉴그랜저 하이브리드)
+        return norm(o.mk + o.model).indexOf(qn) >= 0 || norm(o.model).indexOf(qn) >= 0 ||
+          o.alias.some(function (a) { return norm(a).indexOf(qn) >= 0 || norm(o.mk + a).indexOf(qn) >= 0; });
+      });
+      if (!hit.length) hit = LIST.filter(function (o) {
+        var t = norm(o.mk + o.grp + o.model + o.alias.join(''));
+        return toks.every(function (k) { return t.indexOf(k) >= 0; });
+      });
       return hit.sort(byOn)[0] || null;
     }
     function pickModel(o) { V.mk = o.mk; V.grp = o.grp; V.model = o.model; V.cmp = []; V.msg = ''; V.fmsg = ''; go(''); }

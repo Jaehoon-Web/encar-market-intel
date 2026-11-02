@@ -26,6 +26,7 @@ market_index.py — 시황판 지수 (기획안 D4, 5.2.1): 시세·판매속도
 import os, sys, json, datetime
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(ROOT, "encar_output")
@@ -74,8 +75,10 @@ JN_ADD = {("국산", "RV"): 528, ("국산", "SUV"): 2135, ("국산", "경차"): 
 
 
 def load():
-    L = pd.read_parquet(os.path.join(PREP, "listings.parquet"),
-                        columns=["상태", "첫관측일", "마지막관측일", "판매추정일", "엔카등록일", "등록연월", "첫가격", "현재가", "주행km",
+    path = os.path.join(PREP, "listings.parquet")
+    enc = ["엔카_모델"] if "엔카_모델" in pq.read_schema(path).names else []          # 목록(ids_all)과 잇는 엔카 원래 모델명(기획 v2.23)
+    L = pd.read_parquet(path,
+                        columns=enc + ["상태", "첫관측일", "마지막관측일", "판매추정일", "엔카등록일", "등록연월", "첫가격", "현재가", "주행km",
                                  "제조사", "모델그룹", "모델", "등급", "세부등급", "차급", "국산", "시도", "카테고리", "연료", "연료_원문", "성능감가율", "색상계열", "번호판유형",
                                  "체류일", "더미가", "인수금의심", "주행의심", "핵심결측"])
     for c in ["첫관측일", "마지막관측일", "판매추정일", "엔카등록일"]:
@@ -132,7 +135,7 @@ def jn_gap_dates(LC, dates):
 def list_frame(ids, L):
     """목록 매물 → origin·seg(상세 표의 제조사·모델 최빈값) · 7월 범위 · 전남광주 누락 대상(지역별 제조사·비친환경)"""
     mk = L.groupby("제조사")["origin"].agg(lambda s: s.mode().iat[0])
-    seg = L.groupby(["제조사", "모델"])["seg"].agg(lambda s: s.mode().iat[0])
+    seg = L.groupby(["제조사", "엔카_모델" if "엔카_모델" in L else "모델"])["seg"].agg(lambda s: s.mode().iat[0])   # 목록은 엔카 이름
     cat = ids["category"].fillna("")
     org = ids["manufacturer"].map(mk)
     org = org.fillna(pd.Series(np.where(cat.str.contains("imported"), "수입", "국산"), index=ids.index))

@@ -468,3 +468,8 @@ body.v2-sheeton { overflow: hidden; }
   header .nav-tab { height: 42px; padding: 0 10px; font-size: 13.5px; }
   header .nav-tab.on::after { left: 8px; right: 8px; }
 }
+
+/* 차 이름 4단계(기획 v2.23) — 비교 매물 등급 칸 아래 엔카 원래 이름 · 가까운 이름 표시, 세부모델 아래 엔카 표기 안내 */
+.v2-encrow { display: block; font-size: 11px; line-height: 1.4; color: var(--tx-4); margin-top: 2px; white-space: normal; }
+.v2-encrow span { color: var(--tx-2); font-weight: 600; }
+.v2-help.v2-enc { margin-top: 6px; }

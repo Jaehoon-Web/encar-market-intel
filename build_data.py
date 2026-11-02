@@ -683,6 +683,20 @@ comp = l2[["vehicle_id","manufacturer","model","grade","form_year",
            "mileage","fuel","body_type","sido","sale_price","residual"]].copy()
 comp["residual"] = comp["residual"].round(1)
 comp.columns = ["매물ID","제조사","모델","등급","연식","주행km","연료","차체","시도","판매가","잔존율"]
+_lp = os.path.join(SRC, "prep", "listings.parquet")             # 차 이름 4단계(경매장 표기, 기획 v2.23) — 전처리 결과에 있으면 그 이름으로
+if os.path.exists(_lp):
+    import pyarrow.parquet as _pq
+    _cols = [c for c in ["모델그룹", "모델", "등급", "세부등급", "이름근거"] if c in _pq.read_schema(_lp).names]
+    if "이름근거" in _cols:
+        _nm = pd.read_parquet(_lp, columns=_cols)
+        _nm.index = _nm.index.astype(str)
+        _k = comp["매물ID"].astype(str)
+        comp["엔카_모델"], comp["엔카_등급"] = comp["모델"], comp["등급"]
+        comp["모델"] = _k.map(_nm["모델"]).fillna(comp["모델"])
+        comp["등급"] = _k.map(_nm["등급"]).fillna(comp["등급"])
+        comp.insert(2, "모델그룹", _k.map(_nm["모델그룹"]))
+        comp.insert(5, "세부등급", _k.map(_nm["세부등급"]))
+        comp["이름근거"] = _k.map(_nm["이름근거"])
 to_excel_csv(comp, "listings_compact.csv")
 
 # 다운로드 CSV 5: 누적 이력 (전체 크롤 스냅샷) — 판매완료 포함, 가격변동 추적용

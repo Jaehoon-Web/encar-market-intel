@@ -27,7 +27,7 @@
     conv: '경매에서 받을 만한 값(낙찰가 수준)의 추정입니다. 추정 시세 × (1 − 환산 비율) − 수리비. 환산 비율은 같은 조건의 경매 낙찰가가 ' +
       '엔카 호가보다 얼마나 낮았는지로 정한 팀 기준입니다(⚙ 환산 비율). 기준표는 칸 가운데 값 사이를 이어서 읽어, 호가대·차령 경계에서 비율이 뛰지 않습니다.',
     grade: 'A = 비교 매물 10대 이상, 조건을 거의 넓히지 않았고 범위가 ±8% 안. B = 조건을 조금 넓힘. C = 같은 세부모델 전체로 넓힌 참고값.',
-    step: '비교 매물을 같은 등급·가까운 차령·주행부터 찾고, 5대가 안 되면 범위를 한 단계씩 넓힙니다. 1단계가 가장 좁은(정확한) 조건입니다.',
+    step: '비교 매물을 같은 등급·세부등급(트림)·가까운 차령·주행부터 찾고, 5대가 안 되면 범위를 한 단계씩 넓힙니다. 1단계(같은 트림)가 가장 좁은 조건이고, 세부등급을 고르지 않았으면 2단계부터 봅니다. 이름이 「가까운 이름」·「엔카 이름」인 매물은 1단계에 쓰지 않습니다.',
     cond: '같은 차가 무사고였다면의 값입니다. 성능 상태를 넣으면 비교 매물이 비슷한 상태의 차로 바뀌어, 감가율보다 크게 빠질 수 있습니다.',
     sim: '이 차와 얼마나 비슷한지(100 = 가장 비슷). 차령·주행·등급·성능이 가까울수록 높고, 높을수록 추정 시세에 크게 반영됩니다.',
     price: '엔카에 올라온 판매 희망 가격. 판매된 매물은 목록에서 사라지기 전 마지막 호가입니다.',
@@ -121,6 +121,64 @@
   function modelRows(G, model) {
     var M = G.models[model], fi = G.fi;
     return M ? G.F.rows.filter(function (r) { return r[fi.m] === M.idx; }) : [];
+  }
+
+  // ───── 엔카 이름 → 경매 4단계 이름 (기획 v2.23 Q109 — 엔카 이름으로 된 옛 주소·최근 산정 기록을 새 이름으로 연다) ─────
+  function legacyModel(s) {                                 // 모델그룹·세부모델: index 세부모델의 en(붙은 엔카 원래 이름)에서 찾는다
+    var mk = X.idx.makers.find(function (m) { return m.name === s.mk; });
+    if (!mk || (!s.grp && !s.model)) return null;
+    var g0 = mk.groups.find(function (g) { return g.name === s.grp; });
+    if (g0 && (!s.model || g0.models.some(function (m) { return m.name === s.model; }))) return null;   // 지금 이름이면 그대로
+    var best = null, y = +s.y || 0;
+    mk.groups.forEach(function (g) { g.models.forEach(function (m) { (m.en || []).forEach(function (e) {
+      if (s.model ? e[1] !== s.model || (e[0] && e[0] !== s.grp && g.name !== s.grp) : e[0] !== s.grp) return;
+      var sc = e[2] + (y && y >= e[4] && y <= e[5] ? 1e7 : 0);   // 등록 연도가 맞는 쪽 먼저, 그다음 대수
+      if (!best || sc > best.sc) best = { sc: sc, g: g.name, m: m.name };
+    }); }); });
+    if (!best) return null;
+    var from = s.model || s.grp;
+    s.grp = best.g;
+    if (s.model) s.model = best.m;
+    return { from: from, to: s.grp + (s.model ? ' › ' + s.model : '') };
+  }
+  function legacyGrade(s, G) {                               // 등급·세부등급: 그 세부모델 비교 매물의 엔카 원래 등급(파일 머리말 enc)과 가장 많이 짝지은 것
+    if (!G || !s.model || !s.grade || !G.F.enc || G.fi.en == null) return null;
+    var rows = modelRows(G, s.model), fi = G.fi, c = {}, best = null;
+    if (rows.some(function (r) { return G.F.grades[r[fi.g]] === s.grade; })) return null;
+    rows.forEach(function (r) {
+      var e = String(G.F.enc[r[fi.en]] || '').split('|'), k;
+      if (e[1] !== s.grade || (s.trim && e[2] !== s.trim)) return;
+      k = r[fi.g] + '|' + r[fi.t];
+      c[k] = (c[k] || 0) + 1;
+      if (!best || c[k] > c[best]) best = k;
+    });
+    if (!best) return null;
+    var p = best.split('|'), from = s.grade + (s.trim ? ' ' + s.trim : '');
+    s.grade = G.F.grades[+p[0]];
+    s.trim = G.F.trims[+p[1]] || '';
+    return { from: from, to: s.grade + (s.trim ? ' ' + s.trim : '') };
+  }
+  function legacyNote(a, b) {                                // 바꿔 연 사실을 차명 찾기 아래 안내 줄에
+    if (!a && !b) return;
+    VIEW.nameMsg = '예전 엔카 이름 「' + [a && a.from, b && b.from].filter(Boolean).join(' · ') + '」을 경매 이름 「' +
+      [a && a.to, b && b.to].filter(Boolean).join(' · ') + '」으로 바꿔 열었습니다';
+  }
+  function encNames(mk, grp, model) {                        // 이 세부모델에 붙은 엔카 원래 이름 [[엔카 모델그룹, 엔카 모델, 대수, 가까운 이름 대수, …], …]
+    var m = X.idx.makers.find(function (x) { return x.name === mk; }), g = m && m.groups.find(function (x) { return x.name === grp; });
+    var e = g && g.models.find(function (x) { return x.name === model; });
+    return e && e.en || [];
+  }
+  function encLine(mk, grp, model) {                         // '엔카 표기: 그랜저 하이브리드 (GN7) 590대 · 더 뉴 그랜저 하이브리드 (GN7) 7대(가까운 이름)'
+    var en = encNames(mk, grp, model).filter(function (e) { return e[1]; });
+    if (!en.length) return '';
+    return '엔카 표기: ' + en.slice(0, 3).map(function (e) {
+      return e[1] + ' ' + e[2].toLocaleString() + '대' + (e[3] >= e[2] / 2 ? '(경매에 없는 이름 — 가까운 이 이름에 붙임)' : '');
+    }).join(' · ') + (en.length > 3 ? ' 외' : '');
+  }
+  function encOfRow(G, row) {                                // 비교 매물 한 대의 엔카 원래 이름 { model, grade, trim } — 없으면 null
+    if (!G.F.enc || G.fi.en == null) return null;
+    var e = String(G.F.enc[row[G.fi.en]] || '').split('|');
+    return e.length < 3 ? null : { model: e[0], grade: e[1], trim: e[2] };
   }
   function countBy(rows, f, names) {
     var c = {};
@@ -257,7 +315,8 @@
     }
     h += field('세부모델', sel('model', [['', G ? '세부모델 선택' : (g ? '불러오는 중…' : '—')]].concat(mopts), S.model, !G) +
       (S.model && S.y && !fits(S.model) ? '<p class="v2-help v2-bad">등록 ' + S.y + '년은 이 세대' + yrOf(S.mk, S.grp, S.model) +
-        ' 기간 밖입니다 — 다른 세대인지 확인하세요</p>' : ''));
+        ' 기간 밖입니다 — 다른 세대인지 확인하세요</p>' : '') +
+      (S.model && encLine(S.mk, S.grp, S.model) ? '<p class="v2-help v2-enc">' + esc(encLine(S.mk, S.grp, S.model)) + '</p>' : ''));   // 이름은 경매장 표기(기획 v2.23)
     var grades = rows.length ? countBy(rows, fi.g, G.F.grades) : [], gfuel = gradeFuel(G, rows), fuels = [];
     grades.forEach(function (x) { var f = gfuel[x[0]] || '기타'; if (fuels.indexOf(f) < 0) fuels.push(f); });
     var glab = function (x) { return [x[0], x[0] + ' · ' + x[1].toLocaleString() + '대']; };
@@ -657,12 +716,21 @@
       '<td><input type="checkbox" data-ex="' + id + '"' + (ex ? ' checked' : '') + ' aria-label="이 매물 빼기"></td>' +
       '<td class="num">' + (x.sim != null ? x.sim : '–') + '</td><td>' + ym(row[fi.reg]) + '</td>' +
       '<td class="num">' + (row[fi.km] / 1e4).toFixed(1) + '만</td><td>' + esc(F.colors[row[fi.col]]) + '</td>' +
-      '<td>' + esc(F.grades[row[fi.g]] + (trim ? ' ' + trim : '')) + '</td>' +
+      '<td>' + esc(F.grades[row[fi.g]] + (trim ? ' ' + trim : '')) + encSmall(G, row) + '</td>' +
       '<td>' + row[fi.perf] + '등급' + (gv != null ? ' (' + gv + '점·감점 ' + row[fi.gp] + ')' : '') + ' · ' + esc(F.labels[row[fi.acc]]) + dmButton(G, row) + '</td>' +
       '<td class="num price">' + man(price) + '</td><td class="num">' + (x.adj != null ? '<b>' + man(x.adj) + '</b>' : '–') + '</td>' +
       '<td>' + state + '</td><td class="num">' + (x.dwell != null ? x.dwell + '일' : '–') + '</td>' +
       '<td class="num">' + (p0 != null && p0 > price ? '−' + man(p0 - price) : '–') + '</td>' +
       '<td><a href="https://fem.encar.com/cars/detail/' + id + '" target="_blank" rel="noopener">보기 ↗</a></td></tr>';
+  }
+
+  function encSmall(G, row) {                                // 등급 칸 아래 작게: 엔카 원래 이름 · 가까운 이름 표시(기획 v2.23 Q101·Q102)
+    var e = encOfRow(G, row), q = G.fi.q != null && row[G.fi.q];
+    if (!e && !q) return '';
+    var t = e ? (e.model !== S.model ? e.model + ' ' : '') + e.grade + (e.trim ? ' ' + e.trim : '') : '';
+    return '<small class="v2-encrow">' + (q === 1 ? '<span title="경매 데이터에 같은 이름이 없어 가장 가까운 경매 이름에 붙인 매물입니다">가까운 이름</span> '
+      : q === 2 ? '<span title="경매 데이터에 맞는 이름이 없어 엔카 이름을 그대로 쓴 매물입니다">엔카 이름</span> ' : '') +
+      (t ? '엔카: ' + esc(t) : '') + '</small>';
   }
 
   function dmButton(G, row) {                                // 손상 부위 펼치기(기획안 5.1.3 ①) — 누르면 아래에 한 줄
@@ -1317,13 +1385,17 @@
       ['데이터 기준', '엔카 ' + dataDate(true)],
       ['비교 매물 파일', F.version], ['보정 계수', X.coef.version], ['환산 비율', RatesStore.label(X.rates)],
       ['비교 범위', S.sold ? '판매중 + 최근 3개월 판매' : '판매중만'], ['산정 화면 주소', location.href],
+      ['차 이름', '경매장 4단계 표기(모델·세부모델·등급·세부등급). ' + (encLine(S.mk, S.grp, S.model) || '엔카 표기 없음')],
       ['참고', '추정 시세는 엔카 호가 기준. 환산가는 팀 환산 비율(도·소매 갭 요약치)을 적용한 값']);
-    var cr = [['유사도', '매물ID', '상태', '판매 확인일', '최초등록', '주행(km)', '색상', '등급', '세부등급', '연료', '성능등급', '사고 라벨', '손상 부위',
+    var cr = [['유사도', '매물ID', '상태', '판매 확인일', '최초등록', '주행(km)', '색상', '등급', '세부등급', '엔카 세부모델', '엔카 등급', '엔카 세부등급', '이름 근거',
+      '연료', '성능등급', '사고 라벨', '손상 부위',
       '글로비스 종합', '글로비스 감점', '호가(만원)', '보정 후(만원)', '첫 호가(만원)', '인하(만원)', '체류일', '이상치', '직접 제외', '엔카 링크']];
     function line(row, x) {
-      var p0 = row[fi.p0], price = row[fi.price], sold = row[fi.sold] === 1, reg = String(row[fi.reg]);
+      var p0 = row[fi.p0], price = row[fi.price], sold = row[fi.sold] === 1, reg = String(row[fi.reg]), e = encOfRow(G, row);
       return [x ? x.sim : null, row[fi.id], sold ? '판매' : '판매중', sold ? row[fi.sd] : null, reg.slice(0, 4) + '-' + reg.slice(4, 6), row[fi.km],
-        F.colors[row[fi.col]], F.grades[row[fi.g]], F.trims[row[fi.t]] || null, F.fuels ? F.fuels[row[fi.fu]] : null, row[fi.perf], F.labels[row[fi.acc]],
+        F.colors[row[fi.col]], F.grades[row[fi.g]], F.trims[row[fi.t]] || null,
+        e ? e.model : null, e ? e.grade : null, e ? e.trim || null : null, fi.q != null ? ['정확', '가까운 이름', '엔카 이름'][row[fi.q]] || null : null,   // 엔카 원래 이름(기획 v2.23)
+        F.fuels ? F.fuels[row[fi.fu]] : null, row[fi.perf], F.labels[row[fi.acc]],
         ENG.damage(G, row).join(' · ') || null,
         row[fi.gv], row[fi.gp], price, x ? Math.round(x.adj) : null, p0, p0 != null && p0 > price ? p0 - price : null,
         x && x.dwell != null ? x.dwell : null, x && x.outlier ? '예' : null, x ? null : '예', 'https://fem.encar.com/cars/detail/' + row[fi.id]];
@@ -1333,8 +1405,8 @@
     XlsxWriter.download(fileSafe('시세산정_' + S.model + '_' + S.grade + (S.trim ? '_' + S.trim : '') + '_' + (S.m ? S.y + '-' + pad(S.m) : S.y) + '_' +
       (kmNum(S.km) / 1e4).toFixed(1) + '만km_' + today()) + '.xlsx', [
       { name: '산정 결과', rows: rows, header: true, widths: [32, 64] },
-      { name: '비교 매물', rows: cr, header: true, freeze: true, money: [5, 15, 16, 17, 18],
-        widths: [7, 11, 7, 11, 9, 10, 9, 18, 14, 8, 8, 12, 34, 10, 10, 10, 11, 11, 9, 7, 7, 8, 42] },
+      { name: '비교 매물', rows: cr, header: true, freeze: true, money: [5, 19, 20, 21, 22],
+        widths: [7, 11, 7, 11, 9, 10, 9, 18, 14, 24, 20, 14, 11, 8, 8, 12, 34, 10, 10, 10, 11, 11, 9, 7, 7, 8, 42] },
       { name: '분석', rows: analysisRows(G, car, c), widths: [40, 14, 14, 18, 16, 14, 12] }]);
   }
 
@@ -1507,7 +1579,8 @@
     var cond = c['상태'] === '미상' ? '성능 상태 미상' : c['사고라벨'] + ' · 성능 ' + c['성능등급'] + '등급 · 글로비스 ' + c['글로비스_종합평가점'] + '점·' + c['글로비스_사고평가점'] +
       (S.cond === '입력' && S.items.length ? '(' + ISC.summary(S.items) + ')' : '');
     var h = '<div class="sh-top"><div><div class="sh-eyebrow">시세 산정 요약</div><div class="sh-title">' + esc(F.maker + ' ' + S.model) + ' · ' + esc(S.grade + (S.trim ? ' ' + S.trim : '')) + '</div>' +
-      '<div class="sh-sub">' + regText() + ' 등록 · ' + car['주행km'].toLocaleString('ko-KR') + 'km · ' + esc(S.color || '색상 상관없음') + (S.rent ? ' · 렌트 번호판' : '') + ' · ' + esc(cond) + '</div></div>' +
+      '<div class="sh-sub">' + regText() + ' 등록 · ' + car['주행km'].toLocaleString('ko-KR') + 'km · ' + esc(S.color || '색상 상관없음') + (S.rent ? ' · 렌트 번호판' : '') + ' · ' + esc(cond) + '</div>' +
+      (encLine(S.mk, S.grp, S.model) ? '<div class="sh-sub">' + esc(encLine(S.mk, S.grp, S.model)) + '</div>' : '') + '</div>' +   // 경매장 이름 옆 엔카 표기(기획 v2.23 Q102)
       '<div class="sh-date">데이터 기준 ' + dataDate(true) + '<br>작성 ' + stamp + '</div></div>';
     h += '<div class="sh-nums"><div class="sh-num main"><span>추정 시세 · 엔카 소매 호가 기준</span><b>' + man(r.price) + '<small>만원</small></b><em>범위 ' + man(r.range[0]) + ' ~ ' + man(r.range[1]) +
       '만(보정 후 가운데 50%)' + (r.repair ? ' · 수리비 −' + man(r.repair) + '만 반영' : '') +
@@ -1649,9 +1722,17 @@
       return Promise.resolve();
     }
     S = fromHash();
+    var lm = legacyModel(S);                                 // 엔카 이름으로 된 옛 주소·최근 산정 → 경매 이름
+    if (lm) toHash();
     $('navPrice').setAttribute('href', location.hash || '#/price');
     renderInputs();
-    return loadGroup().then(function () { renderInputs(); applyMode(); });
+    return loadGroup().then(function () {
+      var lg = legacyGrade(S, grp());
+      if (lg) toHash();
+      legacyNote(lm, lg);
+      renderInputs();
+      applyMode();
+    });
   }
 
   function reportHref(mk, grp, model) {                      // 모델 리포트 주소(마켓 펄스·시장 시황·모델 요약에서 링크)
@@ -1666,6 +1747,10 @@
     return { X: X, esc: esc, man: man, pct: pct, signed: signed, getJSON: getJSON, fileSafe: fileSafe, today: today, root: ROOT, bindTips: bindTips,
       mm: function () { return X.mmWait; },                  // market_models.json(Promise) — X.mm·X.mmBy 도 채워진다
       reportHref: reportHref,
+      legacy: function (s) {                                 // 엔카 이름 → 경매 이름 { grp, model, from, to } (모델 리포트의 옛 주소)
+        var t = { mk: s.mk, grp: s.grp, model: s.model, y: s.y }, r = legacyModel(t);
+        return r ? { grp: t.grp, model: t.model, from: r.from, to: r.to } : null;
+      },
       priceHref: function (s, mode) { return query(Object.assign(blank(), s), mode || 'model'); },   // 시세 산정(기본은 모델 요약)
       trendCard: function (maker, model, seg, W) { return trendCardOf(maker, model, seg, W); },   // 시세 산정과 같은 '시세 추세' 카드(HTML)
       hash: function (q) {                                   // 화면 상태를 주소에(공유·새로 고침) — 위쪽 탭도 그 주소로

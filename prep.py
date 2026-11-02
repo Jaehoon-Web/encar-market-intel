@@ -137,6 +137,72 @@ def plate_type(plate):
         ["렌트", "영업용", "일반"], default="형식불명"), index=plate.index)
 
 
+# ─────────────────────────────────────────────────────
+#  차 이름 4단계 (기획 v2.23 5.6) — 모델그룹·모델·등급·세부등급 = 경매장 표기(대표모델·세부모델·대표등급·세부등급)
+# ─────────────────────────────────────────────────────
+NAMES = os.path.join(OUT, "names.parquet")       # 매물별 경매 4단계 이름 — 이 PC의 매칭 단계(local_steps)가 만든다. 없으면 엔카 이름
+NAME_COLS = ["모델그룹", "모델", "등급", "세부등급"]
+NO_TRIM = "(세부등급 없음)"                       # 엔카가 쓰는 '세부등급 없음' 표기 → 빈칸
+PT_WORD = re.compile(r"\d|가솔린|디젤|LPG|LPI|LPLI|HEV|하이브리드|PHEV|플러그인|전기|EV|KWH|터보|GDI|MPI|CRDI|VGT|2WD|4WD|AWD|XDRIVE|SDRIVE|"
+                     r"4MATIC|4매틱|콰트로|QUATTRO|TDI|TFSI|TSI|롱레인지|스탠다드|퍼포먼스|듀얼모터|싱글모터|가스|바이퓨얼|인승|택시|렌터카|장애인|영업용", re.I)
+AWD_W = re.compile(r"4MATIC|4매틱|XDRIVE|X드라이브|콰트로|QUATTRO|HTRAC|4MOTION|ALL4|4WD|AWD|4륜|사륜", re.I)
+TWD_W = re.compile(r"2WD|FWD|RWD|전륜|후륜|2륜|SDRIVE", re.I)
+
+
+def split_grade(grade, trim):
+    """경매 이름이 없는 매물의 등급·세부등급: 세부등급이 비었고 엔카 등급에 동력계와 트림이 합쳐져 있으면 앞쪽 동력계 낱말
+       (2.4·디젤·9인승·E250·HG240)과 뒤쪽 트림으로 나눈다 — '523d M 스포츠' → '523d' · 'M 스포츠'"""
+    g = "" if pd.isna(grade) else str(grade).strip()
+    t = "" if pd.isna(trim) else str(trim).strip()
+    if t or not g:
+        return g or None, t or None
+    toks = g.split()
+    i = 0
+    while i < len(toks) and PT_WORD.search(toks[i].replace(" ", "")):
+        i += 1
+    return (" ".join(toks[:i]), " ".join(toks[i:])) if 0 < i < len(toks) else (g, None)
+
+
+def add_names(L):
+    """엔카 원래 이름은 엔카_* 열에 두고, 주 이름 열에는 경매 4단계 이름(names.parquet)을 넣는다. 이름 파일에 없는 매물은 엔카 이름
+       (등급은 split_grade 로 나눔). 이름근거 = 정확 · 가까운 이름(경매에 같은 이름이 없어 가장 가까운 것) · 엔카 이름.
+       구동·인승·용도는 엔카 등급 글에서 뽑는다(경매 이름에 빠질 수 있어 비교 조건으로 쓴다, Q108). 여러 번 돌려도 결과가 같다"""
+    for c in NAME_COLS:
+        if "엔카_" + c not in L:
+            L["엔카_" + c] = L[c]
+    L.loc[L["엔카_세부등급"] == NO_TRIM, "엔카_세부등급"] = np.nan
+    text = (L["엔카_등급"].fillna("") + " " + L["엔카_세부등급"].fillna("")).str.upper()
+    L["구동"] = np.select([text.str.contains(AWD_W), text.str.contains(TWD_W)], ["AWD", "2WD"], default=None)
+    L["인승"] = pd.to_numeric(text.str.extract(r"(\d{1,2})\s*인승", expand=False), errors="coerce")
+    L["용도"] = np.select([text.str.contains("택시"), text.str.contains("렌터카|렌트카|\\(렌트\\)"),
+                         text.str.contains("장애인|휠체어"), text.str.contains("영업용")], ["택시", "렌터카", "장애인", "영업용"], default=None)
+    sg = [split_grade(g, t) for g, t in zip(L["엔카_등급"], L["엔카_세부등급"])]
+    L["모델그룹"], L["모델"] = L["엔카_모델그룹"], L["엔카_모델"]
+    L["등급"], L["세부등급"] = [a for a, _ in sg], [b for _, b in sg]
+    L["이름근거"], L["매칭등급"] = "엔카 이름", None
+    if os.path.exists(NAMES):
+        N = pd.read_parquet(NAMES).reindex(L.index)
+        m = N["이름_모델"].notna()
+        g = m & N["이름_등급"].notna()
+        L.loc[m, "모델그룹"], L.loc[m, "모델"] = N.loc[m, "이름_모델그룹"], N.loc[m, "이름_모델"]
+        L.loc[g, "등급"], L.loc[g, "세부등급"] = N.loc[g, "이름_등급"], N.loc[g, "이름_세부등급"].replace("", np.nan)
+        L.loc[m, "이름근거"] = N.loc[m, "이름근거"]
+        L["매칭등급"] = N["매칭등급"]
+    return L
+
+
+def names_only():
+    """python prep.py --names — 전처리를 다시 하지 않고 listings.parquet 에 names.parquet 만 다시 붙인다(매칭 단계가 부름)"""
+    sys.stdout.reconfigure(encoding="utf-8")
+    p = os.path.join(OUT, "listings.parquet")
+    L = add_names(pd.read_parquet(p))
+    tmp = p + ".tmp"
+    L.to_parquet(tmp)
+    os.replace(tmp, p)                                   # 중간에 실패해도 원래 파일이 깨지지 않게
+    cur = L["상태"] == "판매중"
+    log("[prep --names] 차 이름 다시 붙임 — 판매중 이름근거: " + ", ".join(f"{k} {v:,}" for k, v in L.loc[cur, "이름근거"].value_counts().items()))
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")   # 리포트의 '—' 등이 cp949 콘솔에서 출력 오류를 내지 않도록 (2026-10-28 실패 기록)
     t0 = datetime.datetime.now()
@@ -312,6 +378,7 @@ def main():
     R["상태"] = "목록 잔존(판매 추정)"
     R["비교사용"] = False
     L = pd.concat([L, R], axis=0)
+    L = add_names(L)                                     # 차 이름 4단계(경매장 표기) — 엔카 이름은 엔카_* 열
 
     # ---------- 저장 ----------
     for c in ["판매추정일", "첫관측일", "마지막관측일"]:
@@ -341,7 +408,8 @@ def main():
              + " · 사고평가점: " + ", ".join(f"{k} {v:,}" for k, v in cur["글로비스_사고평가점"].value_counts().sort_index().items()),
              "판매중 색상계열: " + ", ".join(f"{k} {v:,}" for k, v in cur["색상계열"].value_counts().items()),
              "판매중 번호판유형: " + ", ".join(f"{k} {v:,}" for k, v in cur["번호판유형"].value_counts().items()),
-             f"세부등급 채움 {cur['세부등급'].notna().mean()*100:.1f}% (목록 값으로 보충 {int(cur['세부등급_보충여부'].sum()):,}) · 차령 채움 {cur['차령개월'].notna().mean()*100:.1f}%",
+             f"세부등급 채움 {cur['세부등급'].notna().mean()*100:.1f}% (엔카 세부등급 {cur['엔카_세부등급'].notna().mean()*100:.1f}%, 목록 값으로 보충 {int(cur['세부등급_보충여부'].sum()):,}) · 차령 채움 {cur['차령개월'].notna().mean()*100:.1f}%",
+             "판매중 차 이름 근거: " + ", ".join(f"{k} {v:,}" for k, v in cur["이름근거"].value_counts().items()) + (" (이름 파일 없음 — 엔카 이름)" if not os.path.exists(NAMES) else ""),
              f"재등록 정정 {int(L['재등록여부'].eq(True).sum()):,}대 · price_obs 누적 {len(po):,}행 ({po['관측일'].nunique()}회)",
              "미분류 부위(사고 단계 미반영): " + (", ".join(f"{k} {v}" for k, v in unknown_parts.head(10).items()) or "없음"),
              f"소요 {(datetime.datetime.now() - t0).seconds}초"]
@@ -351,4 +419,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    names_only() if "--names" in sys.argv else main()

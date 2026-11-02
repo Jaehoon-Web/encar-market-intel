@@ -56,6 +56,8 @@
     var E = opt.config, C = opt.coef, R = opt.rates;
     var STEPS = E.steps, COLORS = E.colors, SIM = E.sim, KM_CAP = E.km_cap;
     var MIN = E.min_comps, GOOD = E.good_comps, OUT_MAD = E.out_mad, OUT_FLOOR = E.out_floor, A_WIDTH = E.a_width;
+    var A_STEP = E.a_step || 2, B_STEP = E.b_step || 4, ATTR = SIM.attr || 0;          // 신뢰도 A·B 단계 상한 · 구동·인승·용도 거리
+    var DRIVES = E.drives || [''], USES = E.uses || [''];
 
     function vec(e) {
       return [e.age, e.km, e.rent].concat(COLORS.map(function (c) { return num(own(e.color, c)); }));
@@ -87,7 +89,8 @@
       var rows = F.rows.filter(function (r) { return r[fi.m] === M.idx; }), n = rows.length;
       var G = { n: n, rows: rows, cf: cf, ids: new Array(n), age: new Float64Array(n), km: new Float64Array(n), x: new Array(n),
         grades: new Array(n), trims: new Array(n), perf: new Float64Array(n), dep: new Float64Array(n), price: new Float64Array(n),
-        sold: new Uint8Array(n), tf: new Float64Array(n), fe: new Float64Array(n) };
+        sold: new Uint8Array(n), tf: new Float64Array(n), fe: new Float64Array(n),
+        q: new Uint8Array(n), dv: new Int32Array(n), se: new Int32Array(n), us: new Int32Array(n) };   // 근거 약한 이름 · 구동 · 인승 · 용도
       for (var i = 0; i < n; i++) {
         var r = rows[i], col = F.colors[r[fi.col]], g = F.grades[r[fi.g]], t = F.trims[r[fi.t]];
         var km = Math.min(r[fi.km], KM_CAP) / 1e4, om = r[fi.om] == null ? F.now_ym : r[fi.om], reg = r[fi.reg];
@@ -97,6 +100,7 @@
         G.grades[i] = g; G.trims[i] = t; G.perf[i] = r[fi.perf]; G.dep[i] = r[fi.dep] / 100;
         G.price[i] = r[fi.price]; G.sold[i] = r[fi.sold]; G.tf[i] = r[fi.tk] == null ? 1 : F.tf[r[fi.tk]];
         G.fe[i] = feOf(cf, g, t);
+        if (fi.q != null) { G.q[i] = r[fi.q] || 0; G.dv[i] = r[fi.dv] || 0; G.se[i] = r[fi.se] || 0; G.us[i] = r[fi.us] || 0; }
       }
       grp.cache[name] = G;
       return G;
@@ -104,6 +108,7 @@
 
     /* 대상 차 한 대. t: grade, trim, age(개월), km(km), rent(0/1), color(계열 | null=모름),
        dep(성능감가율 % | null=상태 미상), perf(성능등급 | null), excludeId(비교에서 뺄 매물 ID),
+       dv·se·us(구동·인승·용도 번호, 모르면 0 — 차명 글에서 읽은 값),
        excludeIds(화면에서 사용자가 뺀 매물 ID 목록 — 사이트 전용, 후보에서 빼는 것 말고는 계산이 같다)
        o: { sold, time, weight, outlier, adjust } — 기본 모두 true. 비교 매물이 5대 미만이면 null */
     function estimate(grp, name, t, o) {
@@ -114,20 +119,23 @@
       var tage = t.age, tkm = Math.min(t.km, KM_CAP) / 1e4, tg = t.grade, tt = t.trim || '';
       var n0 = G.n, i, j, k, excl = t.excludeIds && t.excludeIds.length ? new Set(t.excludeIds) : null;
       var base = new Uint8Array(n0), dage = new Float64Array(n0), dkm = new Float64Array(n0), same = new Uint8Array(n0),
-        dperf = new Float64Array(n0);
+        dperf = new Float64Array(n0), sameT = new Uint8Array(n0), tdv = t.dv || 0, tse = t.se || 0, tus = t.us || 0;
       for (i = 0; i < n0; i++) {
         base[i] = (t.excludeId == null || G.ids[i] !== t.excludeId) && (o.sold || !G.sold[i]) && !(excl && excl.has(G.ids[i])) ? 1 : 0;
         dage[i] = Math.abs(G.age[i] - tage);
         dkm[i] = Math.abs(G.km[i] - tkm);
         same[i] = G.grades[i] === tg ? 1 : 0;
+        sameT[i] = G.trims[i] === tt && !G.q[i] ? 1 : 0;                       // 같은 트림 단계는 이름이 '정확'인 매물만
         dperf[i] = known ? Math.abs(G.perf[i] - tperf) : 0;
       }
       var step = 0, sel = [];
       for (var s = 0; s < STEPS.length && !step; s++) {
         var st = STEPS[s];
+        if (st[5] && tt === '') continue;                                       // 세부등급을 고르지 않았으면 같은 트림 단계는 건너뜀
         sel = [];
         for (i = 0; i < n0; i++) {
-          if (base[i] && dage[i] <= st[2] && dkm[i] <= st[3] && (!st[1] || same[i]) && (!known || dperf[i] <= st[4])) sel.push(i);
+          if (base[i] && dage[i] <= st[2] && dkm[i] <= st[3] && (!st[1] || same[i]) && (!st[5] || sameT[i]) &&
+            (!known || dperf[i] <= st[4])) sel.push(i);
         }
         if (sel.length >= MIN) step = s + 1;
       }
@@ -151,9 +159,11 @@
         p[k] = G.price[i] * Math.exp(lin) * tf;
         var cond = known && o.adjust ? (1 - tdep) / (1 - G.dep[i]) : 1;
         adj[k] = p[k] * cond;
+        var attr = (tdv && G.dv[i] && G.dv[i] !== tdv ? 1 : 0) + (tse && G.se[i] && G.se[i] !== tse ? 1 : 0) +
+          (tus && G.us[i] && G.us[i] !== tus ? 1 : 0);                          // 구동·인승·용도가 둘 다 알려져 있고 다르면
         var dist = dage[i] / SIM.age + dkm[i] / SIM.km + SIM.grade * (1 - same[i])
           + SIM.trim * (tt !== '' && G.trims[i] !== '' && G.trims[i] !== tt ? 1 : 0)
-          + SIM.perf * dperf[i] + SIM.sold * G.sold[i];
+          + SIM.perf * dperf[i] + SIM.sold * G.sold[i] + ATTR * attr;
         w[k] = o.weight ? Math.exp(-dist) : 1;
         la[k] = Math.log(adj[k]);
         parts[k] = pr; feD[k] = tfe - G.fe[i]; condL[k] = Math.log(cond); tfL[k] = Math.log(tf);
@@ -176,7 +186,7 @@
       var est = Math.exp(wq(lk, wk, 0.5)), lo = Math.exp(wq(lk, wk, 0.25)), hi = Math.exp(wq(lk, wk, 0.75));
       var n = lk.length, tight = hi / est - 1 <= A_WIDTH && 1 - lo / est <= A_WIDTH;
       var r = { est: est, lo: lo, hi: hi, n: n, out: m - n, step: step, stepName: STEPS[step - 1][0],
-        grade: n >= GOOD && step <= 2 && tight ? 'A' : (step <= 4 ? 'B' : 'C'), coefLevel: G.cf.level };
+        grade: n >= GOOD && step <= A_STEP && tight ? 'A' : (step <= B_STEP ? 'B' : 'C'), coefLevel: G.cf.level };
       if (!known) r.est0 = Math.exp(wq(l0, wk, 0.5));                     // 무사고 기준 값(대상 감가율 0)
 
       // 보정 근거(만원): 항목별 로그 보정의 가중 평균을 추정 시세 기준 금액으로 — 표시용
@@ -246,7 +256,8 @@
       var r = estimate(grp, car['모델'], {
         grade: car['등급'], trim: car['세부등급'] || '', age: age, km: car['주행km'], rent: car['렌트'] ? 1 : 0,
         color: car['색상계열'] || null, dep: perf ? perf['감가율'] : null, perf: perf ? perf['등급'] : null, excludeId: car.excludeId,
-        excludeIds: car.excludeIds
+        excludeIds: car.excludeIds, dv: Math.max(0, DRIVES.indexOf(car['구동'])), se: +(car['인승'] || 0),
+        us: Math.max(0, USES.indexOf(car['용도']))
       }, o);
       if (!r) return null;
       var yrs = Math.floor(ym / 100) - (car['연식'] || Math.floor(reg / 100));

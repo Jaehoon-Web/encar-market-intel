@@ -5,6 +5,8 @@
  *    + 등록 연도 범위 + 매물 수. 같은 이름이라도 연도로 세대를 가른다(그랜저 IG ↔ 더 뉴 그랜저 IG)
  * 2) 등급·세부등급: 그 세부모델의 등급 조합 중 연료·배기량·터보·구동·인승·트림 단어(앞부분만 써도 됨)가 가장 잘 맞는 것
  * 확신(conf): high · mid · low — 묶음 화면에서 low 는 노랗게 표시하고 후보 중에서 고르게 한다
+ * 이름 체계(기획 v2.23): 사이트 이름은 경매장 4단계 표기다. 엑셀에는 엔카 표기도 오므로(Q103) 세부모델마다 붙은 엔카 원래 이름(index 의 en)을
+ * 별칭 후보로 같이 맞추고 결과는 경매 이름으로 돌려준다. 등급도 그 조합의 비교 매물에 적힌 엔카 등급 글(파일 머리말 enc)과 함께 맞춘다.
  *
  *   var nm = NameMatch.create(index);                               // comps/index.json
  *   nm.model('올뉴투싼 2.0 디젤', 2018)
@@ -76,22 +78,32 @@
         if (/^기타/.test(gc)) return;                                    // '기타 승용차' 같은 묶음은 이름으로 찾지 않는다
         groupNames[gc] = true;
         g.models.forEach(function (m) {
-          var names = [nameOf(g.name)], cut = up(g.name);
-          if (compact(m.name).indexOf(gc) < 0 || gc.length === 1) {     // 그란투리스모 (GT) / 3시리즈 GT (F34) · 인피니티 G / G25 —
-            cut = up(m.name).replace(/\(.*?\)|\d+세대/g, ' ').replace(/\s+/g, ' ').trim();   //   세부모델 이름(괄호·세대 빼고)도 모델명으로
-            names.push(nameOf(cut, true));
-          }
-          var rest = up(m.name).replace(cut, ' ');                       // 모델그룹 이름을 뺀 나머지 = 세부모델 표시
-          var rc = compact(rest), pf = prefixOf(rc);
-          if (pf) rest = rest.replace(new RegExp(pf.split('').join('\\s*')), ' ');
-          var core = words(rest).filter(function (w) { return !/^(?:HEV|PHEV|EV)$/.test(w) && !fuelOf(w); });
-          models.push({ maker: mk.name, group: g.name, model: m.name, file: g.file, n: m.n, y0: m.y0, y1: m.y1,
-            names: names, prefix: pf, core: core, fuel: /하이브리드|HEV/.test(up(m.name)) ? (/PHEV|플러그인/.test(up(m.name)) ? 'PHEV' : 'HEV')
-              : (/일렉트릭|(^|[^A-Z])EV([^A-Z]|$)|전기/.test(up(m.name)) ? 'EV' : null),
-            gk: (m.gk || []).map(compact) });
+          models.push(entry(mk.name, g, m, g.name, m.name, m.n, m.y0, m.y1));
+          (m.en || []).forEach(function (e) {                          // 엔카 원래 이름 [엔카 모델그룹, 엔카 모델, 대수, 가까운 이름 대수, 연도 2%, 98%]
+            if (!e[1] || (compact(e[1]) === compact(m.name) && compact(e[0] || '') === gc)) return;
+            if (e[0] && !/^기타/.test(compact(e[0]))) groupNames[compact(e[0])] = true;
+            models.push(entry(mk.name, g, m, e[0] || g.name, e[1], e[2], e[4], e[5]));
+          });
         });
       });
     });
+
+    // 후보 하나: 이름(gname 모델그룹 · mname 세부모델)으로 점수를 매기고, 고르면 경매 이름(g.name · m.name)을 돌려준다
+    function entry(maker, g, m, gname, mname, n, y0, y1) {
+      var gc = compact(gname), names = [nameOf(gname)], cut = up(gname);
+      if (compact(mname).indexOf(gc) < 0 || gc.length === 1) {     // 그란투리스모 (GT) / 3시리즈 GT (F34) · 인피니티 G / G25 —
+        cut = up(mname).replace(/\(.*?\)|\d+세대/g, ' ').replace(/\s+/g, ' ').trim();   //   세부모델 이름(괄호·세대 빼고)도 모델명으로
+        names.push(nameOf(cut, true));
+      }
+      var rest = up(mname).replace(cut, ' ');                       // 모델그룹 이름을 뺀 나머지 = 세부모델 표시
+      var rc = compact(rest), pf = prefixOf(rc);
+      if (pf) rest = rest.replace(new RegExp(pf.split('').join('\\s*')), ' ');
+      var core = words(rest).filter(function (w) { return !/^(?:HEV|PHEV|EV)$/.test(w) && !fuelOf(w); });
+      return { maker: maker, group: g.name, model: m.name, file: g.file, n: n, y0: y0, y1: y1,
+        names: names, prefix: pf, core: core, fuel: /하이브리드|HEV/.test(up(mname)) ? (/PHEV|플러그인/.test(up(mname)) ? 'PHEV' : 'HEV')
+          : (/일렉트릭|(^|[^A-Z])EV([^A-Z]|$)|전기/.test(up(mname)) ? 'EV' : null),
+        gk: (m.gk || []).map(compact) };
+    }
 
     function prep(text) {
       var t = up(text);
@@ -146,8 +158,14 @@
     }
 
     function model(text, year) {
-      var inp = prep(text), list = [];
-      models.forEach(function (m) { var r = scoreModel(m, inp, year); if (r) list.push(r); });
+      var inp = prep(text), list = [], top = {};
+      models.forEach(function (m) {                              // 같은 세부모델(경매 이름)의 이름·별칭 후보는 가장 높은 점수 하나만
+        var r = scoreModel(m, inp, year), k;
+        if (!r) return;
+        k = r.maker + '|' + r.model;
+        if (!top[k] || r.score > top[k].score) top[k] = r;
+      });
+      Object.keys(top).forEach(function (k) { list.push(top[k]); });
       list.sort(function (a, b) { return b.score - a.score; });
       if (!list.length) return { best: null, conf: 'none', cands: [] };
       return finish(list, year);
@@ -175,12 +193,27 @@
     function grade(grp, modelName, text) {
       var M = grp.models[modelName], F = grp.F, fi = grp.fi;
       if (!M) return null;
-      var cnt = {};
-      F.rows.forEach(function (r) { if (r[fi.m] === M.idx) { var k = r[fi.g] + '|' + r[fi.t]; cnt[k] = (cnt[k] || 0) + 1; } });
+      var cnt = {}, encOf = {};                              // 조합별 대수 · 그 조합 비교 매물의 엔카 원래 등급 글(대수 순 3개까지)
+      F.rows.forEach(function (r) {
+        if (r[fi.m] !== M.idx) return;
+        var k = r[fi.g] + '|' + r[fi.t];
+        cnt[k] = (cnt[k] || 0) + 1;
+        if (fi.en != null && F.enc) { var e = encOf[k] || (encOf[k] = {}); e[r[fi.en]] = (e[r[fi.en]] || 0) + 1; }
+      });
       var mx = up(modelName), mw = words(mx), f = feats(up(text).split(mx).join(' '), mw);
       var phrase = function (s) { return up(s).replace(/[\s\-_.,·:;()\[\]\/]/g, ''); }, whole = phrase(text);
       var list = Object.keys(cnt).map(function (k) {
-        var p = k.split('|'), g = F.grades[+p[0]], t = F.trims[+p[1]], cf = feats(g + ' ' + t, mw), s = 0, ev = 0, trimHit = false;
+        var p = k.split('|'), g = F.grades[+p[0]], t = F.trims[+p[1]], r = scoreGT(g, t);
+        Object.keys(encOf[k] || {}).sort(function (a, b) { return encOf[k][b] - encOf[k][a]; }).slice(0, 3).forEach(function (ei) {
+          var e = String(F.enc[+ei] || '').split('|');                    // '엔카 모델|엔카 등급|엔카 세부등급' — 엑셀이 엔카 표기면 이것과 더 잘 맞는다
+          if (e.length < 3) return;
+          var x = scoreGT(e[1], e[2]);
+          if (x.s > r.s) r = { s: x.s, ev: x.ev, trimHit: r.trimHit };       // 세부등급을 맞혔는지는 경매 트림 이름 기준 그대로
+        });
+        return { grade: g, trim: t, n: cnt[k], score: r.s + 0.15 * Math.log(cnt[k] + 1) / Math.LN10, ev: r.ev, trimHit: r.trimHit };
+      }).sort(function (a, b) { return b.score - a.score; });
+      function scoreGT(g, t) {                              // 입력 글 ↔ 등급 g · 세부등급 t 의 점수 · 단서 수 · 세부등급 낱말을 맞혔나
+        var cf = feats(g + ' ' + t, mw), s = 0, ev = 0, trimHit = false;
         if (f.fuel && cf.fuel) { if (f.fuel === cf.fuel) { s += 3; ev++; } else s -= 4; }
         else if (!f.fuel && cf.fuel) s -= 0.3;                                // 연료를 안 적었으면 연료가 붙은 등급을 조금 덜(어린이보호차 ↔ 어린이보호차 LPi)
         if (f.disp && cf.disp) { if (f.disp === cf.disp) { s += 3; ev++; } else s -= 3; }
@@ -222,9 +255,8 @@
         cf.letters.forEach(function (x) { if (f.letters.indexOf(x) < 0) s -= 0.3; });
         f.nums.forEach(function (x) { if (cf.nums.indexOf(x) >= 0) { s += 1.5; ev++; } });
         cf.nums.forEach(function (x) { if (f.nums.indexOf(x) < 0) s -= 0.3; });
-        s += 0.15 * Math.log(cnt[k] + 1) / Math.LN10;
-        return { grade: g, trim: t, n: cnt[k], score: s, ev: ev, trimHit: trimHit };
-      }).sort(function (a, b) { return b.score - a.score; });
+        return { s: s, ev: ev, trimHit: trimHit };
+      }
       if (!list.length) return null;
       var best = list[0], gap = list.length > 1 ? best.score - list[1].score : 9;
       var conf = best.ev >= 2 && gap >= 1.5 ? 'high' : (best.ev >= 1 ? 'mid' : 'low');

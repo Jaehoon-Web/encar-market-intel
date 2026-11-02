@@ -12,19 +12,21 @@ price_engine.py — 시세 산정 엔진 (기획안 WP1, 5.1.2): "가장 비슷�
   1 후보: 같은 모델(엔카 '모델' = 기획안의 세부모델)의 비교 가능 매물 중 성능점검이 있는 것.
           판매중(현재가) + 최근 3개월 판매(마지막 호가). 같은 차(차키)는 뺀다
   2 단계별 매칭: 비교 매물이 5대 이상 모이는 첫 단계를 쓴다
-          1 정확(등급 일치·차령 ±6개월·주행 ±2만km·성능등급 ±1) → 2 차령 ±12개월 → 3 주행 ±4만km → 4 등급 무관 → 5 모델 전체
-          상태 미상이면 성능등급 조건을 쓰지 않는다
+          1 같은 트림(등급·세부등급 일치, 차령 ±6개월·주행 ±2만km·성능등급 ±1, 이름이 '정확'인 매물만) → 2 트림 무관(등급 일치)
+          → 3 차령 ±12개월 → 4 주행 ±4만km → 5 등급 무관 → 6 모델 전체. 세부등급을 고르지 않았으면 1단계는 건너뛴다(기획 v2.23 Q104·Q111)
+          상태 미상이면 성능등급 조건을 쓰지 않는다. 구동·인승·용도(엔카 등급 글에서 뽑음)가 다르면 유사도를 낮춘다(Q108)
   3 조건 보정: 가격 × (1−대상 감가율)/(1−비교 감가율) × exp(D3 계수: 차령·주행·렌트·색상 차이 + 등급·세부등급 차이)
                × 시점(판매 매물의 마지막 호가 → 지금, D4 시세지수 국산·수입별).
                상태 미상이면 성능 보정 없이 계산하고, 무사고 기준 값(대상 감가율 0)을 따로 낸다
   4 이상치: 로그 보정가가 가중 중앙값에서 3×MAD(최소 15%)보다 멀면 뺀다. 남는 매물이 5대 미만이면 빼지 않는다
   5 대표값: 유사도 가중 중앙값. 범위는 가중 25~75%
-  6 신뢰도: A 10대 이상·2단계 이내·범위가 대표값 ±8% 안 / B 4단계 이내 / C 5단계(참고용)
+  6 신뢰도: A 10대 이상·3단계 이내·범위가 대표값 ±8% 안 / B 5단계 이내 / C 6단계(참고용)
   7 환산가: 대표값 × (1 − 환산 비율: 직접 입력 → 팀 수정(모델) → 모델 예외 → 호가대×차령 기준표). 수리비는 시세·환산가에서 전액 뺀다
 """
 import os, re, sys, json, zlib, glob, argparse, datetime, subprocess
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 import adjust_coef as AC
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -34,23 +36,33 @@ REPORT = os.path.join(PREP, "price_engine_report.txt")
 SITE = os.path.join(DATA, "comps")                               # 사이트용 비교 매물 파일 — 매주 auto_update가 web/data와 함께 커밋
 PARITY = os.path.join(PREP, "_engine_parity.json")
 RUNNER = os.path.join(ROOT, "tools", "price_engine_parity.js")
+NAME_EXTRA = ["이름근거", "구동", "인승", "용도", "엔카_모델그룹", "엔카_모델", "엔카_등급", "엔카_세부등급"]
+NAME_Q = {"정확": 0, "가까운 이름": 1, "엔카 이름": 2}     # 차 이름 4단계(기획 v2.23)
 
-STEPS = AC.STEPS                      # (이름, 등급 일치, 차령 ±개월, 주행 ±만km, 성능등급 ±)
+STEPS = [("1 같은 트림", True, 6, 2, 1, True), ("2 정확", True, 6, 2, 1, False), ("3 차령±12", True, 12, 2, 1, False),
+         ("4 주행±4만", True, 12, 4, 1, False), ("5 등급 무관", False, 12, 4, 1, False), ("6 모델 전체", False, 999, 999, 99, False)]
+# (이름, 등급 일치, 차령 ±개월, 주행 ±만km, 성능등급 ±, 세부등급 일치) — 세부등급 일치 단계는 이름이 '정확'인 매물만 쓴다
+A_STEP, B_STEP = 3, 5                 # 신뢰도 A·B 의 단계 상한(같은 트림 단계가 앞에 붙어 예전 2·4단계와 같은 범위)
+DRIVES, USES = ["", "AWD", "2WD"], ["", "택시", "렌터카", "장애인", "영업용"]
 COLORS, FEATS, KM_CAP = AC.COLORS, AC.FEATS, AC.KM_CAP
 MIN_COMPS, GOOD_COMPS = 5, 10
 OUT_MAD, OUT_FLOOR = 3.0, 0.15        # 이상치: 3×MAD, 최소 15%
 A_WIDTH = 0.08                        # 신뢰도 A: 범위(25~75%)가 대표값 ±8% 안
-SIM = {"age": 12.0, "km": 4.0, "grade": 0.5, "trim": 0.25, "perf": 0.25, "sold": 1.0}    # 유사도 거리(차령 12개월·주행 4만km = 1)
+SIM = {"age": 12.0, "km": 4.0, "grade": 0.5, "trim": 0.25, "perf": 0.25, "sold": 1.0, "attr": 0.25}   # 유사도 거리(차령 12개월·주행 4만km = 1)
+# attr: 구동·인승·용도가 둘 다 알려져 있고 다르면 하나마다 더함
 # 판매 매물 감점 1.0: 0.25 대비 오차 5.6→5.5%, 편향 +0.8→+0.4%(1겹 시험). 판매 매물은 마지막 호가라 조금 높게 남는다
 OPTS = {"sold": True, "time": True, "weight": True, "outlier": True, "adjust": True}
 ENGINE = {"steps": [list(s) for s in STEPS], "colors": COLORS, "km_cap": KM_CAP, "min_comps": MIN_COMPS, "good_comps": GOOD_COMPS,
-          "out_mad": OUT_MAD, "out_floor": OUT_FLOOR, "a_width": A_WIDTH, "sim": SIM}       # 사이트 엔진이 읽는 설정(한곳에서 관리)
+          "out_mad": OUT_MAD, "out_floor": OUT_FLOOR, "a_width": A_WIDTH, "sim": SIM, "a_step": A_STEP, "b_step": B_STEP,
+          "drives": DRIVES, "uses": USES}                                            # 사이트 엔진이 읽는 설정(한곳에서 관리)
 ROW_FIELDS = ["id", "m", "g", "t", "reg", "om", "km", "rent", "col", "perf", "dep", "price", "sold", "tk",
-              "acc", "gv", "gp", "ds", "p0", "sd", "fu", "dm"]
+              "acc", "gv", "gp", "ds", "p0", "sd", "fu", "q", "dv", "se", "us", "en", "dm"]
 # 행에는 매물이 바뀌지 않으면 그대로인 값만 둔다 — 매주 바뀌는 값(현재 월·시점 보정 배수)은 파일 머리말(now_ym·tf)에.
 #   om: 가격을 본 달(yyyymm, 판매중은 null → now_ym) · tk: 시점 보정 키('국산|크롤일', 판매중은 null → 1)
 #   ds: 체류 시작일(yyyymmdd, 체류일 = 판매일 또는 now_date − ds) · sd: 판매 추정일 · p0: 첫 호가 · fu: 연료(환산 비율 모델 예외용)
 #   dm: 손상 부위 — 파일 머리말 damage 목록('프론트 휀더(교환)' 등)의 번호 배열, 없으면 null(비교 매물 표에서 펼쳐 봄)
+#   q: 이름 근거 0 정확 · 1 가까운 이름 · 2 엔카 이름(0이 아니면 같은 트림 단계에서 뺌) · dv: 구동(머리말 drives 번호) · se: 인승 · us: 용도(uses 번호)
+#   en: 엔카 원래 이름(머리말 enc 목록 번호 — '모델|등급|세부등급')
 
 
 # ───────── 데이터 ─────────
@@ -60,7 +72,10 @@ def load_pool():
                         columns=["상태", "비교사용", "점검여부", "제조사", "모델그룹", "모델", "등급", "세부등급", "차급", "국산", "연료",
                                  "연식", "등록연월", "주행km", "현재가", "첫가격", "마지막가", "마지막관측일", "판매추정일", "체류일",
                                  "번호판유형", "색상계열", "성능감가율", "성능등급", "사고라벨", "글로비스_종합평가점", "글로비스_감점합", "차키",
-                                 "손상부위"])
+                                 "손상부위"] + [c for c in NAME_EXTRA if c in pq.read_schema(os.path.join(PREP, "listings.parquet")).names])
+    for c in NAME_EXTRA:                                                            # 이름 4단계 전의 listings 도 읽히게
+        if c not in L:
+            L[c] = L[c.replace("엔카_", "")] if c.startswith("엔카_") else ("정확" if c == "이름근거" else None)
     sold = L["상태"] != "판매중"
     price = L["현재가"].where(~sold, L["마지막가"])
     ok = (L["비교사용"].eq(True) & L["점검여부"].eq(True) & L["성능감가율"].notna() & price.gt(0) & L["주행km"].gt(0)
@@ -76,6 +91,10 @@ def load_pool():
     for c in COLORS:
         d[f"c_{c}"] = (d["색상계열"] == c).astype(float)
     d["등급"], d["세부"] = d["등급"].fillna(""), d["세부등급"].fillna("")
+    d["q"] = d["이름근거"].map(NAME_Q).fillna(2).astype(int)                         # 0 정확 · 1 가까운 이름 · 2 엔카 이름 — 0이 아니면 같은 트림 단계에서 뺀다
+    d["dv"] = d["구동"].map({v: i for i, v in enumerate(DRIVES)}).fillna(0).astype(int)
+    d["se"] = d["인승"].fillna(0).astype(int)
+    d["us"] = d["용도"].map({v: i for i, v in enumerate(USES)}).fillna(0).astype(int)
     d["origin"] = np.where(d["국산"].eq(True), "국산", "수입")
     d["seg"] = d["차급"].fillna("기타") + "·" + d["origin"]
     d["key"] = d["제조사"] + "|" + d["모델"]
@@ -134,6 +153,7 @@ class Group:
         self.perf, self.dep = g["성능등급"].values.astype(float), g["dep"].values
         self.price, self.sold, self.tf = g["price"].values, g["sold"].values.astype(bool), g["tf"].values
         self.carkey = g["차키"].values
+        self.q, self.dv, self.se, self.us = g["q"].values.astype(bool), g["dv"].values, g["se"].values, g["us"].values
         self.fe = np.array([self.grade.get(a, 0.0) + self.trim.get(a, {}).get(t, 0.0) for a, t in zip(self.grades, self.trims)])
 
 
@@ -161,11 +181,16 @@ def estimate_one(G, t, opts=None, detail=False):
         base &= ~G.sold
     dage, dkm = np.abs(G.age - t["age"]), np.abs(G.km - t["km"])
     same_g = G.grades == t["등급"]
+    same_t = (G.trims == t["세부"]) & ~G.q
     dperf = np.abs(G.perf - t["perf"]) if known else np.zeros(n0)
-    for step, (name, need_g, da, dk, ds) in enumerate(STEPS, 1):
+    for step, (name, need_g, da, dk, ds, need_t) in enumerate(STEPS, 1):
+        if need_t and not t["세부"]:
+            continue                                                                 # 세부등급을 고르지 않았으면 같은 트림 단계는 건너뜀
         sel = base & (dage <= da) & (dkm <= dk)
         if need_g:
             sel &= same_g
+        if need_t:
+            sel &= same_t
         if known:
             sel &= dperf <= ds
         if sel.sum() >= MIN_COMPS:
@@ -189,9 +214,14 @@ def estimate_one(G, t, opts=None, detail=False):
     p = G.price[idx] * np.exp(lin) * tf
     cond = (1 - t["dep"]) / (1 - G.dep[idx]) if known and o["adjust"] else np.ones(len(idx))
     adj = p * cond
+    attr = np.zeros(len(idx))                                                        # 구동·인승·용도 — 둘 다 알 때 다르면
+    for key, arr in (("dv", G.dv), ("se", G.se), ("us", G.us)):
+        tv = t.get(key) or 0
+        if tv:
+            attr += (arr[idx] != 0) & (arr[idx] != tv)
     dist = (dage[idx] / SIM["age"] + dkm[idx] / SIM["km"] + SIM["grade"] * ~same_g[idx]
             + SIM["trim"] * ((t["세부"] != "") & (G.trims[idx] != "") & (G.trims[idx] != t["세부"]))
-            + SIM["perf"] * dperf[idx] + SIM["sold"] * G.sold[idx])
+            + SIM["perf"] * dperf[idx] + SIM["sold"] * G.sold[idx] + SIM["attr"] * attr)
     w = np.exp(-dist) if o["weight"] else np.ones(len(idx))
     la = np.log(adj)
     dev = np.abs(la - wquantile(la, w, 0.5))
@@ -204,7 +234,7 @@ def estimate_one(G, t, opts=None, detail=False):
     est, lo, hi = (float(np.exp(wquantile(lk, wk, q))) for q in (0.5, 0.25, 0.75))
     n = int(keep.sum())
     tight = hi / est - 1 <= A_WIDTH and 1 - lo / est <= A_WIDTH
-    grade = "A" if n >= GOOD_COMPS and step <= 2 and tight else ("B" if step <= 4 else "C")
+    grade = "A" if n >= GOOD_COMPS and step <= A_STEP and tight else ("B" if step <= B_STEP else "C")
     r = {"est": est, "lo": lo, "hi": hi, "n": n, "out": int((~keep).sum()), "step": step, "step_name": STEPS[step - 1][0], "grade": grade}
     if not known:                                                                    # 무사고 기준 값(대상 감가율 0)
         r["est0"] = float(np.exp(wquantile(np.log(p / (1 - G.dep[idx]))[keep], wk, 0.5)))
@@ -279,7 +309,9 @@ def estimate_car(groups, R, car, opts=None):
     perf = car.get("성능")
     t = {"등급": car["등급"], "세부": car.get("세부등급") or "", "age": float(age), "km": min(car["주행km"], KM_CAP) / 1e4,
          "rent": float(bool(car.get("렌트"))), "color": car.get("색상계열"), "exclude_id": car.get("exclude_id"),
-         "dep": None if perf is None else perf["감가율"] / 100, "perf": None if perf is None else perf["등급"]}
+         "dep": None if perf is None else perf["감가율"] / 100, "perf": None if perf is None else perf["등급"],
+         "dv": DRIVES.index(car["구동"]) if car.get("구동") in DRIVES else 0, "se": int(car.get("인승") or 0),
+         "us": USES.index(car["용도"]) if car.get("용도") in USES else 0}                 # 차명 글에서 읽은 구동·인승·용도(없으면 0)
     r = estimate_one(G, t, opts, detail=True)
     if r is None:
         return None
@@ -314,6 +346,7 @@ def validate(pool, folds=5):
                     t = {"등급": r.등급, "세부": r.세부, "age": r.age, "km": r.km, "rent": r.rent,
                          "color": r.색상계열 if r.색상계열 in COLORS or r.색상계열 == "흰색·진주" else None,
                          "dep": None if unknown else r.dep, "perf": None if unknown else float(r.성능등급),
+                         "dv": r.dv, "se": r.se, "us": r.us,
                          "exclude_id": r.Index, "carkey": r.차키 if isinstance(r.차키, str) else None}
                     res = estimate_one(G, t, {kk: vv for kk, vv in v.items() if kk != "unknown"})
                     rows.append({"variant": vname, "fold": f, "id": r.Index, "actual": r.price, "origin": r.origin,
@@ -367,7 +400,7 @@ def demo(pool, n=3):
         R = json.load(f)
     groups = {k: Group(g, C) for k, g in pool.groupby("key")}
     cur = pool[~pool["sold"]]
-    picks = [cur[cur["모델"] == "그랜저 IG"].iloc[100], cur[cur["모델"] == "5시리즈 (G30)"].iloc[50], cur.sample(1, random_state=3).iloc[0]]
+    picks = [cur[cur["엔카_모델"] == "그랜저 IG"].iloc[100], cur[cur["엔카_모델"] == "5시리즈 (G30)"].iloc[50], cur.sample(1, random_state=3).iloc[0]]
     for r in picks[:n]:
         for unknown in (False, True):
             car = {"제조사": r["제조사"], "모델": r["모델"], "등급": r["등급"], "세부등급": r["세부"], "등록연월": int(r["등록연월"]),
@@ -421,6 +454,17 @@ def grade_keys(grades, limit=30):
     return [k for k, _ in sorted(cnt.items(), key=lambda x: -x[1])[:limit]]
 
 
+def enc_aliases(s, limit=8):
+    """세부모델 하나에 붙은 엔카 원래 이름 [[엔카 모델그룹, 엔카 모델, 대수, 그중 '정확'이 아닌 대수, 연도 2%, 연도 98%], …] 많은 순"""
+    out = []
+    for (eg, em), x in s.groupby([s["엔카_모델그룹"].fillna(""), s["엔카_모델"].fillna("")], sort=False):
+        if not em:
+            continue
+        yr = x["등록연월"] // 100
+        out.append([eg, em, int(len(x)), int((x["q"] == 1).sum()), int(yr.quantile(0.02)), int(yr.quantile(0.98))])
+    return sorted(out, key=lambda e: -e[2])[:limit]
+
+
 def site_groups(pool):
     """파일을 나누는 모델그룹. 비어 있으면 같은 모델의 가장 흔한 모델그룹, 그것도 없으면 모델 이름"""
     grp = pool["모델그룹"].fillna("").astype(str)
@@ -467,22 +511,27 @@ def export(pool):
         ti = {v: i for i, v in enumerate(sorted(g["세부"].unique()))}
         dmg = g["손상부위"].map(lambda s: [x.strip() for x in s.split("/") if x.strip()] if isinstance(s, str) and s.strip() else [])
         di = {v: i for i, v in enumerate(sorted({x for xs in dmg for x in xs}))}             # 손상 부위 낱말 목록(파일마다)
+        enc = (g["엔카_모델"].fillna("") + "|" + g["엔카_등급"].fillna("") + "|" + g["엔카_세부등급"].fillna("").replace("(세부등급 없음)", ""))
+        ei = {v: i for i, v in enumerate(sorted(enc.unique()))}                         # 엔카 원래 이름 목록(파일마다, 기획 v2.23)
         rows = [[int(r.Index), mi[r.모델], gi[r.등급], ti[r.세부], int(r.등록연월), int(r.om) or None, _num(r.주행km), int(r.rent),
                  ci.get(r.색상계열, 0), _num(r.성능등급), _num(r.성능감가율), _num(r.price), int(r.sold), r.tk or None,
                  li[r.사고라벨 if isinstance(r.사고라벨, str) else "미상"], _num(r.글로비스_종합평가점), _num(r.글로비스_감점합),
                  int(r.ds) if r.ds else None, _num(r.첫가격), str(r.판매추정일) if r.sold else None,
-                 fi_[r.연료 if isinstance(r.연료, str) else "기타"]] + ([[di[x] for x in dmg[r.Index]]] if dmg[r.Index] else [])
+                 fi_[r.연료 if isinstance(r.연료, str) else "기타"], int(r.q), int(r.dv), int(r.se), int(r.us), ei[enc[r.Index]]]
+                + ([[di[x] for x in dmg[r.Index]]] if dmg[r.Index] else [])
                 for r in g.itertuples()]                                              # 손상이 없으면 dm 칸을 아예 두지 않는다(파일 크기)
         tf = {k: float(v) for k, v in g[g["sold"]].groupby("tk")["tf"].first().items()}   # 같은 키는 같은 배수
         minfo = [{"name": m, "seg": s["seg"].mode().iat[0], "n": len(s), "onsale": int((~s["sold"]).sum()),
                   "onsale_all": int(allon.get((mk, m), 0)),
                   "y0": int((s["등록연월"] // 100).quantile(0.02)), "y1": int((s["등록연월"] // 100).quantile(0.98)),   # 등록 연도 범위
-                  "gk": grade_keys(s["등급"])}                       # 등급명의 영문·숫자 코드(520d·E300 등) — 모델명 매칭용
+                  "gk": grade_keys(pd.concat([s["등급"], s["엔카_등급"].dropna()])),   # 등급명의 영문·숫자 코드(520d·E300·엔카 HG240 등) — 모델명 매칭용
+                  "en": enc_aliases(s)}                              # 이 이름에 붙은 엔카 원래 모델명(차명 찾기·옛 주소·'가까운 이름' 안내)
                  for m, s in ((m, g[g["모델"] == m]) for m in models)]
         head = json.dumps({"version": version, "maker": mk, "group": gname, "now_ym": now_ym, "now_date": now_date, "tf": tf,
-                           "fields": ROW_FIELDS, "models": [{k: v for k, v in m.items() if k != "gk"} for m in minfo],   # 등급 코드는 index.json에만
+                           "fields": ROW_FIELDS, "models": [{k: v for k, v in m.items() if k not in ("gk", "en")} for m in minfo],   # 등급 코드·엔카 이름은 index.json에만
                            "grades": list(gi), "trims": list(ti), "colors": colors,
-                           "labels": labels, "fuels": fuels, "damage": list(di)}, ensure_ascii=False, separators=(",", ":"))
+                           "labels": labels, "fuels": fuels, "damage": list(di), "drives": DRIVES, "uses": USES, "enc": list(ei)},
+                          ensure_ascii=False, separators=(",", ":"))
         body = ",\n".join(json.dumps(r, ensure_ascii=False, separators=(",", ":")) for r in rows)
         path = os.path.join(SITE, fname)
         with open(path, "w", encoding="utf-8", newline="\n") as f:
@@ -520,19 +569,21 @@ def parity(pool):
         yrs = year - int(r.연식 if r.연식 == r.연식 and r.연식 else r.등록연월 // 100)
         for unknown in (False, True):
             t = {"등급": r.등급, "세부": r.세부, "age": r.age, "km": r.km, "rent": r.rent, "color": color,
-                 "dep": None if unknown else r.dep, "perf": None if unknown else float(r.성능등급), "exclude_id": r.Index}
+                 "dep": None if unknown else r.dep, "perf": None if unknown else float(r.성능등급), "exclude_id": r.Index,
+                 "dv": r.dv if unknown else 0, "se": r.se if unknown else 0, "us": r.us if unknown else 0}   # 절반은 구동·인승·용도를 알 때
             res = estimate_one(groups[r.key], t)
             exp = None
             if res is not None:
                 exp = {k: res[k] for k in ["est", "lo", "hi", "n", "out", "step", "grade"] + (["est0"] if unknown else [])}
                 exp["rate"], exp["src"] = conversion_rate(R, res["est"], yrs, r.제조사, r.모델, r.연료)
             cases.append({"f": file_of[(r.제조사, r.모델)], "m": r.모델, "id": int(r.Index), "grade": r.등급, "trim": r.세부,
+                          "dv": int(t["dv"]), "se": int(t["se"]), "us": int(t["us"]),
                           "age": _num(r.age), "km": _num(r.주행km), "rent": int(r.rent), "color": color,
                           "dep": None if unknown else _num(r.성능감가율), "perf": None if unknown else int(r.성능등급),
                           "yrs": yrs, "maker": r.제조사, "fuel": r.연료 if isinstance(r.연료, str) else None, "exp": exp})
     cars = []                                                                        # 사이트 입력 형태(환산가·수리비 포함)
     cur = pool[~pool["sold"]]
-    for r in [cur[cur["모델"] == "그랜저 IG"].iloc[100], cur[cur["모델"] == "5시리즈 (G30)"].iloc[50]] + \
+    for r in [cur[cur["엔카_모델"] == "그랜저 IG"].iloc[100], cur[cur["엔카_모델"] == "5시리즈 (G30)"].iloc[50]] + \
              [x for _, x in cur.sample(6, random_state=11).iterrows()]:
         for unknown in (False, True):
             car = {"제조사": r["제조사"], "모델": r["모델"], "등급": r["등급"], "세부등급": r["세부"], "등록연월": int(r["등록연월"]),

@@ -113,11 +113,11 @@ const ev = isc.evaluate({ state: '입력', items: cond.items, mechLevel: 0 });
 ok(ev['성능등급'] >= 1 && ev['성능등급'] <= 9 && ev['사고라벨'], `성능 계산 → ${ev['사고라벨']} · ${ev['성능등급']}등급`);
 const nm = NM.create(idx);
 const res = nm.model('더 뉴 그랜저 IG 2.5 프리미엄', 2020);
-ok(res.best && res.best.model === '더 뉴 그랜저 IG' && res.conf === 'high', `차명 매칭 → ${res.best && res.best.model} (${res.conf})`);
+ok(res.best && res.best.model === '더 뉴그랜저IG' && res.conf === 'high', `차명 매칭 → ${res.best && res.best.model} (${res.conf})`);
 const eng = PE.create({ config: idx.engine, coef, rates });
 const G = eng.group(read(path.join(DATA, 'comps', res.best.file)));
 const gr = nm.grade(G, res.best.model, '더 뉴 그랜저 IG 2.5 프리미엄');
-ok(gr && gr.grade === '2.5', `등급 매칭 → ${gr && gr.grade} ${gr && gr.trim}`);
+ok(gr && gr.grade === '가솔린 2.5' && gr.trim === '프리미엄', `등급 매칭 → ${gr && gr.grade} ${gr && gr.trim}`);
 const R = eng.estimateCar(G, { '모델': res.best.model, '등급': gr.grade, '세부등급': gr.trim, '등록연월': 202003, '주행km': 60000, '색상계열': '흰색·진주',
   '렌트': false, '성능': { '감가율': ev['성능감가율'], '등급': ev['성능등급'] }, '수리비': 30, '연료': '가솔린' }, { sold: true });
 ok(R && R.price > 500 && R.price < 6000 && R.n >= 5 && ['A', 'B', 'C'].includes(R.grade),

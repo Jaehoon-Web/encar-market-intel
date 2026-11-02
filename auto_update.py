@@ -163,7 +163,8 @@ def main():
         except Exception as e:
             log("전처리 실패(무시하고 계속): %s" % e)
 
-        # 2.65) 이 PC에만 있는 추가 단계(encar_output/local_steps.json, 저장소 밖 — 예: 비공개 매칭표로 표준 모델명 붙이기) — 실패해도 계속
+        # 2.65) 이 PC에만 있는 추가 단계(encar_output/local_steps.json, 저장소 밖 — 비공개 매칭표로 차 이름 4단계(경매장 표기)를 만들어
+        #       prep/names.parquet 에 쓰고 prep.py --names 로 listings 에 붙인다, 기획 v2.23) — 실패해도 계속(그때는 지난 이름 파일·엔카 이름)
         for st in local_steps():
             try:
                 run([PY, st["script"]] + st.get("args", []), st.get("label", "로컬 단계"))
