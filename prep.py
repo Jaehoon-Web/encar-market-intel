@@ -184,6 +184,8 @@ def add_names(L):
         N = pd.read_parquet(NAMES).reindex(L.index)
         m = N["이름_모델"].notna()
         g = m & N["이름_등급"].notna()
+        g0 = N["이름_모델그룹"].notna()                      # 엔카 이름으로 둔 먼 세대도 모델그룹은 경매 이름일 수 있다(G-클래스 W465 → G클래스 아래)
+        L.loc[g0, "모델그룹"] = N.loc[g0, "이름_모델그룹"]
         L.loc[m, "모델그룹"], L.loc[m, "모델"] = N.loc[m, "이름_모델그룹"], N.loc[m, "이름_모델"]
         L.loc[g, "등급"], L.loc[g, "세부등급"] = N.loc[g, "이름_등급"], N.loc[g, "이름_세부등급"].replace("", np.nan)
         L.loc[m, "이름근거"] = N.loc[m, "이름근거"]
@@ -348,10 +350,12 @@ def main():
     L["더미가"] = price.isin(DUMMY_PRICES)
     res = L["잔존율"]; age = L["차령개월"]
     L["인수금의심"] = (price < 50) | ((res < 0.25) & (age <= 48)) | ((res < 0.15) & (age <= 72)) | (price >= 90000)
-    L["주행의심"] = ((L["주행km"] < 100) & (age >= 12)) | ((L["연평균주행"] > 50000) & (age >= 12)) | (L["주행km"] >= 600000)
+    L["주행의심"] = (((L["주행km"] < 100) & (age >= 12)) | ((L["주행km"] < 1000) & (age >= 60))     # 5년 넘었는데 1,000km 미만(2026-11-02 추가)
+                   | ((L["연평균주행"] > 50000) & (age >= 12)) | (L["주행km"] >= 600000))
     L["핵심결측"] = L["제조사"].isna() | L["모델"].isna() | L["등록연월"].isna()
+    L["연식의심"] = (L["연식"] - L["등록연월"] // 100).abs() > 2                     # 연식과 최초등록 연도가 2년 넘게 다름(입력 오류)
     L["중복"] = L["중복_대표ID"].notna()
-    base_ok = ~(L["더미가"] | L["인수금의심"] | L["주행의심"] | L["핵심결측"] | L["중복"]) & (price > 0)
+    base_ok = ~(L["더미가"] | L["인수금의심"] | L["주행의심"] | L["핵심결측"] | L["연식의심"] | L["중복"]) & (price > 0)
     # 가격이상: 같은 모델·차령 12개월·주행 2만km 그룹(8대 이상)에서 로그 가격이 중앙값 ± 4.5×MAD 밖
     g = L[base_ok & (L["상태"] == "판매중")].copy()
     g["lp"] = np.log(g["현재가"])
@@ -364,6 +368,13 @@ def main():
     L.loc[out_[out_].index, "가격이상"] = True
     cutoff = (datetime.date.fromisoformat(snap) - datetime.timedelta(days=92)).isoformat()   # 최근 3개월
     recent_sold = (L["상태"] == "판매완료(추정)") & (L["판매추정일"].fillna("").astype(str) >= cutoff)
+    # 최근 판매 매물(비교 매물로 쓰임)도 같은 기준: 마지막 호가가 판매중 같은 칸(모델·차령 12개월·주행 2만km, 8대 이상)의 중앙값 ± 4.5×MAD 밖(2026-11-02)
+    ref = pd.DataFrame({"모델": g["모델"], "ab": g["ab"], "kb": g["kb"], "med": med, "n": n, "mad": mad}).drop_duplicates(["모델", "ab", "kb"])
+    sd = L.loc[base_ok & recent_sold & (L["마지막가"] > 0), ["모델", "차령개월", "주행km", "마지막가"]].copy()
+    sd["ab"], sd["kb"] = sd["차령개월"] // 12, (sd["주행km"] // 20000).clip(upper=12)
+    sd = sd.reset_index().merge(ref, on=["모델", "ab", "kb"], how="inner").set_index("매물ID")
+    out_s = (sd["n"] >= 8) & (sd["mad"] > 0) & ((np.log(sd["마지막가"]) - sd["med"]).abs() > 4.5 * sd["mad"])
+    L.loc[out_s[out_s].index, "가격이상"] = True
     L["비교사용"] = base_ok & ~L["가격이상"] & ((L["상태"] == "판매중") | recent_sold)
 
     # ---------- 목록 잔존(상세 없음) 매물 추가 ----------
@@ -400,7 +411,8 @@ def main():
     lines = [f"전처리 리포트 — 크롤일 {snap} · 목록 관측일 {obs_date} · 실행 {datetime.datetime.now():%Y-%m-%d %H:%M}",
              f"전체 {len(L):,}대 · 상태: " + ", ".join(f"{k} {v:,}" for k, v in L["상태"].value_counts().items()),
              f"판매중 {len(cur):,}대 → 비교사용 {int(cur['비교사용'].sum()):,}대 · 최근 3개월 판매완료 비교사용 {int((L['비교사용'] & (L['상태']=='판매완료(추정)')).sum()):,}대",
-             "판매중 플래그: " + ", ".join(f"{c} {int(cur[c].sum()):,}" for c in ["더미가", "인수금의심", "주행의심", "핵심결측", "중복", "가격이상"]),
+             "판매중 플래그: " + ", ".join(f"{c} {int(cur[c].sum()):,}" for c in ["더미가", "인수금의심", "주행의심", "핵심결측", "연식의심", "중복", "가격이상"])
+             + f" · 최근 판매 가격이상 {int((L['가격이상'] & (L['상태'] == '판매완료(추정)')).sum()):,}",
              "판매중 사고라벨: " + ", ".join(f"{k} {v:,}" for k, v in cur["사고라벨"].value_counts().items()),
              "판매중 결함단계: " + ", ".join(f"{k} {v:,}" for k, v in cur["결함단계"].value_counts(dropna=False).items()),
              "판매중 성능등급(자체): " + ", ".join(f"{int(k)}등급 {v:,}" for k, v in cur["성능등급"].value_counts().sort_index(ascending=False).items()) if "성능등급" in cur else "성능등급 없음",

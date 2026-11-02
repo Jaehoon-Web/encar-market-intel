@@ -34,7 +34,7 @@ OUT_JSON = os.path.join(DATA, "pulse.json")
 
 WEEK_DAYS = (5, 16)                  # 주간 비교가 되는 목록 간격(일) — market_index.py SPEED_DAYS 와 같음
 NO_DETAIL = "목록 잔존(판매 추정)"     # 상세 페이지가 없는 목록 매물 — 같은 매물 가격 변화에서 뺀다
-PX_FLAGS = ["더미가", "인수금의심", "가격이상", "핵심결측", "중복"]   # 가격 통계에서 빼는 매물 — model_report.py FLAGS 와 같음
+PX_FLAGS = ["더미가", "인수금의심", "가격이상", "핵심결측", "연식의심", "중복"]   # 가격 통계에서 빼는 매물 — model_report.py FLAGS 와 같음
 PX_RATIO = (0.5, 2.0)                # 한 주 가격 이번 ÷ 지난이 이 밖이면 호가 오타·자리값으로 보고 뺀다(n_bad)
 PX_GAP_DIFF = 2                      # 같은 매물 가격 변화의 지난주 값: 이번·지난 구간 길이 차이가 2일 이하일 때만
 MOVER_ON, MOVER_N = 100, 5           # 주목할 모델: 판매중 100대 이상, 구분마다 5개
