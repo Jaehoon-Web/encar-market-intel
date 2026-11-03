@@ -27,6 +27,14 @@
     ['maker', /제조사|메이커|브랜드|제작사/], ['grade', /등급|트림|사양/], ['fuel', /연료|유종/], ['rent', /렌트|용도/],
     ['name', /차명|차종|모델|차량/]];
 
+  // ───── 붙여넣기 양식(사용자 요청 11-03) — 복사하면 엑셀 빈 시트에 그대로 열로 들어간다 ─────
+  var FORM = [['차량번호', '선택', '12가3456 — 하·허·호면 렌트로 봄'], ['차명', '꼭', '더 뉴 그랜저 IG 2.5 프리미엄 — 모델·등급까지 쓸수록 정확'],
+    ['최초등록', '꼭(또는 연식)', '2019-03 · 2019.03 · 19년 3월 — 월을 모르면 연식(2019)만 써도 6월로 계산'], ['주행거리', '꼭', '45000 · 45,000km · 4.5만'],
+    ['색상', '선택', '흰색 · 검정 · 회색 · 청색 · 펄'], ['성능 상태', '선택', '무사고 · 좌프론트휀더 X, 후드 W — 비우면 상태 미상'], ['수리비', '선택', '만원(50) 또는 원(500,000)']];
+  var FORM_ROWS = [['12가3456', '더 뉴 그랜저 IG 2.5 프리미엄', '2019-03', '45000', '흰색', '무사고', ''],
+    ['34나5678', '쏘렌토 MQ4 2.2 디젤 시그니처', '2021-07', '32000', '검정', '좌프론트휀더 X', '50']];
+  function formTSV() { return [FORM.map(function (f) { return f[0]; })].concat(FORM_ROWS).map(function (r) { return r.join('\t'); }).join('\r\n'); }
+
   // ───── 칸 읽기 ─────
   function parseTSV(text) {                                  // 엑셀 복사 = 탭 구분. 줄바꿈이 든 칸은 "…"로 감싸 온다
     var rows = [], row = [], cell = '', q = false, i, ch;
@@ -52,7 +60,9 @@
   function kmOf(v) {                                         // "38,200" · "3.8만" · "61000km" → 38200
     var s = String(v || '').replace(/[,\s]|km|㎞|키로(미터)?/gi, '');
     if (!s) return null;
-    var m = s.match(/^(\d+(?:\.\d+)?)만$/), x = m ? parseFloat(m[1]) * 1e4 : (/^\d+(\.\d+)?$/.test(s) ? Number(s) : NaN);
+    var m = s.match(/^(\d+(?:\.\d+)?)만$/), m2 = s.match(/^(\d+(?:\.\d+)?)만(\d+)(천)?$/), m3 = s.match(/^(\d+)천$/);
+    var x = m ? parseFloat(m[1]) * 1e4 : m2 ? parseFloat(m2[1]) * 1e4 + +m2[2] * (m2[3] ? 1000 : 1) : m3 ? +m3[1] * 1000 :
+      (/^\d+(\.\d+)?$/.test(s) ? Number(s) : NaN);   // 4만5천 · 4만5000 · 45천
     return isFinite(x) && x >= 0 && x < 2e6 ? Math.round(x) : null;
   }
   function priceOf(v) {                                      // 차 값 → 만원: "1,850" · "1850만" · "1억 2,300" · "18,500,000"(원, 10만 이상이면 원으로 봄)
@@ -85,6 +95,7 @@
     }
     if ((m = s.match(/^((?:19|20)\d{2})\s*[-./년]\s*(\d{1,2})/)) || (m = s.match(/^((?:19|20)\d{2})(\d{2})(\d{2})?$/))) return ok(+m[1], +m[2]);
     if ((m = s.match(/^(\d{2})\s*[-./]\s*(\d{1,2})(\s*[-./]\s*\d{1,2})?$/))) return ok((+m[1] > 50 ? 1900 : 2000) + +m[1], +m[2]);
+    if ((m = s.match(/^(\d{2})\s*년\s*(\d{1,2})\s*월?/))) return ok((+m[1] > 50 ? 1900 : 2000) + +m[1], +m[2]);   // 19년 3월
     return null;
   }
   function colorOf(v) {                                      // 산정 엔진의 색상 계열로
@@ -99,6 +110,22 @@
   function rentOf(plate, cell) {                             // 번호판 하·허·호 = 렌트
     var m = String(plate || '').replace(/\s/g, '').match(/^\d{2,3}([가-힣])\d{4}$/);
     return !!(m && '하허호'.indexOf(m[1]) >= 0) || /렌트|렌터|대여|^(Y|YES|예|O|1|TRUE)$/i.test(String(cell || '').trim());
+  }
+  // 한 칸에 이어 쓴 글('그랜저 IG 2.5 프리미엄 2019년 3월 45,000km')에서 최초등록·연식·주행을 꺼낸다 — 엑셀 열로 나뉘지 않은 붙여넣기용.
+  // 주행: 단위(km·키로·만)가 붙은 숫자, 또는 천 단위 쉼표 숫자. 연식: 따로 떨어진 19xx·20xx(여럿이면 마지막 — 푸조 2008 같은 모델 이름 보호), 'YY년식'.
+  function pullFromText(text) {
+    var t = ' ' + String(text || '') + ' ', out = { reg: null, km: null };
+    var km = /(?:^|[\s,/(])(\d+(?:\.\d+)?\s*만\s*(?:\d+\s*천?)?\s*(?:km|㎞|키로(?:미터)?)?|\d{1,3}(?:,\d{3})+\s*(?:km|㎞|키로(?:미터)?)?|\d{3,7}\s*(?:km|㎞|키로(?:미터)?)|\d{5,7})(?=$|[\s,/)])/i.exec(t);   // 단위 없는 숫자는 5자리 이상만(4자리는 모델 이름일 수 있음)
+    if (km && kmOf(km[1]) != null) { out.km = kmOf(km[1]); t = t.replace(km[1], ' '); }
+    var reg = /(?:^|[\s,/(])((?:19|20)\d{2}\s*(?:[-./]\s*|년\s*)\d{1,2}(?:\s*월|\s*[-./]\s*\d{1,2})?|\d{2}\s*년\s*\d{1,2}\s*월)(?=$|[\s,/)])/.exec(t);
+    if (reg && regOf(reg[1].replace(/\s+/g, ''))) { out.reg = regOf(reg[1].replace(/\s+/g, '')); t = t.replace(reg[1], ' '); }
+    else {
+      var re = /(?:^|[\s,/(])((?:19|20)\d{2}\s*(?:년식|년형|년)?|\d{2}\s*(?:년식|년형))(?=$|[\s,/)])/g, m, last = null;
+      while ((m = re.exec(t))) last = m;
+      if (last && yearOf(last[1])) { out.reg = { y: yearOf(last[1]), m: 6, guess: true }; t = t.slice(0, last.index) + t.slice(last.index).replace(last[1], ' '); }
+    }
+    out.text = t.replace(/[,/]\s*(?=[,/]|$)/g, ' ').replace(/\s+/g, ' ').trim();
+    return out;
   }
   function keyOf(t) { return String(t || '').toUpperCase().replace(/[^0-9A-Z가-힣.]/g, ''); }   // 같은 표기 = 띄어쓰기·기호만 다른 것
   function load(k) { try { return JSON.parse(localStorage.getItem(STORE + k) || 'null'); } catch (e) { return null; } }
@@ -141,7 +168,7 @@
 
     // ───── 열 알아보기 ─────
     function headRole(h) {                                   // 역할 · ''(쓰지 않는 열) · null(모름 → 값으로 알아본다)
-      if (!h) return null;
+      if (!h || h.length > 20 || /\d{3,}|\d+\s*(년|만)/.test(h)) return null;   // 숫자가 든 긴 글은 값(머리글 아님)
       if (ACTUAL_HEAD.test(h)) return 'actual';
       if (SKIP_HEAD.test(h)) return '';
       for (var i = 0; i < HEAD.length; i++) if (HEAD[i][1].test(h)) return HEAD[i][0];
@@ -169,6 +196,7 @@
         if (role) used[role] = true;
         roles.push(role);
       }
+      if (nc === 1 && !roles[0]) roles[0] = 'name';            // 엑셀 열로 나뉘지 않은 붙여넣기 — 한 줄 글에서 차명·연식·주행을 읽는다(makeRow)
       return { header: header, roles: roles };
     }
 
@@ -179,10 +207,16 @@
       function one(k) { return by[k] ? by[k][0] : ''; }
       r.plate = one('plate');
       r.text = TEXT_ROLES.map(function (k) { return (by[k] || []).join(' '); }).join(' ').replace(/\s+/g, ' ').trim();
-      r.key = keyOf(r.text);
       var y = yearOf(one('year')) || yearOf(one('reg'));
       r.reg = regOf(one('reg')) || (y ? { y: y, m: 6, guess: true } : null);   // 연식만 있으면 6월로
       r.km = kmOf(one('km'));
+      if (!r.reg || r.km == null) {                         // 연식·주행 열이 없거나 비었으면 차명 글에서 꺼낸다(꺼낸 숫자는 차명에서 뺀다)
+        var pf = pullFromText(r.text);
+        if (!r.reg && pf.reg) { r.reg = pf.reg; r.fromText = true; }
+        if (r.km == null && pf.km != null) { r.km = pf.km; r.fromText = true; }
+        if (r.fromText) r.text = pf.text;
+      }
+      r.key = keyOf(r.text);
       r.color = colorOf(one('color'));
       r.cost = costOf(one('cost'));
       r.rent = rentOf(r.plate, one('rent'));
@@ -339,6 +373,9 @@
         info('엑셀에서 머리글 행째로 복사해 붙여넣으세요(한 번에 ' + LIMIT + '대까지). 꼭 있어야 하는 열: 차명(모델·등급), 최초등록 또는 연식, 주행거리. ' +
           '있으면 더 정확해지는 열: 색상, 성능 상태(예: 좌프론트휀더 X, 본넷 W — 빈칸이면 상태 미상), 수리비(만원), 차량번호(하·허·호는 렌트로 봅니다). ' +
           '붙여넣은 글과 고친 표기는 이 브라우저에만 남습니다.') +
+        '<p class="v2-bform"><b>필요한 열</b> 차명 · 최초등록(또는 연식) · 주행거리 <span>있으면 더 정확: 색상 · 성능 상태 · 수리비 · 차량번호</span></p>' +
+        '<div class="v2-actions v2-bformbtn"><button type="button" class="v2-btn" data-b="formCopy">양식 복사</button><button type="button" class="v2-btn" data-b="formXlsx">양식 엑셀 ↓</button>' +
+        '<span class="v2-dim" id="bFormMsg">양식을 엑셀에 붙여 채운 뒤, 머리글째로 복사해 아래에 붙여 넣으세요</span></div>' +
         '<textarea class="v2-in v2-paste" id="bPaste" spellcheck="false" wrap="off" aria-label="차량 목록 붙여넣기" placeholder="차량번호&#9;차명&#9;최초등록&#9;주행거리&#9;색상&#9;성능 상태&#10;12가3456&#9;투싼 (NX4) 1.6T 인스퍼레이션&#9;2022-03&#9;38,200&#9;흰색&#9;좌프론트휀더 X"></textarea>' +
         '<div class="v2-actions"><button type="button" class="v2-btn primary" data-b="run">산정하기</button>' +
         '<button type="button" class="v2-btn" data-b="sample">예시 목록 넣기</button><button type="button" class="v2-btn" data-b="clear">지우기</button></div></div>' +
@@ -382,11 +419,13 @@
       h += '</tr></thead><tbody>' + data.map(function (r) {
         return '<tr>' + r.map(function (v, c) { return '<td class="' + (T.roles[c] ? '' : 'v2-dim') + '">' + esc(v) + '</td>'; }).join('') + '</tr>';
       }).join('') + '</tbody></table></div>';
-      var miss = [];
+      var miss = [], fromText = rows.filter(function (r) { return r.fromText; }).length;
       if (!T.roles.some(function (r) { return r === 'name' || r === 'grade'; })) miss.push('차명');
-      if (T.roles.indexOf('reg') < 0 && T.roles.indexOf('year') < 0) miss.push('최초등록 또는 연식');
-      if (T.roles.indexOf('km') < 0) miss.push('주행거리');
-      if (miss.length) h += '<p class="v2-help v2-bad">꼭 필요한 열이 없습니다: ' + miss.join(', ') + ' — 위에서 열의 쓰임을 골라 주세요.</p>';
+      if (T.roles.indexOf('reg') < 0 && T.roles.indexOf('year') < 0 && !fromText) miss.push('최초등록 또는 연식');
+      if (T.roles.indexOf('km') < 0 && !fromText) miss.push('주행거리');
+      if (nc === 1) h += '<p class="v2-help v2-warnt2">한 칸으로 붙여졌습니다(엑셀 열로 나뉘지 않음) — 한 줄 글에서 차명 · 연식 · 주행을 읽어 계산했습니다. 더 정확하게 하려면 <b>양식 복사</b>로 열을 나눠 주세요.</p>';
+      else if (fromText) h += '<p class="v2-help v2-warnt2">연식·주행 열이 없거나 빈 차 ' + fromText + '대는 차명 글에서 읽었습니다.</p>';
+      if (miss.length) h += '<p class="v2-help v2-bad">꼭 필요한 값을 찾지 못했습니다: ' + miss.join(', ') + ' — 위에서 열의 쓰임을 고르거나, <b>양식 복사</b>로 받은 양식에 맞춰 붙여 넣으세요.</p>';
       if (T.over) h += '<p class="v2-help v2-bad">' + LIMIT + '대까지만 계산합니다. 나머지 ' + T.over + '대는 나눠서 붙여 주세요.</p>';
       $('bCols').innerHTML = h + '</div>';
     }
@@ -658,6 +697,15 @@
         ctx.tile('추정 시세 합계', man(sumP), '만원', eok(sumP) + '만 · 수리비 반영' + offNote) +
         ctx.tile('환산가 합계', man(sumC), '만원', eok(sumC) + '만' + offNote) +
         ctx.tile('확인할 차', String(chk + skip), '대', '신뢰도 C ' + cN + '대 · 차명 확인 ' + chk + '대') + '</div>';
+      if (skip) {                                            // 계산 못 한 차 — 이유별 대수와 할 일(사용자 요청 11-03: '시세가 안 나온다')
+        var why = {}, HOW = { '차명 못 찾음': '표의 빨간 칸에서 "다른 모델 찾기"로 고르세요', '차명 없음': '차명 열을 확인하세요', '등급 없음': '표에서 등급을 고르세요',
+          '연식·최초등록 없음': '최초등록(2019-03) 또는 연식(2019) 열을 넣으세요', '주행 없음': '주행거리(45000) 열을 넣으세요',
+          '못 읽은 성능 표기': '위 ③에서 표기를 고치거나 "무시하고 계산"을 누르세요', '비교 매물 5대 미만': '매물이 적은 차라 계산하지 않았습니다(한 대 산정에서 조건을 넓혀 보세요)' };
+        rows.forEach(function (r) { if (!r.R) r.why.forEach(function (w) { why[w] = (why[w] || 0) + 1; }); });
+        h += '<div class="card v2-bwhy"><div class="card-title">계산 못 한 차 ' + skip + '대</div><ul>' + Object.keys(why).sort(function (a, b) { return why[b] - why[a]; }).map(function (w) {
+          return '<li><b>' + esc(w) + ' ' + why[w] + '대</b> — ' + esc(HOW[w] || '표에서 확인하세요') + '</li>';
+        }).join('') + '</ul><p class="v2-note">붙여 넣는 모양을 모르겠으면 <button type="button" class="v2-btn" data-b="formCopy">양식 복사</button> 로 받아 채워 보세요.</p></div>';
+      }
       var vs = verify();
       if (vs) h += verifyCard(vs);
       h += sumCard(done);
@@ -670,6 +718,26 @@
       $('bOut').innerHTML = h;
     }
     function render() { renderCols(); renderFix(); renderOut(); }
+
+    function formCopy(b) {                                   // 양식 복사 → 엑셀 빈 시트 A1에 붙이면 열로 나뉜다
+      var tsv = formTSV(), msg = $('bFormMsg');
+      var done = function () {
+        if (msg) msg.textContent = '복사했습니다 — 엑셀 빈 시트 A1에 붙여 넣고(Ctrl+V) 차량을 채운 뒤, 머리글째로 복사해 아래에 붙여 넣으세요';
+        var t = b.textContent; b.textContent = '복사됨'; setTimeout(function () { b.textContent = t; }, 1600);
+      };
+      var fallback = function () {                           // 클립보드 권한이 없을 때
+        var ta = document.createElement('textarea'); ta.value = tsv; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); done(); } catch (e) { if (msg) msg.textContent = '복사하지 못했습니다 — 양식 엑셀 ↓ 로 받으세요'; }
+        document.body.removeChild(ta);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(tsv).then(done, fallback); else fallback();
+    }
+    function formXlsx() {                                    // 양식 엑셀: 목록(머리글 + 예시 2대) · 작성 방법
+      XlsxWriter.download('묶음산정_양식.xlsx', [
+        { name: '목록', rows: [FORM.map(function (f) { return f[0]; })].concat(FORM_ROWS), header: true, widths: [12, 34, 12, 12, 10, 26, 10] },
+        { name: '작성 방법', rows: [['열', '필요', '쓰는 법 · 예']].concat(FORM).concat([[], ['붙여 넣기', '', '목록 시트에서 머리글 행부터 마지막 차까지 골라 복사(Ctrl+C) → 묶음 산정 칸에 붙여 넣기(Ctrl+V) → 산정하기'],
+          ['한 번에', '', LIMIT + '대까지'], ['예시 2대', '', '지우고 쓰세요']]), header: true, widths: [12, 14, 70] }]);
+    }
 
     // ───── 엑셀 ─────
     function exportAll() {
@@ -787,6 +855,8 @@
       var b = e.target.closest('button[data-b]');
       if (!b) return;
       var a = b.getAttribute('data-b'), k = +b.getAttribute('data-k');
+      if (a === 'formCopy') { formCopy(b); return; }
+      if (a === 'formXlsx') { formXlsx(); return; }
       if (a === 'sumSort') { sumSort = b.getAttribute('data-v'); renderOut(); return; }
       if (a === 'sumAll') { sumAll = !sumAll; renderOut(); return; }
       if (a === 'run') { run(); if (window.CT) CT.ev('batch', 'run', rows.length); }   // 이용 통계: 사용자가 누른 산정만(예시·저장본 복원은 안 셈) · 대수
@@ -867,7 +937,7 @@
     return { show: show, addCar: addCar, hasCar: hasCar, parseTSV: parseTSV, detect: detect };
   }
 
-  var api = { create: create, parseTSV: parseTSV, kmOf: kmOf, costOf: costOf, priceOf: priceOf, regOf: regOf, yearOf: yearOf, colorOf: colorOf, rentOf: rentOf };
+  var api = { create: create, parseTSV: parseTSV, pullFromText: pullFromText, formTSV: formTSV, kmOf: kmOf, costOf: costOf, priceOf: priceOf, regOf: regOf, yearOf: yearOf, colorOf: colorOf, rentOf: rentOf };
   root.V2Batch = api;
   if (typeof module === 'object' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

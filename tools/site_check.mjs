@@ -172,6 +172,12 @@ RS.apply(rates, null);
 ok(eng.conversionRate(1500, 4, '현대', '더 뉴 그랜저 IG', '가솔린').rate === before.rate, '팀 수정을 지우면 초기값으로');
 const B = require(path.join(V2, 'batch.js'));
 ok(B.kmOf('3.8만') === 38000 && B.regOf('22.03').y === 2022 && B.costOf('150,000') === 15 && B.colorOf('펄화이트') === '흰색·진주', '묶음 산정 값 읽기(주행·등록·수리비·색상)');
+ok(B.kmOf('4만5천') === 45000 && B.regOf('19년 3월').y === 2019 && B.regOf('19년 3월').m === 3, '묶음 산정 값 읽기(4만5천 · 19년 3월)');
+const pf = [B.pullFromText('그랜저 IG 2.5 프리미엄 2019년 45000km'), B.pullFromText('푸조 2008 1.2 GT라인 2021 30000km'), B.pullFromText('아반떼 CN7 19년 3월 4만5천'), B.pullFromText('그랜저 2019 45000')];
+ok(pf[0].reg.y === 2019 && pf[0].km === 45000 && pf[0].text === '그랜저 IG 2.5 프리미엄' && pf[1].reg.y === 2021 && pf[1].text === '푸조 2008 1.2 GT라인' &&
+  pf[2].reg.m === 3 && pf[2].km === 45000 && pf[3].km === 45000, '한 칸에 이어 쓴 글에서 연식·주행 꺼내기(모델 이름 속 숫자는 그대로)', JSON.stringify(pf));
+const ft = B.formTSV().split(/\r?\n/);
+ok(ft.length === 3 && ft[0].split('\t').length === 7 && ft[0].startsWith('차량번호\t차명\t최초등록\t주행거리'), '묶음 산정 양식(머리글 7열 + 예시 2대, 탭 구분)', ft[0]);
 const t = B.parseTSV('차명\t주행\n"그랜저\nIG"\t3.8만');
 ok(t.length === 2 && t[1][0] === '그랜저 IG', '엑셀 붙여넣기(줄바꿈 든 칸)');
 const xl = XW.build([{ name: '시험', rows: [['a', 'b'], [1, { v: 1234, money: true }]], header: true }]);

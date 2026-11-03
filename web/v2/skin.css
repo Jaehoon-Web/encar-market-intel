@@ -414,3 +414,14 @@ header .adm-link:hover, header .adm-link.on { color: var(--tx-1); background: #f
 .adm-errs { margin-top: 14px; }
 .adm-msgc { max-width: 520px; word-break: break-all; color: var(--tx-2); }
 
+/* 묶음 산정 — 붙여넣기 양식 · 계산 못 한 차(사용자 요청 11-03) */
+.v2-bform { margin: 4px 0 8px; font-size: 14px; color: var(--tx-2); line-height: 1.6; }
+.v2-bform b { color: var(--tx-1); margin-right: 6px; }
+.v2-bform span { color: var(--tx-3); margin-left: 10px; font-size: 13px; }
+.v2-bformbtn { margin: 0 0 10px !important; align-items: center; }
+.v2-bformbtn .v2-dim { font-size: 12px; color: var(--tx-3); }
+.v2-warnt2 { color: #9a3412 !important; background: #fff7ed; border-radius: 10px; padding: 8px 12px; }
+.v2-bwhy { border: 1px solid #fed7aa; background: #fffaf5; }
+.v2-bwhy ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; font-size: 14px; color: var(--tx-2); }
+.v2-bwhy b { color: #c2410c; }
+
