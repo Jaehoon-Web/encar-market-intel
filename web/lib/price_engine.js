@@ -280,7 +280,20 @@
       return order.map(function (t) { return cnt[t] > 1 ? t + ' ×' + cnt[t] : t; });
     }
 
-    return { group: group, prepare: prepare, estimate: estimate, estimateCar: estimateCar, conversionRate: conversionRate, damage: damage };
+    // 차 한 대의 보정 위치(로그) — 같은 세부모델 두 차의 값 차이를 항목별로 나눌 때 쓴다(묶음 산정 비교, 기획 v2.29 Q180).
+    // estimate 와 같은 계수(차령·주행·렌트·색상 · 등급/세부등급 고정효과 · 성능 감가율)만 읽고, 시세 계산에는 쓰지 않는다.
+    // 색상·성능을 모르면 그 항목은 비교하지 않는다(estimate 도 그 보정을 하지 않으므로).
+    function logParts(grp, car) {
+      var G = prepare(grp, car['모델']);
+      if (!G) return null;
+      var ym = car['기준연월'] || grp.F.now_ym, reg = car['등록연월'], perf = car['성능'] || null, b = G.cf.b, col = car['색상계열'] || null, colL = 0;
+      var age = Math.floor(ym / 100) * 12 + ym % 100 - (Math.floor(reg / 100) * 12 + reg % 100);
+      if (col != null) COLORS.forEach(function (c, j) { if (col === c) colL += b[3 + j]; });
+      return { '차령': age * b[0], '주행': Math.min(car['주행km'], KM_CAP) / 1e4 * b[1], '렌트': (car['렌트'] ? 1 : 0) * b[2], '색상': colL, colorKnown: col != null,
+        '등급': feOf(G.cf, car['등급'], car['세부등급'] || ''), '성능': perf ? Math.log(1 - perf['감가율'] / 100) : 0, condKnown: !!perf };
+    }
+
+    return { group: group, prepare: prepare, estimate: estimate, estimateCar: estimateCar, conversionRate: conversionRate, damage: damage, logParts: logParts };
   }
 
   var api = { create: create };

@@ -164,6 +164,12 @@ const R = eng.estimateCar(G, { '모델': res.best.model, '등급': gr.grade, '�
   '렌트': false, '성능': { '감가율': ev['성능감가율'], '등급': ev['성능등급'] }, '수리비': 30, '연료': '가솔린' }, { sold: true });
 ok(R && R.price > 500 && R.price < 6000 && R.n >= 5 && ['A', 'B', 'C'].includes(R.grade),
   `시세 산정 → ${R && Math.round(R.price)}만(${R && R.grade}, 비교 ${R && R.n}대), 환산 ${R && R.rate}% ${R && R.rateSource}`);
+{                                                            // 묶음 비교의 보정 차이(기획 v2.29): 같은 계수로 — 오래되고 많이 탄 차는 차령·주행이 음수
+  const base = { '모델': res.best.model, '등급': gr.grade, '세부등급': gr.trim, '등록연월': 202003, '주행km': 60000, '색상계열': '흰색·진주', '렌트': false };
+  const a = eng.logParts(G, base), b = eng.logParts(G, Object.assign({}, base, { '등록연월': 201903, '주행km': 120000 }));
+  ok(a && b && b['차령'] < a['차령'] && b['주행'] < a['주행'] && a.colorKnown && !a.condKnown, '보정 위치(logParts): 1년 더 오래되고 6만km 더 탄 차는 차령·주행이 음수 쪽',
+    JSON.stringify([a, b]));
+}
 const before = eng.conversionRate(1500, 4, '현대', '더 뉴 그랜저 IG', '가솔린');
 RS.apply(rates, { rev: 1, cells: rates.rates.map(r => r.map(() => null)), models: [{ '제조사': '현대', '모델': '더 뉴 그랜저 IG', '연료': '', '비율': 33.3 }] });
 const after = eng.conversionRate(1500, 4, '현대', '더 뉴 그랜저 IG', '가솔린');
@@ -181,7 +187,7 @@ const pf = [B.pullFromText('그랜저 IG 2.5 프리미엄 2019년 45000km'), B.p
 ok(pf[0].reg.y === 2019 && pf[0].km === 45000 && pf[0].text === '그랜저 IG 2.5 프리미엄' && pf[1].reg.y === 2021 && pf[1].text === '푸조 2008 1.2 GT라인' &&
   pf[2].reg.m === 3 && pf[2].km === 45000 && pf[3].km === 45000, '한 칸에 이어 쓴 글에서 연식·주행 꺼내기(모델 이름 속 숫자는 그대로)', JSON.stringify(pf));
 const ft = B.formTSV().split(/\r?\n/);
-ok(ft.length === 3 && ft[0].split('\t').length === 7 && ft[0].startsWith('차량번호\t차명\t최초등록\t주행거리'), '묶음 산정 양식(머리글 7열 + 예시 2대, 탭 구분)', ft[0]);
+ok(ft.length === 3 && ft[0].split('\t').length === 8 && ft[0].startsWith('차량번호\t차명\t최초등록\t주행거리') && ft[0].endsWith('판매 가격'), '묶음 산정 양식(머리글 8열 — 판매 가격 포함 + 예시 2대, 탭 구분)', ft[0]);
 const t = B.parseTSV('차명\t주행\n"그랜저\nIG"\t3.8만');
 ok(t.length === 2 && t[1][0] === '그랜저 IG', '엑셀 붙여넣기(줄바꿈 든 칸)');
 const xl = XW.build([{ name: '시험', rows: [['a', 'b'], [1, { v: 1234, money: true }]], header: true }]);
