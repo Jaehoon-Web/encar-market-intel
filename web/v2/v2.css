@@ -266,7 +266,7 @@ select.filter-select.v2-need, .v2-in.v2-need { border-color: var(--accent); box-
 /* 시장 시황(5.2) — 계열 색(검증한 범주 팔레트 1~3번 + 시황은 먹색). 같은 대상은 차트가 달라도 같은 색 */
 .v2-mk { --s-price: #2a78d6; --s-speed: #eb6834; --s-stock: #1baf7a; --s-cond: var(--tx-1); --s-new: #2a78d6; --s-sold: #eb6834; }
 .v2-mfilter { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
-.v2-board { min-width: 720px; }
+table.v2-board { min-width: 720px; }   /* 시황판 표만(기록부 부위 묶음도 .v2-board 라 휴대폰에서 넘치지 않게) */
 .v2-board th, .v2-board td { padding: 8px 10px; vertical-align: top; }
 .v2-board td b { font-variant-numeric: tabular-nums; color: var(--tx-1); }
 .v2-board td small { display: block; font-size: 11px; font-weight: 500; color: var(--tx-3); line-height: 1.4; }

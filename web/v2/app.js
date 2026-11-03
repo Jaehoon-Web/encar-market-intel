@@ -24,7 +24,7 @@
   var PV = null;                                             // 마켓 펄스(pulse.js)
   var VIEW = { sort: 'sim', all: false, mode: 'one', condWarn: [], condOut: [], exKeep: {}, allGrades: false, nameText: '', nameMsg: '', nameCands: [], recentOpen: false,
     posx: 'km', hl: null,                                    // posx: 내 차 위치 그림 가로축(km·age) · hl: 그림에서 누른 비교 매물 ID      // mode: one(한 대 산정) · model(모델 요약) · batch(묶음 산정) · rates(⚙ 환산 비율)
-    open: {}, info: {}, carOpen: false, moreOpen: null, shown: null, shownKey: '', countId: 0, riseKey: '' };   // 화면 정리(기획 v2.26·v2.27): open = 처음 접힌 섹션을 펼침 · info = 섹션 i 설명 펼침 · carOpen = 차 고르는 5칸 펼침 · moreOpen = 더 보기 · shown = 추정 시세 숫자 올라가기 · riseKey = 처음 그릴 때만 떠오르기
+    open: {}, info: {}, carOpen: false, moreOpen: null, recOpen: null, shown: null, shownKey: '', countId: 0, riseKey: '' };   // 화면 정리(기획 v2.26·v2.27): open = 처음 접힌 섹션을 펼침 · info = 섹션 i 설명 펼침 · carOpen = 차 고르는 5칸 펼침 · moreOpen = 더 보기 · recOpen = 기록부 입력 창 · shown = 추정 시세 숫자 올라가기 · riseKey = 처음 그릴 때만 떠오르기
   var TIP = {                                                // 용어 설명(결과 카드·비교 매물 표의 ? — 마우스를 올리거나 누르면)
     est: '비슷한 온라인 매물(판매중 + 최근 3개월 판매)의 호가를 이 차 조건으로 맞춘 값(보정 후) 가운데 값입니다. 비슷한 매물일수록 크게 반영합니다. ' +
       '온라인 소매 호가 기준이라 실제 거래가와는 다릅니다. 범위는 보정 후 값의 가운데 50%입니다.',
@@ -328,6 +328,7 @@
   function spy() {                                           // 지금 보는 섹션 = 화면 위쪽 선을 지난 마지막 섹션(맨 아래까지 내리면 마지막 섹션)
     spyRaf = 0;
     var nav = $('snav'), bar = $('condbar'), inp = $('inp');
+    if (VIEW.recOpen !== false && S.cond === '입력') recAuto();
     if (bar) bar.hidden = !bar.innerHTML || !nav || nav.hidden || !inp || inp.getBoundingClientRect().bottom > hdrBottom() + 8;
     if (!nav || nav.hidden) return;
     var secs = $('res').querySelectorAll('.v2-sec'), lim = window.innerWidth >= 1200 ? 140 : 190, cur = secs[0] || null;
@@ -439,7 +440,6 @@
       cell('예상 수리비', '<div class="v2-unit"><input class="v2-in" data-k="cost" inputmode="numeric" autocomplete="off" placeholder="0" title="시세·환산가에서 그대로 뺍니다" value="' +
         esc(S.cost) + '"><span>만원</span></div>') + '</div>' + (path ? outYr : '');
 
-    var note = S.cond === '입력' ? (S.items.length ? '기록부 ' + S.items.length + '곳으로 계산' : '부위를 넣기 전엔 상태 미상') : '';   // 미상·무사고 뜻은 단추 말풍선으로
     h += '<div class="v2-crow3"><div class="v2-cgroup"><span class="v2-glabel">색상</span><div class="v2-cpills" role="group" aria-label="색상">' +
       [['', '상관없음']].concat(COLORS.map(function (c) { return [c, c]; })).map(function (c) {
         var on = S.color === c[0];
@@ -447,10 +447,9 @@
           '<span class="sw" style="background:' + COLOR_SW[c[0]] + '"></span>' + esc(c[1]) + '</button>';
       }).join('') + '</div></div>' +
       '<div class="v2-cgroup"><span class="v2-glabel">성능 상태</span>' + seg('cond', [['미상', '미상', '넣지 않음 — 성능 보정 없이 계산하고, 무사고라면 값을 함께 보여 줍니다'],
-        ['무사고', '무사고', '이상 없음을 직접 고름'], ['입력', '기록부 입력', '성능·상태점검기록부 부위 37곳을 옮겨 적습니다(한 부위에 여러 상태면 가장 심한 것)']], S.cond, '성능 상태') + '</div>' +
-      '<label class="v2-toggle"><input type="checkbox" data-k="rent"' + (S.rent ? ' checked' : '') + '><span class="trk" aria-hidden="true"></span>렌트 번호판(하·허·호)</label>' +
-      (note ? '<span class="v2-cnote">' + esc(note) + '</span>' : '') + '</div>';
-    if (S.cond === '입력') h += condPanel();
+        ['무사고', '무사고', '이상 없음을 직접 고름'], ['입력', '기록부 입력', '성능·상태점검기록부 부위 37곳을 옮겨 적습니다(한 부위에 여러 상태면 가장 심한 것) — 다시 누르면 접고 펼칩니다']], S.cond, '성능 상태') + '</div>' +
+      '<label class="v2-toggle"><input type="checkbox" data-k="rent"' + (S.rent ? ' checked' : '') + '><span class="trk" aria-hidden="true"></span>렌트 번호판(하·허·호)</label></div>';
+    if (S.cond === '입력') h += recOpen() ? condPanel() : recSum();
     h += '<div class="notebox v2-condout" id="condOut"></div>';
 
     var nonDef = S.sr !== 'auto' || S.mech !== '0' || S.fixes.length > 0 || !S.sold || S.rate !== '';   // 기본값이 아니면 더 보기를 펼쳐 둔다(바꾼 것이 숨지 않게)
@@ -478,7 +477,8 @@
       if (!b || b.name !== p.board) boards.push(b = { name: p.board, list: [] });
       b.list.push(i);
     });
-    var h = '<div class="v2-cond"><div class="v2-text"><input class="v2-in" id="condText" autocomplete="off" placeholder="텍스트로: 좌프론트휀더 X, 우쿼터 W">' +
+    var h = '<div class="v2-cond v2-rec" id="recPanel"><div class="v2-rec-h"><b>성능·상태점검기록부</b><span>' + (S.items.length ? S.items.length + '곳 입력' : '부위 입력 전') + '</span>' +
+      '<button type="button" class="v2-link" data-act="recFold" aria-expanded="true">접기 ▴</button></div><div class="v2-text"><input class="v2-in" id="condText" autocomplete="off" placeholder="텍스트로: 좌프론트휀더 X, 우쿼터 W">' +
       '<button type="button" class="v2-btn" data-act="parse">읽기</button></div><div class="v2-msg" id="condMsg">' + condMsgHtml() + '</div>';
     boards.forEach(function (b) {
       h += '<div class="v2-board"><div class="v2-board-t">' + esc(b.name) + '</div><div class="v2-pos">';
@@ -496,6 +496,22 @@
         ' <button type="button" class="v2-btn" data-act="clearExtra">지우기</button></p>';
     }
     return h + '</div>';
+  }
+
+  function recOpen() { return VIEW.recOpen != null ? VIEW.recOpen : !S.items.length; }   // 부위를 넣은 채로 열면(주소·최근 산정) 접어 둔다
+  function recSum() {                                        // 접힌 기록부 — 한 줄 요약, 누르면 다시 펼침(기획 v2.27)
+    return '<button type="button" class="v2-recsum" data-act="recUnfold" aria-expanded="false"><b>성능·상태점검기록부</b><span>' +
+      (S.items.length ? S.items.length + '곳 · ' + esc(ISC.summary(S.items)) : '부위 입력 전 — 상태 미상으로 계산') + '</span><em>펼치기 ▾</em></button>';
+  }
+  function recAuto() {                                       // 펼친 기록부 창을 다 지나 아래로 내려가면 접는다 — 보던 화면은 그 자리에
+    var rp = $('recPanel');
+    if (!rp || !rp.offsetParent || rp.getBoundingClientRect().bottom > hdrBottom()) return;   // 다른 화면(숨김)에서는 그대로
+    var res = $('res'), y0 = res.getBoundingClientRect().top, bd = document.body;
+    bd.style.overflowAnchor = 'none';                        // 브라우저의 스크롤 고정과 겹쳐 두 번 움직이지 않게 직접 맞춘다
+    VIEW.recOpen = false;
+    renderInputs();
+    window.scrollBy(0, res.getBoundingClientRect().top - y0);
+    requestAnimationFrame(function () { bd.style.overflowAnchor = ''; });
   }
 
   // A. 차명 한 줄 → 제조사·모델·세부모델·등급·세부등급(묶음 산정과 같은 D5 매칭). 연도를 적으면 등록 연도로도 쓴다
@@ -576,14 +592,15 @@
     var el = $('condOut');
     if (!el) return;
     var c = condResult();
-    el.hidden = c['상태'] === '미상' && S.cond !== '입력';    // 미상 설명은 버튼 말풍선으로(기획 v2.26)
+    var folded = S.cond === '입력' && !recOpen();
+    el.hidden = c['상태'] === '미상' && (S.cond !== '입력' || folded);   // 미상 설명은 버튼 말풍선으로(기획 v2.26) · 접힌 기록부는 요약 줄이 안내
     if (c['상태'] === '미상') {
       el.innerHTML = S.cond === '입력' ? '부위를 고르거나 텍스트로 읽어 넣으세요 — 그 전엔 <b>상태 미상</b>으로 계산합니다.' : '';
       return;
     }
     var h = '<b>' + esc(c['사고라벨']) + '</b> · 성능 <b>' + c['성능등급'] + '등급</b> · 감가율 <b>' + c['성능감가율'] + '%</b> · 점수 <b>' + c['성능점검점수'] + '</b>' +
       '<br>글로비스 감점 <b>' + c['글로비스_감점합'] + '</b> → 종합 <b>' + c['글로비스_종합평가점'] + '점</b> · 사고평가 <b>' + esc(c['글로비스_사고평가점']) + '</b>';
-    if (S.cond === '입력') h += '<br>입력 확인: ' + esc(ISC.summary(S.items));
+    if (S.cond === '입력' && !folded) h += '<br>입력 확인: ' + esc(ISC.summary(S.items));
     h += '<br>단순수리 ' + (c['단순수리'] ? '있음' : '없음') + (c['단순수리_자동'] ? ' (자동 판정)' : '');
     el.innerHTML = h;
   }
@@ -1847,7 +1864,9 @@
       MK.show($('marketView'), new URLSearchParams(i >= 0 ? h.slice(i + 1) : ''));
       return Promise.resolve();
     }
+    var it0 = JSON.stringify(S.items);
     S = fromHash();
+    if (JSON.stringify(S.items) !== it0) VIEW.recOpen = null;
     var lm = legacyModel(S);                                 // 매물 이름으로 된 옛 주소·최근 산정 → 경매 이름
     if (lm) toHash();
     $('navPrice').setAttribute('href', location.hash || '#/price');
@@ -1975,10 +1994,13 @@
       var cell = b.getAttribute('data-cell'), gname = b.getAttribute('data-grade');
       if (cell) { fillFromCell(+cell.split('|')[0], +cell.split('|')[1]); return; }
       if (gname != null) { S.grade = gname; S.trim = ''; S.ex = []; renderInputs(); changed(); return; }
+      if (k === 'cond' && v === '입력' && S.cond === '입력') { VIEW.recOpen = !recOpen(); renderInputs(); return; }   // 다시 누르면 접고 펼친다
+      if (k === 'cond') VIEW.recOpen = v === '입력' ? true : null;
       if (k) { S[k] = v; if (k === 'cond') { VIEW.condWarn = []; VIEW.condOut = []; } renderInputs(); changed(); return; }
       if (chipK === 'color') { S.color = v; renderInputs(); changed(); return; }
       if (chipK === 'fix') { toggle(S.fixes, v); renderInputs(); changed(); return; }
       if (act === 'parse') { parseCond(); return; }
+      if (act === 'recFold' || act === 'recUnfold') { VIEW.recOpen = act === 'recUnfold'; renderInputs(); return; }
       if (act === 'findName') { findName(); return; }
       if (act === 'recent') { VIEW.recentOpen = !VIEW.recentOpen; renderInputs(); return; }
       if (act === 'recentClear') { try { localStorage.removeItem(RECENT); } catch (e) { /* 지우지 못해도 산정은 된다 */ } VIEW.recentOpen = false; renderInputs(); return; }
@@ -1988,7 +2010,7 @@
         return;
       }
       if (act === 'clearExtra') { S.items = S.items.filter(posIndex); renderInputs(); changed(); return; }
-      if (act === 'reset') { S = blank(); VIEW.all = false; VIEW.condWarn = []; VIEW.condOut = []; VIEW.nameText = ''; VIEW.nameMsg = ''; VIEW.nameCands = []; VIEW.carOpen = false; VIEW.moreOpen = null; renderInputs(); changed(); return; }
+      if (act === 'reset') { S = blank(); VIEW.all = false; VIEW.condWarn = []; VIEW.condOut = []; VIEW.nameText = ''; VIEW.nameMsg = ''; VIEW.nameCands = []; VIEW.carOpen = false; VIEW.moreOpen = null; VIEW.recOpen = null; renderInputs(); changed(); return; }
       if (act === 'carOpen') { VIEW.carOpen = true; renderInputs(); var f = $('inp').querySelector('[data-k="grade"]'); if (f) f.focus(); return; }
       if (act === 'toCond') { goSec('top'); return; }
       if (act === 'example') { example(); return; }
