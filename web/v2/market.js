@@ -5,7 +5,7 @@
  *        · ../data/report/index.json(세부모델 잔존가치 지수, model_report.py — 못 불러오면 사분면의 가치 축만 끈다)
  * 위쪽 한 줄(국산·수입 · 기간)이 아래 전부에 적용된다. 시황판 행을 누르면 핵심 숫자·트렌드·사분면·차종 비교가 그 세그먼트로 바뀐다.
  * 날짜는 목록 관측일, 축은 실제 날짜 간격. 10일 넘는 공백은 음영, 5~16일이 아닌 구간의 흐름은 흐리게 그린다.
- * 사분면 점·차종 비교의 세부모델을 누르면 모델 리포트, 차종 비교 행 끝 '모델 요약'은 시세 산정으로 간다.
+ * 사분면 점·차종 비교의 세부모델을 누르면 시세 산정 모델 요약으로 간다(기획 v2.24 — 모델 리포트 탭을 합침).
  *
  *   var M = V2Market.create(ctx);   M.show(el, params);      // ctx = app.js 가 넘기는 데이터·도우미(reportHref·mm 포함)
  */
@@ -408,12 +408,12 @@
     }
     function rvWhy(m) {                                       // 잔존가치 지수가 없는 까닭
       var r = rvRec(m);
-      return rvErr ? '잔존가치 지수 파일을 불러오지 못함' : !RV ? '불러오는 중' : !r ? '시세 산정·모델 리포트 대상이 아니라 계산 안 함'
+      return rvErr ? '잔존가치 지수 파일을 불러오지 못함' : !RV ? '불러오는 중' : !r ? '시세 산정 대상이 아니라 계산 안 함'
         : r.rvn < 20 ? '잔존율을 계산한 판매중 매물이 ' + r.rvn + '대라(20대 미만) 계산 안 함' : '같은 차급·연차의 기준 잔존율이 없어 계산 안 함';
     }
-    function mLink(m, label) {                                // 세부모델 → 모델 리포트(시세 산정 대상이 아니면 리포트가 없어 이름만)
+    function mLink(m, label) {                                // 세부모델 → 시세 산정 모델 요약(대상이 아니면 이름만)
       return HAVE[mkey(m)] ? '<a class="v2-link" href="' + esc(ctx.reportHref(m.maker, m.group, m.model)) + '">' + label + '</a>'
-        : '<span title="성능점검 있는 비교 매물이 적어 시세 산정·모델 리포트 대상이 아님">' + label + '</span>';
+        : '<span title="성능점검 있는 비교 매물이 적어 시세 산정 대상이 아님">' + label + '</span>';
     }
     function quadPts(ax) {                                    // 판매중 100대 이상 · 주간 판매율 있음 · 위쪽 국산·수입·차급 선택 → 가로축 값이 있는 것만 점으로
       var all = MM.models.filter(function (m) {
@@ -442,7 +442,7 @@
     function quadInner() {
       var ax = qAxis(), h = '<div class="v2-tools"><div class="card-title">차종 사분면' +
         '<span class="v2-q" tabindex="0" role="note" aria-label="사분면 읽는 법" data-tip="' + esc(quadGuide(ax)) + '">?</span>' +
-        ' <span class="hint">판매중 ' + QMIN + '대 이상 세부모델 · 점을 누르면 모델 리포트</span></div>' +
+        ' <span class="hint">판매중 ' + QMIN + '대 이상 세부모델 · 점을 누르면 모델 요약</span></div>' +
         '<div class="segmented" role="group" aria-label="사분면 가로축">' + ['rv', 'trend'].map(function (k) {
           var off = k === 'rv' && rvErr;
           return '<button type="button" data-m="qx" data-v="' + k + '" class="' + (ax === k ? 'on' : '') + '" aria-pressed="' + (ax === k) + '"' +
@@ -482,7 +482,7 @@
         p.r = Math.max(4, rmax * Math.sqrt(p.m.on / top));                       // 점 크기 ∝ √판매중(반지름 4 이상)
       });
       var h = '<svg class="v2-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" tabindex="0" data-kchart="quad" aria-label="' +
-        esc('차종 사분면 — 가로 ' + QX[ax] + ', 세로 주간 판매율, 세부모델 ' + pts.length + '개. ←→로 점을 옮기고 Enter로 모델 리포트') + '">';
+        esc('차종 사분면 — 가로 ' + QX[ax] + ', 세로 주간 판매율, 세부모델 ' + pts.length + '개. ←→로 점을 옮기고 Enter로 모델 요약') + '">';
       h += '<rect x="' + n(x0) + '" y="' + T + '" width="' + n(Math.max(0, W - R - x0)) + '" height="' + n(Math.max(0, y0 - T)) + '" fill="var(--up-wash)" opacity="0.55"/>' +   // 우상·좌하 칸만 옅게
         '<rect x="' + L + '" y="' + n(y0) + '" width="' + n(Math.max(0, x0 - L)) + '" height="' + n(Math.max(0, H - B - y0)) + '" fill="var(--down-wash)" opacity="0.55"/>';
       niceTicks(ylo, yhi, 5).forEach(function (t) {
@@ -560,7 +560,7 @@
         (QP.clamped ? '<span><i class="v2-quad-lcl"></i>점선 테두리 = 축 범위 밖이라 가장자리에 그림</span>' : '') + '</div>';
     }
 
-    function quadSum(ax, P) {                                 // 네 칸 대수 + 판매중이 많은 모델 3개(누르면 모델 리포트)
+    function quadSum(ax, P) {                                 // 네 칸 대수 + 판매중이 많은 모델 3개(누르면 모델 요약)
       var G = [[], [], [], []], flat = 0;
       P.pts.forEach(function (p) {
         if (p.faded) { flat++; return; }
@@ -584,7 +584,7 @@
         (miss ? ' ' + (ax === 'rv' ? '잔존가치 지수가 없는(잔존율을 계산한 매물 20대 미만) ' : '시세 1주 변화가 없는(직전·기준 목록 중 신규 매물이 10대 미만인 회차가 있는) ') + miss + '개는 뺐습니다.' : '') +
         (ax === 'trend' && (gap < IRREG[0] || gap > IRREG[1]) ? ' 직전 목록과 간격이 ' + gap + '일이라 1주 변화로 보기 어렵습니다.' : '') +
         (rvErr ? ' 잔존가치 지수 파일을 불러오지 못해 가치 축은 껐습니다.' : '') +
-        ' 점을 누르면 모델 리포트로 갑니다(휴대폰은 처음 누르면 설명, 한 번 더 누르면 이동). 키보드는 그림에 초점을 두고 ←→로 점을 옮기고 Enter.';
+        ' 점을 누르면 시세 산정의 모델 요약으로 갑니다(휴대폰은 처음 누르면 설명, 한 번 더 누르면 이동). 키보드는 그림에 초점을 두고 ←→로 점을 옮기고 Enter.';
       return '<p class="v2-help">' + esc(s) + '</p>';
     }
 
@@ -596,7 +596,7 @@
         row(p.rv != null ? f1(p.rv) : '–', '잔존가치 지수' + (p.rv != null ? '(동급 100)' : ' — ' + rvWhy(m))) +
         row(w ? sgn1(w.d) + ' ±' + w.se.toFixed(1) : '–', '시세 1주' + (w ? ' · ' + (w.sig ? (w.d > 0 ? '오름' : '내림') : '보합(흔들림 2배 안)') : ' — 신규 매물이 적어 계산 안 함')) +
         (p.cl ? '<div class="v2-quad-tsub">축 범위 밖이라 가장자리에 그렸습니다</div>' : '') +
-        '<div class="v2-quad-tsub">' + (HAVE[mkey(m)] ? (lastPT === 'touch' ? '한 번 더 누르면 모델 리포트' : '누르면 모델 리포트') : '모델 리포트 대상이 아님') + '</div>';
+        '<div class="v2-quad-tsub">' + (HAVE[mkey(m)] ? (lastPT === 'touch' ? '한 번 더 누르면 모델 요약' : '누르면 모델 요약') : '시세 산정 대상이 아님') + '</div>';
     }
     function quadShow(i, cx, cy) {                            // i 번 점 말풍선 + 테두리 강조(cx, cy = 화면 좌표)
       var p = QP.pts[i], tip = $('tip'), hl = $('qHl');
@@ -617,20 +617,20 @@
       });
       return best;
     }
-    function go(p) {                                          // 모델 리포트로
+    function go(p) {                                          // 시세 산정 모델 요약으로
       var m = p.m;
       if (!HAVE[mkey(m)]) return;
       hideTip();
       location.hash = ctx.reportHref(m.maker, m.group, m.model);
     }
-    function quadClick(e, svg) {                              // 점 누름 → 모델 리포트(터치는 첫 누름에 말풍선, 같은 점을 한 번 더 누르면 이동)
+    function quadClick(e, svg) {                              // 점 누름 → 모델 요약(터치는 첫 누름에 말풍선, 같은 점을 한 번 더 누르면 이동)
       if (!QP) return;
       var i = quadNear(e, svg);
       if (i < 0) { QP.sel = -1; hideTip(); return; }
       if (lastPT === 'touch' && QP.sel !== i) { QP.sel = i; quadShow(i, e.clientX, e.clientY); return; }
       go(QP.pts[i]);
     }
-    function quadKey(e) {                                     // 그림에 초점 → ←→ 로 점 이동(가로 위치 순), Enter 로 모델 리포트
+    function quadKey(e) {                                     // 그림에 초점 → ←→ 로 점 이동(가로 위치 순), Enter 로 모델 요약
       if (!QP || !QP.pts.length) return;
       if (e.key === 'Enter' && QP.cur != null) { e.preventDefault(); go(QP.pts[QP.cur]); return; }
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
@@ -651,7 +651,7 @@
 
     // ───── 차종 비교 ─────
     function models() {
-      var h = '<div class="card" id="mModels"><div class="v2-tools"><div class="card-title">차종 비교 <span class="hint">세부모델별 · 머리글을 누르면 정렬 · 모델을 누르면 모델 리포트 · 행 끝 모델 요약은 시세 산정</span></div>' +
+      var h = '<div class="card" id="mModels"><div class="v2-tools"><div class="card-title">차종 비교 <span class="hint">세부모델별 · 머리글을 누르면 정렬 · 모델을 누르면 시세 산정 모델 요약</span></div>' +
         '<div class="v2-actions" style="margin:0"><input class="v2-in v2-msearch" id="mQ" placeholder="모델 이름으로 찾기" value="' + esc(V.q) + '" autocomplete="off" aria-label="모델 찾기">' +
         '<button type="button" class="v2-btn" data-m="xlsx">엑셀 내려받기</button></div></div><div id="mTable">';
       return h + (MM ? modelTable() : '<p class="v2-kv"><span class="spinner v2-spin"></span>불러오는 중…</p>') + '</div></div>';

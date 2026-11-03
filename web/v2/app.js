@@ -18,7 +18,7 @@
   var SHOW = 10;                                            // 비교 매물 표 기본 행 수(인터뷰 Q40 — 그림 먼저, 표는 10행 + 펼치기)
   var KM_BANDS = [[0, 3e4, '3만 미만'], [3e4, 6e4, '3~6만'], [6e4, 1e5, '6~10만'], [1e5, 1.5e5, '10~15만'], [1.5e5, Infinity, '15만 이상']];
   var X = {}, ENG = null, ISC = null, NM = null, GROUPS = {}, R = null, R0 = null, recentTimer = 0, LAST = null, timer = 0, B = null, RV = null, MK = null, DV = null, MB = '';
-  var PV = null, RP = null;                                  // 마켓 펄스(pulse.js) · 모델 리포트(report.js)
+  var PV = null;                                             // 마켓 펄스(pulse.js)
   var VIEW = { sort: 'sim', all: false, mode: 'one', condWarn: [], condOut: [], exKeep: {}, allGrades: false, nameText: '', nameMsg: '', nameCands: [], recentOpen: false,
     posx: 'km', hl: null };                                  // posx: 내 차 위치 그림 가로축(km·age) · hl: 그림에서 누른 비교 매물 ID      // mode: one(한 대 산정) · model(모델 요약) · batch(묶음 산정) · rates(⚙ 환산 비율)
   var TIP = {                                                // 용어 설명(결과 카드·비교 매물 표의 ? — 마우스를 올리거나 누르면)
@@ -48,6 +48,7 @@
   };
   var DOM_ORDER = ['현대', '제네시스', '기아', '쉐보레(GM대우)', '르노코리아(삼성)', 'KG모빌리티(쌍용)', '기타 제조사'];   // 엔카 국산 제조사 순서
   var RECENT = 'v2.recent';                                  // 최근 산정(이 브라우저에만)
+  var CV = null;                                             // 동급 대비 지표 · 감가 곡선(curve.js)
   var MODES = ['model', 'batch', 'rates'];                  // 주소 view= 로 남는 화면
   var S = blank();
 
@@ -669,12 +670,36 @@
       (S.ex.length ? ' · 직접 제외 ' + S.ex.length + '대 <button type="button" class="v2-link" data-act="exClear">모두 되돌리기</button>' : '') + '</div></div>' +
       (r.grade === 'C' ? '<div class="v2-kv">참고용 — 같은 세부모델 전체로 넓혀 찾은 값입니다</div>' : '') + '</div>';
     h += '</div>';
+    var co = curveOf(G);
+    h += cv().tiles(co);                                       // 동급 대비 지표 6개(기획 v2.24 Q113 — 모델 리포트에서 옮김)
 
     h += '<div class="v2-two-col v2-wide">' + posCard(G, car) + flowCard(G, car, c) + '</div>';   // 보강안 1단계(기획 5.1.3-2): 그림 먼저, 표는 아래
+    h += cv().card(co, myCurve(G, car), chartW(1200, 9999));   // 감가 곡선 — 내 차 위치·보정 흐름 바로 아래(Q114)
     h += '<div class="v2-two-col">' + speedCard(G) + trendCard(G) + '</div>';
     h += ladderCard(G, car, c);
     h += compsTable(G);
     $('res').innerHTML = h;
+    loadCurve(co);
+  }
+
+  // ───── 동급 대비 지표 · 감가 곡선(curve.js, 기획 v2.24) ─────
+  function cv() {
+    if (!CV) CV = V2Curve.create({ X: X, esc: esc, man: man, getJSON: getJSON, mm: function () { return X.mmWait; } });
+    return CV;
+  }
+  function curveOf(G) {                                       // 지금 고른 세부모델 → curve.js 입력
+    var g = groupOf(), M = G.models[S.model];
+    return { mk: S.mk, grp: S.grp, model: S.model, file: g ? g.file : null, seg: M ? M.seg : '' };
+  }
+  function myCurve(G, car) {                                  // 내 차 ★ — 차령(년) · 추정 시세 · 출고가(비교 매물 출고가의 가운데 값)
+    var ym = G.F.now_ym, reg = car['등록연월'], fi = G.fi;
+    var age = (Math.floor(ym / 100) * 12 + ym % 100 - (Math.floor(reg / 100) * 12 + reg % 100)) / 12;
+    var ops = fi.op == null ? [] : R.comps.filter(function (x) { return !x.outlier && x.row[fi.op] > 0; }).map(function (x) { return x.row[fi.op]; });
+    return { age: Math.max(0, age), est: R.est, op: ops.length >= 3 ? median(ops) : null };
+  }
+  function loadCurve(co) {                                    // 리포트 자료·시장 숫자가 오면 지표 줄·곡선만 다시(같은 세부모델일 때)
+    var key = co.mk + '|' + co.model;
+    cv().load(co).then(function () { if (S.mk + '|' + S.model === key) cv().refresh(); });
   }
 
   function compsTable(G) {
@@ -1122,7 +1147,7 @@
   }
 
   function trendData(G) { var M = G.models[S.model]; return trendDataOf(G.F.maker, S.model, M && M.seg); }
-  function trendDataOf(maker, model, segStr) {               // 시세 추세 숫자(카드·한 장 요약·엑셀 분석 시트·모델 리포트) — 점마다 흔들림 se = 지수 × 1.2533 × σ ÷ √신규 대수
+  function trendDataOf(maker, model, segStr) {               // 시세 추세 숫자(카드·한 장 요약·엑셀 분석 시트) — 점마다 흔들림 se = 지수 × 1.2533 × σ ÷ √신규 대수
     var seg = (segStr || '').split('·'), sname = seg[1] + ' ' + seg[0], skey = seg[1] + '|' + seg[0];
     var has = function (p) { return p['시세'] != null; }, raw = (X.mi.series[skey] || []).filter(has);
     if (raw.length < 2) { sname = seg[1] + ' 전체'; skey = seg[1] + '|전체'; raw = (X.mi.series[skey] || []).filter(has); }
@@ -1217,7 +1242,7 @@
   function dirPill(D) { return D ? '<span class="v2-pill ' + (D.dir === '오름' ? 'up' : D.dir === '내림' ? 'dn' : '') + '">' + D.dir + ' ' + signedF(D.d) + '</span>' : '—'; }
 
   function trendCard(G) { var M = G.models[S.model]; return trendCardOf(G.F.maker, S.model, M && M.seg, chartW(620, 360)); }
-  function trendCardOf(maker, model, seg, W) {               // 시세 추세 카드 — 시세 산정과 모델 리포트(report.js, ctx.trendCard)가 같이 쓴다
+  function trendCardOf(maker, model, seg, W) {               // 시세 추세 카드 — 한 대 산정과 모델 요약이 같이 쓴다
     var T = trendDataOf(maker, model, seg), mp = T.mp, sp = T.sp, D = mp.length >= 2 ? T.dm : T.ds, short = !D || D.short;
     var h = '<div class="card"><div class="card-title">시세 추세' + q(TIP.trend) +
       (short && (sp.length >= 2 || mp.length) ? ' <span class="v2-pill" title="매주 수집이 4주가 안 돼 방향을 짧은 기간으로 봅니다">짧음</span>' : '') +
@@ -1268,7 +1293,7 @@
       (unit ? '<small>' + esc(unit) + '</small>' : '') + '</div><div class="v2-kv">' + esc(sub || '') + '</div></div>';
   }
 
-  function segCut(seg) {                                     // 차급 인하 매물 비율 = 같은 차급·구분 세부모델 인하 비율의 판매중 대수 가중(모델 리포트와 같은 식)
+  function segCut(seg) {                                     // 차급 인하 매물 비율 = 같은 차급·구분 세부모델 인하 비율의 판매중 대수 가중(curve.js 지표 줄과 같은 식)
     if (!X.mm || !seg) return null;
     if (!X.mmCut) {
       var a = {};
@@ -1282,35 +1307,26 @@
     }
     return X.mmCut[seg] != null ? X.mmCut[seg] : null;
   }
-  function modelMarket(G) {                                  // 모델 요약의 판매 숫자 — 모델 리포트와 같은 market_models(엔카 판매중 전체) 기준
+  function modelMarket(G) {                                  // 모델 요약의 판매 숫자 — 지표 줄과 같은 market_models(엔카 판매중 전체) 기준
     var seg = G.models[S.model] && G.models[S.model].seg, mm = X.mmBy && X.mmBy[G.F.maker + '|' + S.model] || null;
     var thin = !mm || mm.on < 100, w = function (r) { return r >= 1.15 ? '빠름' : r <= 0.87 ? '느림' : '비슷'; };
     return { mm: mm, sg: X.mm && X.mm.segments && X.mm.segments[seg] || {}, sc: segCut(seg), loading: !X.mmBy,
-      word: function (r) { return thin ? '' : ' · ' + w(r); } };   // 판매중 100대 미만은 빠름·느림을 붙이지 않는다(모델 리포트와 같은 기준)
+      word: function (r) { return thin ? '' : ' · ' + w(r); } };   // 판매중 100대 미만은 빠름·느림을 붙이지 않는다(지표 줄과 같은 기준)
   }
 
   function summary(G, miss) {
-    var st = modelStats(G), M = st.M, F = G.F, K = modelMarket(G), mm = K.mm, sg = K.sg;
+    var st = modelStats(G), M = st.M, F = G.F, K = modelMarket(G), mm = K.mm, co = curveOf(G);
     var h = (miss.length ? needCard(miss) : '') +
       '<div class="card v2-headcard"><div class="v2-head">' + esc(F.maker + ' ' + S.model) + ' · 모델 요약' + (miss.length ? ' <span class="v2-ref">참고</span>' : '') +
-      '<br><span class="sub">판매중·체류일·인하·판매율은 모델 리포트와 같은 기준 · 최근 판매·시세표·등급별은 비교 가능 매물 · 기준 ' + dataDate() + '</span></div>' +
-      '<div class="v2-actions" style="margin:0"><a class="v2-btn" href="' + esc(reportHref(S.mk, S.grp, S.model)) + '">모델 리포트에서 자세히 →</a>' +
-      '<button type="button" class="v2-btn" data-act="xlsxModel">엑셀 내려받기</button></div></div>';
-    var iv = X.mm && X.mm.speed_interval, dc = mm && mm.cut != null && K.sc != null ? Math.round(mm.cut * 100) - Math.round(K.sc * 100) : null;
+      '<br><span class="sub">판매중·판매율·체류일·인하·시세지수·잔존가치는 엔카 판매중 전체 · 최근 판매·시세표·등급별은 비교 가능 매물 · 기준 ' + dataDate() + '</span></div>' +
+      '<div class="v2-actions" style="margin:0"><button type="button" class="v2-btn" data-act="xlsxModel">엑셀 내려받기</button></div></div>';
     h += '<div class="v2-cards">' +
       tile('판매중', (mm ? mm.on : M.onsale_all != null ? M.onsale_all : st.on.length).toLocaleString(), '대', '비교 가능(성능점검 있음) ' + st.on.length.toLocaleString() + '대') +
-      tile('최근 3개월 판매', st.sold.length.toLocaleString(), '대', '비교 가능 매물 중 목록에서 사라진 매물(재등록 제외)') +
-      (mm ? tile('중위 체류일', mm.dwell != null ? String(mm.dwell) : '–', mm.dwell != null ? '일' : '',
-          mm.dwell == null ? '최근 90일 판매가 5대 미만' : sg.dwell ? '차급 ' + sg.dwell + '일' + K.word(sg.dwell / mm.dwell) : '차급 값 없음') +
-        tile('가격 인하 매물', mm.cut != null ? String(Math.round(mm.cut * 100)) : '–', mm.cut != null ? '%' : '',
-          K.sc == null ? '차급 값 없음' : '차급 ' + Math.round(K.sc * 100) + '%' + (mm.on < 100 ? '' : ' · ' + (dc ? Math.abs(dc) + '%p ' + (dc > 0 ? '많음' : '적음') : '같음')))
-      : tile('중위 체류일', st.dw != null ? String(Math.round(st.dw)) : '–', st.dw != null ? '일' : '', K.loading ? '불러오는 중…' : '비교 가능 매물 기준(시장 숫자 없음)') +   // 시장 숫자 파일이 없거나 이 모델이 없으면 비교 가능 매물로
-        tile('가격 인하 매물', st.cut != null ? String(Math.round(st.cut * 100)) : '–', st.cut != null ? '%' : '', K.loading ? '불러오는 중…' : '비교 가능 매물 기준')) +
-      tile('주간 판매율', mm && mm.rate_w != null ? (mm.rate_w * 100).toFixed(1) : '–', mm && mm.rate_w != null ? '%' : '',
-        K.loading ? '불러오는 중…' : !mm ? '시장 숫자 없음' : mm.rate_w == null ? (iv ? '구간 시작 판매중이 10대 미만' : '주간 수집 구간이 아직 없음')
-          : (sg.rate_w ? '차급 ' + (sg.rate_w * 100).toFixed(1) + '%' + K.word(mm.rate_w / sg.rate_w) : '차급 값 없음') + (iv ? ' · ' + mmdd(iv[0]) + '→' + mmdd(iv[1]) : '')) + '</div>';
+      tile('최근 3개월 판매', st.sold.length.toLocaleString(), '대', '비교 가능 매물 중 목록에서 사라진 매물(재등록 제외)') + '</div>';
+    h += cv().tiles(co) + cv().card(co, null, chartW(1200, 9999));   // 동급 대비 지표 6개 · 감가 곡선(기획 v2.24 — 모델 리포트에서 옮김)
     h += matrixCard(st) + '<div class="v2-two-col">' + gradeCard(st) + trendCard(G) + '</div>';
     $('res').innerHTML = h;
+    loadCurve(co);
   }
 
   function matrixCard(st) {
@@ -1421,7 +1437,7 @@
       ['중위 체류일(최근 90일 판매)', K.mm ? mm.dwell : st.dw != null ? Math.round(st.dw) : null], ['차급 중위 체류일', K.mm ? sg.dwell : st.seg.dwell],
       ['가격 인하 매물 비율(%)', K.mm ? r1(mm.cut) : r1(st.cut)], ['차급 가격 인하 비율(%)', K.mm ? r1(K.sc) : r1(st.seg.cut)],
       ['데이터 기준', '엔카 ' + dataDate(true)], ['비교 매물 파일', F.version],
-      ['참고', (K.mm ? '판매중·판매율·체류일·인하 비율은 모델 리포트와 같은 기준(엔카 판매중 전체). ' : '시장 숫자가 없어 체류일·인하 비율은 비교 가능 매물 기준. ') +
+      ['참고', (K.mm ? '판매중·판매율·체류일·인하 비율은 엔카 판매중 전체 기준. ' : '시장 숫자가 없어 체류일·인하 비율은 비교 가능 매물 기준. ') +
         '최근 3개월 판매·시세표·등급별은 비교 가능 매물(성능점검 있음). 시세표 칸은 5대 미만이면 비움']];
     var mx = [['최초등록 \\ 주행'].concat(KM_BANDS.map(function (b) { return b[2] + ' 중앙 호가'; }), KM_BANDS.map(function (b) { return b[2] + ' 대수'; }))];
     st.years.forEach(function (y, i) {
@@ -1664,21 +1680,24 @@
     } else compute();
   }
 
-  // ───── 화면 고르기: #/pulse = 마켓 펄스(pulse.js) · #/report = 모델 리포트(report.js) · #/market = 시장 시황(market.js) · #/data = 데이터(data.js) · 그 밖 = 시세 산정 ─────
-  var PAGES = { pulse: '#/pulse', report: '#/report', market: '#/market', data: '#/data' };
+  // ───── 화면 고르기: #/pulse = 마켓 펄스(pulse.js) · #/market = 시장 시황(market.js) · #/data = 데이터(data.js) · 그 밖 = 시세 산정(#/report 옛 주소 → 모델 요약) ─────
+  var PAGES = { pulse: '#/pulse', report: '#/report', market: '#/market', data: '#/data' }, PAGE0 = null;
   function route() {
     var h0 = location.hash, page = 'price';
     Object.keys(PAGES).forEach(function (k) { if (h0.indexOf(PAGES[k]) === 0) page = k; });
+    if (page !== 'report') {                                 // 다른 화면으로 넘어오면 맨 위부터(마켓 펄스 아래쪽 링크로 모델 요약에 와도 중간에 서지 않게)
+      if (PAGE0 && PAGE0 !== page) window.scrollTo(0, 0);
+      PAGE0 = page;
+    }
     var market = page === 'market', qs = function () { var i = h0.indexOf('?'); return new URLSearchParams(i >= 0 ? h0.slice(i + 1) : ''); };
     $('priceView').hidden = page !== 'price';
     $('mbar').hidden = true;
     $('marketView').hidden = page !== 'market';
     $('dataView').hidden = page !== 'data';
     $('pulseView').hidden = page !== 'pulse';
-    $('reportView').hidden = page !== 'report';
-    var fc = $('footConv');                                  // 아래 '환산가는 …' 안내는 시세 산정에서만(마켓 펄스·모델 리포트는 외부에도 보여 주는 화면)
+    var fc = $('footConv');                                  // 아래 '환산가는 …' 안내는 시세 산정에서만(마켓 펄스·시장 시황은 외부에도 보여 주는 화면)
     if (fc) fc.hidden = page !== 'price';
-    [['navPrice', 'price'], ['navPulse', 'pulse'], ['navReport', 'report'], ['navMarket', 'market'], ['navData', 'data']].forEach(function (n) {
+    [['navPrice', 'price'], ['navPulse', 'pulse'], ['navMarket', 'market'], ['navData', 'data']].forEach(function (n) {
       var a = $(n[0]);
       if (a) a.classList.toggle('on', page === n[1]);
       if (a && page === n[1]) {                               // 휴대폰 폭에서 탭 줄이 넘치면 지금 탭이 보이게 가로로만 민다
@@ -1691,10 +1710,10 @@
       PV.show($('pulseView'), qs());
       return Promise.resolve();
     }
-    if (page === 'report') {
-      if (!RP) RP = V2Report.create(subCtx('#/report', 'navReport'));
-      RP.show($('reportView'), qs());
-      return Promise.resolve();
+    if (page === 'report') {                                 // 모델 리포트 탭은 시세 산정에 합쳤다(기획 v2.24 Q112) — 옛 주소는 그 모델의 모델 요약으로
+      var rq = qs();
+      history.replaceState(null, '', query(Object.assign(blank(), { mk: rq.get('mk') || '', grp: rq.get('grp') || '', model: rq.get('model') || '' }), 'model'));
+      return route();
     }
     if (page === 'data') {
       if (!DV) DV = V2Data.create({ X: X, esc: esc, getJSON: getJSON, root: ROOT });
@@ -1735,24 +1754,13 @@
     });
   }
 
-  function reportHref(mk, grp, model) {                      // 모델 리포트 주소(마켓 펄스·시장 시황·모델 요약에서 링크)
-    var q = new URLSearchParams();
-    if (mk) q.set('mk', mk);
-    if (grp) q.set('grp', grp);
-    if (model) q.set('model', model);
-    var str = q.toString();
-    return '#/report' + (str ? '?' + str : '');
+  function reportHref(mk, grp, model) {                      // 세부모델 한 개 보기 = 시세 산정 모델 요약(마켓 펄스·시장 시황에서 링크 — 기획 v2.24, 모델 리포트 탭을 합침)
+    return query(Object.assign(blank(), { mk: mk || '', grp: grp || '', model: model || '' }), 'model');
   }
-  function subCtx(path, navId) {                             // 마켓 펄스·모델 리포트에 넘기는 데이터·도우미
+  function subCtx(path, navId) {                             // 마켓 펄스에 넘기는 데이터·도우미
     return { X: X, esc: esc, man: man, pct: pct, signed: signed, getJSON: getJSON, fileSafe: fileSafe, today: today, root: ROOT, bindTips: bindTips,
       mm: function () { return X.mmWait; },                  // market_models.json(Promise) — X.mm·X.mmBy 도 채워진다
       reportHref: reportHref,
-      legacy: function (s) {                                 // 엔카 이름 → 경매 이름 { grp, model, from, to } (모델 리포트의 옛 주소)
-        var t = { mk: s.mk, grp: s.grp, model: s.model, y: s.y }, r = legacyModel(t);
-        return r ? { grp: t.grp, model: t.model, from: r.from, to: r.to } : null;
-      },
-      priceHref: function (s, mode) { return query(Object.assign(blank(), s), mode || 'model'); },   // 시세 산정(기본은 모델 요약)
-      trendCard: function (maker, model, seg, W) { return trendCardOf(maker, model, seg, W); },   // 시세 산정과 같은 '시세 추세' 카드(HTML)
       hash: function (q) {                                   // 화면 상태를 주소에(공유·새로 고침) — 위쪽 탭도 그 주소로
         var str = q ? q.toString() : '';
         history.replaceState(null, '', path + (str ? '?' + str : ''));
@@ -1798,7 +1806,6 @@
       '<section class="v2-batch v2-rates" id="ratesView" aria-label="환산 비율 설정" hidden></section>' +
       '<div class="v2-mbar" id="mbar" hidden></div></div>' +
       '<section class="v2-batch v2-pulse" id="pulseView" aria-label="마켓 펄스" hidden></section>' +
-      '<section class="v2-batch v2-report" id="reportView" aria-label="모델 리포트" hidden></section>' +
       '<section class="v2-batch v2-mk" id="marketView" aria-label="시장 시황" hidden></section>' +
       '<section class="v2-batch" id="dataView" aria-label="데이터" hidden></section>';
     var inp = $('inp'), res = $('res'), tip = $('tip');
@@ -1938,7 +1945,7 @@
         S = fromHash();
         layout();
         marketLine();
-        X.mmWait = getJSON('market_models.json').then(function (j) {   // 세부모델 시장 숫자(시세 추세·판매 속도·모델 리포트) — 늦게 와도 되므로 따로
+        X.mmWait = getJSON('market_models.json').then(function (j) {   // 세부모델 시장 숫자(시세 추세·판매 속도·지표 줄) — 늦게 와도 되므로 따로
           X.mm = j; X.mmBy = {};
           j.models.forEach(function (m) { X.mmBy[m.maker + '|' + m.model] = m; });
           if (!$('priceView').hidden && (VIEW.mode === 'one' || VIEW.mode === 'model') && S.model) compute();

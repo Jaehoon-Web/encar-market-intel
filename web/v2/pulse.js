@@ -45,7 +45,7 @@
 
   function create(ctx) {
     var esc = ctx.esc, el = null, P = null, R = null, wait = null, err = null, HAVE = {}, V = { o: '전체' };
-    ((ctx.X.idx || {}).makers || []).forEach(function (mk) {          // 모델 리포트가 있는 세부모델(시세 산정 비교 목록과 같은 범위)
+    ((ctx.X.idx || {}).makers || []).forEach(function (mk) {          // 시세 산정 비교 목록에 있는 세부모델(모델 요약으로 열림)
       mk.groups.forEach(function (g) { g.models.forEach(function (m) { HAVE[mk.name + '|' + g.name + '|' + m.name] = true; }); });
     });
 
@@ -56,7 +56,7 @@
     function rate(r) { return r == null ? '–' : (r * 100).toFixed(1) + '%'; }                    // 0~1 비율 → 13.0%
     function f1(v) { return v == null ? '–' : Number(v).toFixed(1); }
     function sgn(v) { return v == null ? '–' : (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(1); }   // 이미 % 인 값 → −0.5
-    function cutAmt(v) { var a = Math.abs(v); return (Math.round(a) ? '−' : '') + cnt(a) + '만'; }   // 내린 금액(양수) → −50만(모델 리포트와 같은 표기)
+    function cutAmt(v) { var a = Math.abs(v); return (Math.round(a) ? '−' : '') + cnt(a) + '만'; }   // 내린 금액(양수) → −50만(시세 산정과 같은 표기)
     function jo(w, a, b) {                                    // 받침 있으면 a(과·은), 없으면 b(와·는)
       var c = w.charCodeAt(w.length - 1);
       return w + (c >= 0xAC00 && c <= 0xD7A3 && (c - 0xAC00) % 28 ? a : b);
@@ -238,16 +238,16 @@
     }
 
     // ───── ④ 주목할 모델 ─────
-    function modelName(mk, grp, model) {                      // 모델 리포트 링크(대상이 아니면 이름만)
+    function modelName(mk, grp, model) {                      // 시세 산정 모델 요약 링크(대상이 아니면 이름만)
       var name = esc(mk + ' ' + model);
       return HAVE[mk + '|' + grp + '|' + model] ? '<a class="v2-link" href="' + esc(ctx.reportHref(mk, grp, model)) + '">' + name + '</a>'
-        : '<span class="nm" title="모델 리포트 대상이 아닙니다(비교 매물이 적음)">' + name + '</span>';
+        : '<span class="nm" title="시세 산정 대상이 아닙니다(비교 매물이 적음)">' + name + '</span>';
     }
     function moverRow(kind, m) {
       var s = segName(m.origin, m.seg), v, sub;
       if (kind === 'fast') { v = '주 ' + rate(m.rate_w); sub = s + ' ' + rate(m.seg_rate) + '의 ' + m.ratio.toFixed(1) + '배'; }
       else if (kind === 'slow') {
-        var rm = R && R.models && R.models[m.maker + '|' + m.model], oc = rm ? rm.on_chg : null;   // 판매중 지난주 대비(모델 리포트 index)
+        var rm = R && R.models && R.models[m.maker + '|' + m.model], oc = rm ? rm.on_chg : null;   // 판매중 지난주 대비(report/index.json)
         v = m.weeks != null ? f1(m.weeks) + '주' : '판매 없음';
         sub = s + ' ' + (m.seg_weeks != null ? f1(m.seg_weeks) + '주' : '–') + ' · 판매율 주 ' + rate(m.rate_w) + (oc ? ' · 재고 ' + arrow(oc * 100, 1, '%') : '');
       }
@@ -257,7 +257,7 @@
     function moversCard() {
       var M = (P.movers || {})[V.o] || {};
       var h = '<div class="card"><div class="card-title">주목할 모델 <span class="hint">' + (V.o !== '전체' ? esc(V.o) + ' · ' : '') +
-        '판매중 100대 이상 세부모델 · 누르면 모델 리포트</span></div><div class="v2-pmv">';
+        '판매중 100대 이상 세부모델 · 누르면 시세 산정 모델 요약</span></div><div class="v2-pmv">';
       MOVE.forEach(function (k) {
         var rows = M[k[0]] || [];
         h += '<section><div class="v2-ssub">' + esc(k[1]) + q(TIP[k[0]]) + '</div>' + (rows.length
@@ -330,7 +330,7 @@
       if (!R || !R.models) return '';                         // 파일이 없으면 이 카드만 뺀다
       var list = flagList(), rules = R.rules || {};
       return '<div class="card"><div class="card-title">매물 경고 <span class="hint">' + (V.o !== '전체' ? esc(V.o) + ' · ' : '') + (R.date ? md(R.date) + ' ' : '') +
-        '판매중 매물 · 매물 목록은 모델 리포트에서</span></div><div class="v2-pwarn">' +
+        '판매중 매물 · 세부모델을 누르면 모델 요약</span></div><div class="v2-pwarn">' +
         flagCol(list, 'low', '이상 의심 매물', TIP.low, rules.low) + flagCol(list, 'old', '오래 안 팔리는 매물', TIP.old, rules.old) + '</div></div>';
     }
 

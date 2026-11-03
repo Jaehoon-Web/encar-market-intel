@@ -56,13 +56,13 @@ ENGINE = {"steps": [list(s) for s in STEPS], "colors": COLORS, "km_cap": KM_CAP,
           "out_mad": OUT_MAD, "out_floor": OUT_FLOOR, "a_width": A_WIDTH, "sim": SIM, "a_step": A_STEP, "b_step": B_STEP,
           "drives": DRIVES, "uses": USES}                                            # 사이트 엔진이 읽는 설정(한곳에서 관리)
 ROW_FIELDS = ["id", "m", "g", "t", "reg", "om", "km", "rent", "col", "perf", "dep", "price", "sold", "tk",
-              "acc", "gv", "gp", "ds", "p0", "sd", "fu", "q", "dv", "se", "us", "en", "dm"]
+              "acc", "gv", "gp", "ds", "p0", "sd", "fu", "q", "dv", "se", "us", "en", "op", "dm"]
 # 행에는 매물이 바뀌지 않으면 그대로인 값만 둔다 — 매주 바뀌는 값(현재 월·시점 보정 배수)은 파일 머리말(now_ym·tf)에.
 #   om: 가격을 본 달(yyyymm, 판매중은 null → now_ym) · tk: 시점 보정 키('국산|크롤일', 판매중은 null → 1)
 #   ds: 체류 시작일(yyyymmdd, 체류일 = 판매일 또는 now_date − ds) · sd: 판매 추정일 · p0: 첫 호가 · fu: 연료(환산 비율 모델 예외용)
 #   dm: 손상 부위 — 파일 머리말 damage 목록('프론트 휀더(교환)' 등)의 번호 배열, 없으면 null(비교 매물 표에서 펼쳐 봄)
 #   q: 이름 근거 0 정확 · 1 가까운 이름 · 2 엔카 이름(0이 아니면 같은 트림 단계에서 뺌) · dv: 구동(머리말 drives 번호) · se: 인승 · us: 용도(uses 번호)
-#   en: 엔카 원래 이름(머리말 enc 목록 번호 — '모델|등급|세부등급')
+#   en: 엔카 원래 이름(머리말 enc 목록 번호 — '모델|등급|세부등급') · op: 출고가(만원, 감가 곡선의 내 차 잔존율 — 비교 매물 출고가의 가운데 값)
 
 
 # ───────── 데이터 ─────────
@@ -72,7 +72,7 @@ def load_pool():
                         columns=["상태", "비교사용", "점검여부", "제조사", "모델그룹", "모델", "등급", "세부등급", "차급", "국산", "연료",
                                  "연식", "등록연월", "주행km", "현재가", "첫가격", "마지막가", "마지막관측일", "판매추정일", "체류일",
                                  "번호판유형", "색상계열", "성능감가율", "성능등급", "사고라벨", "글로비스_종합평가점", "글로비스_감점합", "차키",
-                                 "손상부위"] + [c for c in NAME_EXTRA if c in pq.read_schema(os.path.join(PREP, "listings.parquet")).names])
+                                 "손상부위", "출고가"] + [c for c in NAME_EXTRA if c in pq.read_schema(os.path.join(PREP, "listings.parquet")).names])
     for c in NAME_EXTRA:                                                            # 이름 4단계 전의 listings 도 읽히게
         if c not in L:
             L[c] = L[c.replace("엔카_", "")] if c.startswith("엔카_") else ("정확" if c == "이름근거" else None)
@@ -517,7 +517,8 @@ def export(pool):
                  ci.get(r.색상계열, 0), _num(r.성능등급), _num(r.성능감가율), _num(r.price), int(r.sold), r.tk or None,
                  li[r.사고라벨 if isinstance(r.사고라벨, str) else "미상"], _num(r.글로비스_종합평가점), _num(r.글로비스_감점합),
                  int(r.ds) if r.ds else None, _num(r.첫가격), str(r.판매추정일) if r.sold else None,
-                 fi_[r.연료 if isinstance(r.연료, str) else "기타"], int(r.q), int(r.dv), int(r.se), int(r.us), ei[enc[r.Index]]]
+                 fi_[r.연료 if isinstance(r.연료, str) else "기타"], int(r.q), int(r.dv), int(r.se), int(r.us), ei[enc[r.Index]],
+                 _num(r.출고가) if r.출고가 == r.출고가 and r.출고가 and r.출고가 > 0 else None]
                 + ([[di[x] for x in dmg[r.Index]]] if dmg[r.Index] else [])
                 for r in g.itertuples()]                                              # 손상이 없으면 dm 칸을 아예 두지 않는다(파일 크기)
         tf = {k: float(v) for k, v in g[g["sold"]].groupby("tk")["tf"].first().items()}   # 같은 키는 같은 배수

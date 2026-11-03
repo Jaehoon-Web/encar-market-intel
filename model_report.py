@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 model_report.py — 모델 리포트 데이터 (기획안 v2.21 5.5.2): "이 세부모델은 지금 시장에서 어떤가?"
+화면은 v2.24(11-03)부터 시세 산정 안의 감가 곡선·동급 지표(web/v2/curve.js)와 마켓 펄스 매물 경고가 쓴다(모델 리포트 탭은 없앰).
 
     python model_report.py      → web/data/report/index.json(세부모델 목록 · 동급 잔존율 곡선 · 이상 매물 수)
                                   + web/data/report/<모델그룹 파일>.json(시세 산정 comps 와 같은 이름, 모델그룹마다)

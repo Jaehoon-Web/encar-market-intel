@@ -195,7 +195,7 @@ def main():
         except Exception as e:
             log("마켓 펄스 실패(무시하고 계속): %s" % e)
 
-        # 2.92) 모델 리포트(잔존율·주간 흐름·인하·이상 의심 매물 → web/data/report, 비교 매물 파일 다음) — 실패해도 배포는 계속
+        # 2.92) 모델 리포트 데이터(잔존율·주간 흐름·인하·이상 의심 매물 → web/data/report, 비교 매물 파일 다음) — 시세 산정 감가 곡선·동급 지표와 마켓 펄스 매물 경고가 씀. 실패해도 배포는 계속
         try:
             run([PY, "model_report.py"], "모델 리포트(model_report.py)")
         except Exception as e:
