@@ -204,24 +204,25 @@ async function ev(request, env) {
 const ADMIN_DAYS = 30, KEEP_EV_DAYS = 365, KEEP_SUM_DAYS = 400;
 const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 async function sign(env, msg) {
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode('admin:' + env.ADMIN_PASSWORD), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode('admin:' + adminPw(env)), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   return b64u(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(msg)));
 }
+const adminPw = env => String(env.ADMIN_PASSWORD || '').trim().normalize('NFC');   // 붙여 넣을 때 딸려 온 앞뒤 빈칸·줄바꿈은 무시
 async function admitted(request, env) {
-  if (!env.ADMIN_PASSWORD) return false;
+  if (!adminPw(env)) return false;
   const m = /^Bearer\s+(\d{12,16})\.([A-Za-z0-9_-]{20,})$/.exec(request.headers.get('authorization') || '');
   if (!m || +m[1] < Date.now()) return false;
   return samePassword(m[2], await sign(env, m[1]));
 }
 async function login(request, env) {
-  if (!env.ADMIN_PASSWORD) return json({ ok: false, error: '관리자 비밀번호가 아직 설정되지 않았습니다 — Cloudflare에 ADMIN_PASSWORD(비밀값)를 넣어 주세요' }, 503);
+  if (!adminPw(env)) return json({ ok: false, error: '관리자 비밀번호가 아직 설정되지 않았습니다 — Cloudflare에 ADMIN_PASSWORD(비밀값)를 넣어 주세요' }, 503);
   const text = await request.text();
   if (text.length > 2000) return json({ ok: false, error: '보낸 내용이 너무 큽니다' }, 413);
   let b = null;
   try { b = JSON.parse(text); } catch (e) { /* 아래에서 틀린 비밀번호로 */ }
-  if (!(await samePassword(b && b.password != null ? b.password : '', env.ADMIN_PASSWORD))) {
+  if (!(await samePassword(String(b && b.password != null ? b.password : '').trim().normalize('NFC'), adminPw(env)))) {
     await sleep(1000);
-    return json({ ok: false, error: '비밀번호가 맞지 않습니다' }, 401);
+    return json({ ok: false, error: '비밀번호가 맞지 않습니다 — 한/영 상태를 확인해 주세요' }, 401);
   }
   const exp = String(Date.now() + ADMIN_DAYS * 86400e3);
   return json({ ok: true, token: exp + '.' + await sign(env, exp), exp: +exp });
@@ -234,7 +235,7 @@ async function rollup(db, d) {                               // 지난 날의 �
   return sum;
 }
 async function stats(request, env, url) {
-  if (!(await admitted(request, env))) return json({ ok: false, error: env.ADMIN_PASSWORD ? '다시 로그인해 주세요' : '관리자 비밀번호가 아직 설정되지 않았습니다' }, 401);
+  if (!(await admitted(request, env))) return json({ ok: false, error: adminPw(env) ? '다시 로그인해 주세요' : '관리자 비밀번호가 아직 설정되지 않았습니다' }, 401);
   const now = Date.now(), today = kstDay(now);
   if (!env.STATS) return json({ ok: true, store: false, today, now, days: [] });
   const n = [7, 30, 90].indexOf(+url.searchParams.get('days')) >= 0 ? +url.searchParams.get('days') : 7, list = [];

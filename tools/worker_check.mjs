@@ -178,6 +178,8 @@ r = await adm(envA, 'POST', '/api/admin/login', { password: '관리-2026' });
 const tok = r.body && r.body.token;
 ok(r.status === 200 && /^\d{13}\.[A-Za-z0-9_-]{40,}$/.test(tok) && Math.abs(r.body.exp - Date.now() - 30 * 86400e3) < 5000, '맞는 비밀번호 → 30일 출입증', r.body);
 ok(!JSON.stringify(r.body).includes('관리-2026'), '출입증에 비밀번호가 들어 있지 않음');
+r = await adm(Object.assign({}, envA, { ADMIN_PASSWORD: '  관리-2026\n' }), 'POST', '/api/admin/login', { password: '관리-2026 ' });
+ok(r.status === 200 && r.body.ok, '비밀값·입력의 앞뒤 빈칸·줄바꿈은 무시', r.status);
 r = await adm(envA, 'GET', '/api/admin/stats?days=7');
 ok(r.status === 401, '출입증 없이 통계 → 401', r.status);
 r = await adm(envA, 'GET', '/api/admin/stats?days=7', null, tok.slice(0, -2) + 'xx');

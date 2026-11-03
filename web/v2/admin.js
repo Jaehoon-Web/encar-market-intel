@@ -91,6 +91,7 @@
     function loginHtml() {
       return '<div class="v2-phead"><div class="v2-ptl"><h1 class="v2-h1">관리자</h1><div class="v2-psub">이용 통계 · 익명</div></div></div>' +
         '<div class="card adm-login"><div class="card-title">관리자 비밀번호</div>' +
+        (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) ? '<p class="adm-local">이 화면은 <b>내 컴퓨터 미리보기</b>입니다(시험 데이터 · 시험 비밀번호). 실제 사이트의 관리자 화면은 carisma-r.fullsoup.workers.dev/#/admin 입니다.</p>' : '') +
         '<form id="admLogin" autocomplete="on"><input type="text" name="username" value="admin" autocomplete="username" hidden>' +
         '<input class="v2-in" type="password" id="admPw" autocomplete="current-password" placeholder="비밀번호" aria-label="관리자 비밀번호">' +
         '<button type="submit" class="v2-btn primary">들어가기</button></form>' +
