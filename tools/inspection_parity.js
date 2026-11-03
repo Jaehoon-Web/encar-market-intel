@@ -42,8 +42,8 @@ function check(title, makeInput) {
   }
 }
 
-// 1) 엔카 성능점검 원문 → 계산기
-check('원문 → 계산기', row => calc.fromEncar(row.outer, row.frame));
+// 1) 성능점검 원문 → 계산기
+check('원문 → 계산기', row => calc.fromRaw(row.outer, row.frame));
 
 // 2) 같은 매물을 사람이 적을 법한 텍스트 3가지로 바꿔 '성능 상태' 칸 읽기를 거친 뒤 계산
 const PILLAR_ALIAS = { 앞: 'A필러', 중간: 'B필러', 뒤: 'C필러' };
@@ -64,7 +64,7 @@ function asText(items, i) {
 }
 let textSamples = [];
 check('텍스트 → 칸 읽기 → 계산기', (row, i) => {
-  const text = asText(calc.fromEncar(row.outer, row.frame).items, i);
+  const text = asText(calc.fromRaw(row.outer, row.frame).items, i);
   if (i < 3 || (i % 33333 === 1 && textSamples.length < 6)) textSamples.push(text);
   return calc.parseText(text);
 });
@@ -136,7 +136,7 @@ console.log(`[계산 예시] ${EXAMPLES.length}건 · 실패 ${exFail}건`);
 
 // 5) 단순수리 자동 판정이 성능점검 표기와 얼마나 맞는지 (참고)
 let agree = 0;
-rows.forEach(row => { if (calc.autoSimpleRepair(calc.fromEncar(row.outer, row.frame).items) === row.simple) agree++; });
+rows.forEach(row => { if (calc.autoSimpleRepair(calc.fromRaw(row.outer, row.frame).items) === row.simple) agree++; });
 console.log(`\n[참고] 단순수리 자동 판정 ↔ 성능점검 표기 일치 ${(agree / rows.length * 100).toFixed(1)}% (${agree.toLocaleString()} / ${rows.length.toLocaleString()})`);
 
 console.log(failures ? `\n✗ 불일치·실패 ${failures.toLocaleString()}건` : '\n✓ 전부 일치');

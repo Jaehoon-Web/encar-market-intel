@@ -130,7 +130,7 @@ def to_json(est):
         models[k] = e
     return {
         "version": datetime.date.today().isoformat(),
-        "note": "엔카 판매중 매물로 추정한 시세 보정 계수(D3). 로그 가격 기준 — 보정 배수 = exp(계수 × 차이)",
+        "note": "온라인 판매중 매물로 추정한 시세 보정 계수(D3). 로그 가격 기준 — 보정 배수 = exp(계수 × 차이)",
         "definition": "보정가 = 비교 매물 호가 × (1 − 대상 감가율)/(1 − 비교 감가율) × exp(age×Δ개월 + km×Δ만km + rent×Δ렌트 + "
                       "color[대상] − color[비교] + grade[대상] − grade[비교] + trim[대상] − trim[비교])",
         "units": {"age": "1개월당", "km": "1만km당(25만km 상한)", "rent": "렌트 번호판", "color": "흰색·진주 대비, 미상은 0"},

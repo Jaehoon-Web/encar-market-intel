@@ -158,7 +158,7 @@
       h += '</tbody></table></div><p class="v2-help">' + esc(MI.definitions['시황']) + '. 판매속도는 수집 간격이 5~16일인 구간만 계산합니다' +
         (series('전체|전체').some(function (p) { return p.date === lastDate() && p['판매속도'] != null; }) ? '' : ' — 지금은 공백 뒤 첫 회차라 판매속도·시황이 없고, 다음 주간 수집부터 나옵니다') +
         '. 흐린 값은 그 지수의 마지막 값(날짜 표시)입니다.' +
-        (series('전체|전체').some(function (p) { return p.stock_fix; }) ? ' 재고의 "보정"은 엔카가 광주·전남 매물을 "전남광주"로 바꿔 목록에서 빠졌던 회차(7/29~)에 실측 누락 대수를 더한 값입니다.' : '') +
+        (series('전체|전체').some(function (p) { return p.stock_fix; }) ? ' 재고의 "보정"은 광주·전남 매물이 "전남광주"로 바뀌어 목록에서 빠졌던 회차(7/29~)에 실측 누락 대수를 더한 값입니다.' : '') +
         '</p></div>';
       return h;
     }
@@ -338,7 +338,7 @@
         '<span><i style="background:var(--tx-4);opacity:.4;border-radius:2px"></i>구간이 5~16일이 아닌 값(비교 주의)</span></div>' + flowChart(pts) + '</div>';
       h += '<div class="v2-actions"><button type="button" class="v2-btn" data-m="table">' + (V.table ? '표 닫기' : '표로 보기') + '</button></div>';
       if (V.table) h += dataTable(pts);
-      return h + '<p class="v2-help">판매중 재고 = 상세 화면까지 확인한 판매중 매물 · 신규 유입 = 직전 수집 뒤 엔카에 새로 올라온 매물 · ' +
+      return h + '<p class="v2-help">판매중 재고 = 상세 화면까지 확인한 판매중 매물 · 신규 유입 = 직전 수집 뒤 온라인에 새로 올라온 매물 · ' +
         '판매(추정) = 그 사이 목록에서 사라진 매물(다시 올린 것은 뺌) · /주 = 7일 기준으로 맞춘 값 · 신규 중앙 호가 = 새로 올라온 매물(30대 이상)의 첫 호가 가운데 값. ' +
         '재고지수는 목록 기준이라 위의 판매중 재고(상세 확인 기준)와 다릅니다. 내려받은 CSV의 열 이름 설명은 데이터 탭에 있습니다.</p></div>';
     }

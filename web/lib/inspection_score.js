@@ -1,7 +1,7 @@
 /*
  * inspection_score.js — 성능 상태 계산기 (사이트용)
  *
- * 성능·상태점검기록부 입력(부위 37곳 × 상태 7가지), 엑셀 '성능 상태' 한 칸, 엔카 성능점검 원문을 받아
+ * 성능·상태점검기록부 입력(부위 37곳 × 상태 7가지), 엑셀 '성능 상태' 한 칸, 성능점검 원문을 받아
  * 파이프라인(prep.py · inspection_score.py)과 같은 규칙으로 계산한다.
  *   → 사고 단계·라벨, 단계별 교환·판금 수, 글로비스 감점합·종합평가점·사고평가점, 자체 성능감가율·점수·등급
  * 규칙·가중치는 /data/inspection_model.json 하나에서 읽는다(inspection_score.py 가 내보냄. 직접 고치지 말 것).
@@ -10,7 +10,7 @@
  *   var calc = InspectionScore.create(model);
  *   calc.evaluate({ state: '입력', items: [{ part: '프론트 휀더', side: '좌', status: '교환' }] });
  *   calc.evaluate(calc.parseText('좌프론트휀더 X, 우쿼터 W'));
- *   calc.evaluate(calc.fromEncar(outerPanelText, mainFrameText));
+ *   calc.evaluate(calc.fromRaw(outerPanelText, mainFrameText));
  *
  * state: '입력'(부위 입력) / '무사고'(이상 없음을 직접 고름) / '미상'(입력 안 함 — 무사고로 치지 않는다)
  * item:  { part: 부위 이름, side: '좌'|'우'|null, pillar: '앞'|'중간'|'뒤'|null, status: 교환·용접절단·판금·요철·손상·부식·흠집 }
@@ -43,13 +43,13 @@
     function info(part) { return parts[part] || (generic[part] ? parts[generic[part]] : null); }
     function itemLabel(it) { return it.part + (it.pillar ? '(' + it.pillar + ')' : '') + (it.side ? '(' + it.side + ')' : ''); }
 
-    // ── 엔카 성능점검 원문 (outer_panel · main_frame) — inspection_score.parse_items 와 같음 ──
+    // ── 성능점검 원문 (outer_panel · main_frame) — inspection_score.parse_items 와 같음 ──
     function rawStatus(stat) {
       for (var i = 0; i < rawRules.length; i++) if (rawRules[i][0].test(stat)) return rawRules[i][1];
       return '기타';
     }
 
-    function fromEncar(outer, frame) {
+    function fromRaw(outer, frame) {
       var items = [];
       [outer, frame].forEach(function (txt) {
         if (txt == null || txt === '') return;
@@ -299,7 +299,7 @@
       s = s.trim();
       if (!s || UNKNOWN_CELL[compact(s)]) { res.state = '미상'; return res; }
       if (NO_DAMAGE[compact(s)]) { res.state = '무사고'; return res; }
-      s = s.replace(/판금\s*\/\s*용접\s*,\s*용접\s*,\s*절단/g, '절단')   // 엔카 원문 표기
+      s = s.replace(/판금\s*\/\s*용접\s*,\s*용접\s*,\s*절단/g, '절단')   // 원문 표기
         .replace(/교환\s*\(\s*교체\s*\)/g, '교환')
         .replace(/판금\s*\/\s*용접/g, '판금')
         .replace(/좌\s*[·,\/&]\s*우/g, '좌우')
@@ -340,7 +340,7 @@
       version: model.version,
       positions: model.positions,
       statuses: model.statuses,
-      fromEncar: fromEncar,
+      fromRaw: fromRaw,
       parseText: parseText,
       evaluate: evaluate,
       autoSimpleRepair: autoSimpleRepair,

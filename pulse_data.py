@@ -471,7 +471,7 @@ def jn_notes(e, p, q, date, wk, pwk):
     out = []
     if e.get("jn_gap"):
         fx = e.get("stock_fix")
-        s = (f"{md(date)} 목록은 엔카 지역 표시가 바뀌어 " + (f"전남광주 매물 약 {fx:,}대가" if fx else "전남광주 매물이") + " 수집에서 빠졌습니다. "
+        s = (f"{md(date)} 목록은 지역 표시가 바뀌어 " + (f"전남광주 매물 약 {fx:,}대가" if fx else "전남광주 매물이") + " 수집에서 빠졌습니다. "
              + ("판매중·신규·판매" if e.get("jn_gap_sold") else "판매중·신규") + " 대수가 실제보다 적게 잡혔습니다"
              + ("(재고 지수에는 이 대수를 더해 계산)." if fx else "."))
         if wk and p.get("jn_gap"):

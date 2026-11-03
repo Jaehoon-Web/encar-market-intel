@@ -642,13 +642,13 @@
       done.filter(counted).forEach(function (r) { sumP += r.R.price; sumC += r.R.converted; });
       done.forEach(function (r) { if (r.R.grade === 'C') cN++; });
       var chk = rows.filter(needsCheck).length, skip = rows.length - done.length, offNote = off ? ' · 차명 확인 ' + off + '대는 합계 제외' : '';
-      var h = '<div class="card v2-headcard"><div class="v2-head">④ 결과 · ' + rows.length + '대<br><span class="sub">추정 시세는 엔카 호가 기준 · 환산가는 팀 환산 비율 적용 · ' +
+      var h = '<div class="card v2-headcard"><div class="v2-head">④ 결과 · ' + rows.length + '대<br><span class="sub">추정 시세는 온라인 소매 호가 기준 · 환산가는 팀 환산 비율 적용 · ' +
         '"열기"는 그 차의 한 대 산정 화면(근거·비교 매물)</span></div><div class="v2-actions" style="margin:0">' +
         '<label class="v2-chk" style="margin:0"><input type="checkbox" data-b="only"' + (onlyCheck ? ' checked' : '') + '> 확인할 차만 보기</label>' +
         '<button type="button" class="v2-btn primary" data-b="xlsx"' + (done.length ? '' : ' disabled') + '>엑셀 내려받기</button></div></div>';
       h += '<div class="v2-cards v2-bcards">' +
         ctx.tile('산정', String(done.length), '대', skip ? '계산 안 됨 ' + skip + '대 · 이유는 표에' : '전부 계산됨') +
-        ctx.tile('추정 시세 합계', man(sumP), '만원', eok(sumP) + '만 · 엔카 호가 기준 · 수리비 반영' + offNote) +
+        ctx.tile('추정 시세 합계', man(sumP), '만원', eok(sumP) + '만 · 온라인 소매 호가 기준 · 수리비 반영' + offNote) +
         ctx.tile('환산가 합계', man(sumC), '만원', eok(sumC) + '만 · 팀 환산 비율 적용' + offNote) +
         ctx.tile('확인할 차', String(chk + skip), '대', '신뢰도 C ' + cN + '대 · 차명 확인 ' + chk + '대') + '</div>';
       var vs = verify();
@@ -698,7 +698,7 @@
       var money = ['산정_주행(km)', '추정 시세(만원)', '범위 하한(만원)', '범위 상한(만원)', '환산가(만원)', '실제 낙찰가(만원)']
         .filter(function (k) { return calc.indexOf(k) >= 0; }).map(function (k) { return nc + calc.indexOf(k); });
       var cmp = [['행', '차량', '유사도', '매물ID', '상태', '판매 확인일', '최초등록', '주행(km)', '색상', '등급', '세부등급', '성능등급', '사고 라벨',
-        '손상 부위', '호가(만원)', '보정 후(만원)', '이상치', '엔카 링크']];
+        '손상 부위', '호가(만원)', '보정 후(만원)', '이상치', '매물 링크']];
       rows.forEach(function (r) {
         if (!r.R) return;
         var G = GROUPS[r.best.file], F = G.F, fi = G.fi, who = (r.plate ? r.plate + ' ' : '') + r.best.model + ' ' + r.grade;
@@ -724,7 +724,7 @@
       var info = [['항목', '값'], ['붙여넣은 차', rows.length + T.over], ['산정한 차', done.length], ['계산 안 된 차', rows.length + T.over - done.length],
         ['추정 시세 합계(만원)', { v: sum(function (R) { return R.price; }), money: true }], ['환산가 합계(만원)', { v: sum(function (R) { return R.converted; }), money: true }],
         ['신뢰도 C(대)', done.filter(function (r) { return r.R.grade === 'C'; }).length],
-        ['데이터 기준', '엔카 목록 ' + (mi.length ? mi[mi.length - 1].date : '')], ['비교 매물 파일', X.idx.version], ['보정 계수', X.coef.version], ['환산 비율', RatesStore.label(X.rates)],
+        ['데이터 기준', '온라인 매물 목록 ' + (mi.length ? mi[mi.length - 1].date : '')], ['비교 매물 파일', X.idx.version], ['보정 계수', X.coef.version], ['환산 비율', RatesStore.label(X.rates)],
         ['비교 범위', '판매중 + 최근 3개월 판매'],
         ['열 지정', T.roles.map(function (role, c) { return role ? colName(c) + '=' + ROLE_NAME[role] : null; }).filter(Boolean).join(', ')],
         ['차명 확신', '확실 · 확인 권장 · 확인 필요 · 직접 고름 · 못 찾음 — 확인 권장·필요는 결과 시트에서 산정_세부모델을 확인하세요'],
@@ -732,7 +732,7 @@
           '범퍼·램프·유리·휠·타이어처럼 성능점검 대상이 아닌 부위는 계산에서 뺌'],
         ['합계', '등록연도가 매칭한 모델 기간(±1년) 밖인 차는 차명을 확인할 때까지 합계에서 뺌'],
         ['수리비', '단위 없이 1만 이상이면 원으로 보고 만원으로 바꿈. 추정 시세·환산가에서 그대로 뺌'],
-        ['참고', '추정 시세는 엔카 호가 기준. 환산가는 팀 환산 비율(도·소매 갭 요약치)을 적용한 값']];
+        ['참고', '추정 시세는 온라인 소매 호가 기준. 환산가는 팀 환산 비율(도·소매 갭 요약치)을 적용한 값']];
       if (vs) info.push(['실제 건 비교', vs.n + '대 · 오차 중위(절댓값) ' + vs.mdape.toFixed(1) + '% · 치우침 ' + sgn(vs.bias) + ' · ±10% 안 ' + Math.round(vs.within * 100) + '%'],
         ['실제로 구한 환산 비율', '중위 ' + vs.imp.toFixed(1) + '% (지금 쓰는 비율 중위 ' + vs.used.toFixed(1) + '%) — 실제 비율 = 1 − (낙찰가 + 수리비) ÷ 수리비 빼기 전 추정 시세']);
       var widths = head.map(function () { return 14; }).concat([10, 12, 20, 18, 14, 10, 12, 11, 30, 12, 8, 10, 10, 10, 10, 12, 12, 12, 10, 12, 16, 7, 9, 22, 24, 40], vs ? [14, 12, 14] : []);

@@ -1012,7 +1012,7 @@ select.filter-select {
 label .bg-slate-900\/80 { background: var(--bg-2) !important; color: var(--tx-1) !important; border-color: var(--line) !important; }
 
 /* ============================================================
-   ENCAR DASHBOARD — 추가 컴포넌트
+   DASHBOARD — 추가 컴포넌트
    ============================================================ */
 
 /* 데이터 출처 레이어 배지 */

@@ -2,16 +2,17 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8" />
-<title>엔카 인텔 — 중고차 시세 산정 · 마켓 펄스 · 시장 시황</title>
+<title>카리스마R — 중고차 소매 시세 산정 · 마켓 펄스 · 시장 시황</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<meta name="description" content="엔카 매물로 중고차 시세를 근거와 함께 추정한다. 감가 곡선·동급 대비 지표, 묶음 산정, 마켓 펄스(이번 주 시장), 시장 시황 지수, 차종 비교, 데이터 내려받기" />
+<meta name="description" content="온라인 매물로 중고차 소매 시세를 근거와 함께 추정한다. 감가 곡선·동급 대비 지표, 묶음 산정, 마켓 펄스(이번 주 시장), 시장 시황 지수, 차종 비교, 데이터 내려받기" />
 <script>
-  // 이전 사이트 즐겨찾기(#/overview 등)는 이전 사이트로 — 2026-10-27 교체(이전 사이트는 old.html)
-  // 새 사이트를 연 채로 즐겨찾기를 누르면 페이지가 다시 읽히지 않으므로 해시가 바뀔 때도 본다
+  // 이전 사이트 즐겨찾기(#/overview 등)는 같은 일을 하는 지금 화면으로 — 이전 사이트는 2026-11-03에 지웠다
+  // 사이트를 연 채로 즐겨찾기를 누르면 페이지가 다시 읽히지 않으므로 해시가 바뀔 때도 본다
   (function () {
-    function toOld() { if (/^#\/(overview|inventory|lookup|model|trend|insights|download)\b/.test(location.hash)) location.replace('old.html' + location.hash); }
-    toOld();
-    addEventListener('hashchange', toOld);
+    var TO = { overview: '#/market', inventory: '#/market', trend: '#/market', insights: '#/market', lookup: '#/price', model: '#/price', download: '#/data' };
+    function toNew() { var m = /^#\/(overview|inventory|lookup|model|trend|insights|download)\b/.exec(location.hash); if (m) location.replace(TO[m[1]]); }
+    toNew();
+    addEventListener('hashchange', toNew);
   })();
 </script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css" />
@@ -39,8 +40,8 @@
   <div class="max-w-[1600px] mx-auto px-4 md:px-6 flex items-center gap-6 md:gap-10" style="height:54px;">
     <a href="#/price" class="brand-mark shrink-0">
       <span class="swoosh"></span>
-      <span class="ko">엔카 인텔</span>
-      <span class="en hidden sm:inline">ENCAR · MARKET INTEL</span>
+      <span class="ko">카리스마R</span>
+      <span class="en hidden sm:inline">CARISMA · RETAIL</span>
     </a>
     <nav class="flex items-center gap-0 overflow-x-auto no-scrollbar">
       <a class="nav-tab on" href="#/price" id="navPrice">시세 산정</a>
@@ -50,7 +51,6 @@
     </nav>
     <div class="ml-auto flex items-center gap-3 shrink-0">
       <span class="eyebrow hidden md:block" id="asOf">—</span>
-      <a class="tag tag-lock hidden sm:inline-flex" href="old.html">이전 사이트</a>
     </div>
   </div>
 </header>
@@ -62,8 +62,8 @@
 </main>
 
 <footer class="mt-16 py-10 text-center" style="border-top:1px solid var(--line);">
-  <div class="eyebrow mb-2">ENCAR MARKET INTEL · 중고차 시세 산정 · 마켓 펄스 · 시장 시황</div>
-  <div class="text-[11px]" style="color:var(--tx-4);">추정 시세는 엔카 호가 기준입니다. <span id="footConv">환산가는 팀 환산 비율(도·소매 갭 요약치)을 적용한 값입니다. </span>· <a href="old.html" style="color:var(--tx-3);">이전 사이트</a></div>
+  <div class="eyebrow mb-2">CARISMA · RETAIL · 중고차 소매 시세 산정 · 마켓 펄스 · 시장 시황</div>
+  <div class="text-[11px]" style="color:var(--tx-4);">추정 시세는 온라인 소매 호가 기준입니다. <span id="footConv">환산가는 팀 환산 비율(도·소매 갭 요약치)을 적용한 값입니다.</span></div>
 </footer>
 
 <div class="v2-tip" id="tip" hidden></div>

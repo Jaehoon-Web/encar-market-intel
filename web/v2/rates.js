@@ -36,7 +36,7 @@
     function head() {
       var t = S.team, h = '<div class="card v2-headcard"><div class="v2-head">⚙ 환산 비율 — 팀 공용<br><span class="sub">';
       if (!S.loaded) h += '저장소를 확인하는 중…';
-      else if (!S.store) h += '팀 저장소 연결 전 — 초기값(경매 낙찰가 ÷ 같은 조건 엔카 호가 요약치)만 쓰는 중입니다. 수정은 저장소를 연결한 뒤에 됩니다.';
+      else if (!S.store) h += '팀 저장소 연결 전 — 초기값(경매 낙찰가 ÷ 같은 조건 온라인 소매 호가 요약치)만 쓰는 중입니다. 수정은 저장소를 연결한 뒤에 됩니다.';
       else if (t) h += '팀 저장소 ' + t.rev + '판 · 마지막 수정 ' + esc(RatesStore.kst(t.updated_at)) + ' ' + esc(t.updated_by);
       else h += '팀 저장소 연결됨 · 아직 팀이 고친 것이 없습니다(초기값 그대로)';
       h += '</span></div><div class="v2-actions" style="margin:0">';
@@ -60,7 +60,7 @@
 
     function tableCard() {
       var cells = S.edit ? S.edit.cells : teamCells(), fill = R.filled_from_neighbor || [], cnt = R.counts || [];
-      var h = '<div class="card"><div class="card-title">호가대 × 차령 기준표 <span class="hint">환산 비율(%) = 엔카 호가에서 뺄 비율 · 칸 아래는 초기값과 근거 대수</span></div>' +
+      var h = '<div class="card"><div class="card-title">호가대 × 차령 기준표 <span class="hint">환산 비율(%) = 온라인 소매 호가에서 뺄 비율 · 칸 아래는 초기값과 근거 대수</span></div>' +
         '<div class="v2-tablewrap"><table class="t v2-rtbl"><thead><tr><th>추정 시세 \\ 차령</th>' + R.age_bands.map(function (b) { return '<th>' + esc(b.label) + '</th>'; }).join('') +
         '</tr></thead><tbody>';
       R.price_bands.forEach(function (p, i) {

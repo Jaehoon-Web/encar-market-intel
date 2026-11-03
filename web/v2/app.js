@@ -22,22 +22,22 @@
   var VIEW = { sort: 'sim', all: false, mode: 'one', condWarn: [], condOut: [], exKeep: {}, allGrades: false, nameText: '', nameMsg: '', nameCands: [], recentOpen: false,
     posx: 'km', hl: null };                                  // posx: 내 차 위치 그림 가로축(km·age) · hl: 그림에서 누른 비교 매물 ID      // mode: one(한 대 산정) · model(모델 요약) · batch(묶음 산정) · rates(⚙ 환산 비율)
   var TIP = {                                                // 용어 설명(결과 카드·비교 매물 표의 ? — 마우스를 올리거나 누르면)
-    est: '비슷한 엔카 매물(판매중 + 최근 3개월 판매)의 호가를 이 차 조건으로 맞춘 값(보정 후) 가운데 값입니다. 비슷한 매물일수록 크게 반영합니다. ' +
-      '엔카 소매 호가 기준이라 실제 거래가와는 다릅니다. 범위는 보정 후 값의 가운데 50%입니다.',
+    est: '비슷한 온라인 매물(판매중 + 최근 3개월 판매)의 호가를 이 차 조건으로 맞춘 값(보정 후) 가운데 값입니다. 비슷한 매물일수록 크게 반영합니다. ' +
+      '온라인 소매 호가 기준이라 실제 거래가와는 다릅니다. 범위는 보정 후 값의 가운데 50%입니다.',
     conv: '경매에서 받을 만한 값(낙찰가 수준)의 추정입니다. 추정 시세 × (1 − 환산 비율) − 수리비. 환산 비율은 같은 조건의 경매 낙찰가가 ' +
-      '엔카 호가보다 얼마나 낮았는지로 정한 팀 기준입니다(⚙ 환산 비율). 기준표는 칸 가운데 값 사이를 이어서 읽어, 호가대·차령 경계에서 비율이 뛰지 않습니다.',
+      '온라인 소매 호가보다 얼마나 낮았는지로 정한 팀 기준입니다(⚙ 환산 비율). 기준표는 칸 가운데 값 사이를 이어서 읽어, 호가대·차령 경계에서 비율이 뛰지 않습니다.',
     grade: 'A = 비교 매물 10대 이상, 조건을 거의 넓히지 않았고 범위가 ±8% 안. B = 조건을 조금 넓힘. C = 같은 세부모델 전체로 넓힌 참고값.',
-    step: '비교 매물을 같은 등급·세부등급(트림)·가까운 차령·주행부터 찾고, 5대가 안 되면 범위를 한 단계씩 넓힙니다. 1단계(같은 트림)가 가장 좁은 조건이고, 세부등급을 고르지 않았으면 2단계부터 봅니다. 이름이 「가까운 이름」·「엔카 이름」인 매물은 1단계에 쓰지 않습니다.',
+    step: '비교 매물을 같은 등급·세부등급(트림)·가까운 차령·주행부터 찾고, 5대가 안 되면 범위를 한 단계씩 넓힙니다. 1단계(같은 트림)가 가장 좁은 조건이고, 세부등급을 고르지 않았으면 2단계부터 봅니다. 이름이 「가까운 이름」·「매물 이름」인 매물은 1단계에 쓰지 않습니다.',
     cond: '같은 차가 무사고였다면의 값입니다. 성능 상태를 넣으면 비교 매물이 비슷한 상태의 차로 바뀌어, 감가율보다 크게 빠질 수 있습니다.',
     sim: '이 차와 얼마나 비슷한지(100 = 가장 비슷). 차령·주행·등급·성능이 가까울수록 높고, 높을수록 추정 시세에 크게 반영됩니다.',
-    price: '엔카에 올라온 판매 희망 가격. 판매된 매물은 목록에서 사라지기 전 마지막 호가입니다.',
+    price: '온라인에 올라온 판매 희망 가격. 판매된 매물은 목록에서 사라지기 전 마지막 호가입니다.',
     adj: '이 매물이 이 차와 조건(차령·주행·색상·렌트·등급·성능·시점)이 같았다면 매겨졌을 호가. 추정 시세는 이 값들의 가운데 값입니다.',
-    dwell: '엔카에 올라온 뒤 지난 날수(판매된 매물은 판매까지)',
+    dwell: '온라인에 올라온 뒤 지난 날수(판매된 매물은 판매까지)',
     cut: '첫 호가보다 내린 금액',
     pos: '점은 비교 매물의 실제 호가입니다(판매된 매물은 목록에서 사라지기 전 마지막 호가). 별은 이 차의 추정 시세, 세로 띠는 추정 범위(25~75%)입니다. ' +
       '점선은 이 차와 다른 조건이 같고 주행(또는 연식)만 다를 때의 값으로, 매주 데이터에서 추정한 보정 계수로 그립니다. 점을 누르면 아래 표의 그 매물로 갑니다.',
     speed: '차급 대비는 이 세부모델과 같은 차급(국산·수입 구분) 전체의 주간 판매율을 비교합니다(±15% 안이면 비슷). 가격 위치별 일수는 최근 3개월에 판매된 비교 매물을 ' +
-      '이 차 조건으로 맞춘 값(보정가)이 추정가보다 얼마나 쌌는지·비쌌는지로 나눠, 엔카에 올라온 뒤 목록에서 사라지기까지 걸린 날수의 가운데 값을 보여 줍니다. 판매자가 내린 매물도 섞일 수 있습니다.',
+      '이 차 조건으로 맞춘 값(보정가)이 추정가보다 얼마나 쌌는지·비쌌는지로 나눠, 온라인에 올라온 뒤 목록에서 사라지기까지 걸린 날수의 가운데 값을 보여 줍니다. 판매자가 내린 매물도 섞일 수 있습니다.',
     ladder: '같은 세부모델 안에서 연식·주행, 등급, 성능 상태에 따라 값이 어떻게 달라지는지 봅니다. 시세표와 등급별은 판매중 매물의 호가 가운데 값이고, ' +
       '성능 상태별은 매물을 이 차 조건으로 맞춘 뒤 사고 단계끼리 비교한 값입니다(사고 차 매각가를 잡을 때 참고).',
     flow: '비교 매물 호가의 가운데 값에서 출발해 조건 차이를 맞추는 보정(비교 매물 평균)을 더하면 추정 시세가 됩니다. "나머지"는 가운데 값끼리의 차이로, ' +
@@ -46,7 +46,7 @@
       '시간에 따른 자연 감가는 빠집니다(100보다 낮으면 같은 조건의 차가 7월 초보다 싸게 나온다는 뜻). 세부모델 점은 신규 매물 10대 이상인 회차만 찍고, 옅은 띠는 표본 수로 생기는 ' +
       '흔들림의 2배 범위입니다(흔들림 = 신규 매물 수로 생기는 표준오차, 마켓 펄스·시장 시황과 같은 뜻). 방향은 최근 4주 기울기가 흔들림의 2배를 넘을 때만 오름·내림으로 씁니다. 회색 점선은 같은 차급(국산·수입 구분) 전체입니다.'
   };
-  var DOM_ORDER = ['현대', '제네시스', '기아', '쉐보레(GM대우)', '르노코리아(삼성)', 'KG모빌리티(쌍용)', '기타 제조사'];   // 엔카 국산 제조사 순서
+  var DOM_ORDER = ['현대', '제네시스', '기아', '쉐보레(GM대우)', '르노코리아(삼성)', 'KG모빌리티(쌍용)', '기타 제조사'];   // 국산 제조사 순서
   var RECENT = 'v2.recent';                                  // 최근 산정(이 브라우저에만)
   var CV = null;                                             // 동급 대비 지표 · 감가 곡선(curve.js)
   var MODES = ['model', 'batch', 'rates'];                  // 주소 view= 로 남는 화면
@@ -124,8 +124,8 @@
     return M ? G.F.rows.filter(function (r) { return r[fi.m] === M.idx; }) : [];
   }
 
-  // ───── 엔카 이름 → 경매 4단계 이름 (기획 v2.23 Q109 — 엔카 이름으로 된 옛 주소·최근 산정 기록을 새 이름으로 연다) ─────
-  function legacyModel(s) {                                 // 모델그룹·세부모델: index 세부모델의 en(붙은 엔카 원래 이름)에서 찾는다
+  // ───── 매물 이름 → 경매 4단계 이름 (기획 v2.23 Q109 — 매물 이름으로 된 옛 주소·최근 산정 기록을 새 이름으로 연다) ─────
+  function legacyModel(s) {                                 // 모델그룹·세부모델: index 세부모델의 en(붙은 매물 원래 이름)에서 찾는다
     var mk = X.idx.makers.find(function (m) { return m.name === s.mk; });
     if (!mk || (!s.grp && !s.model)) return null;
     var g0 = mk.groups.find(function (g) { return g.name === s.grp; });
@@ -142,7 +142,7 @@
     if (s.model) s.model = best.m;
     return { from: from, to: s.grp + (s.model ? ' › ' + s.model : '') };
   }
-  function legacyGrade(s, G) {                               // 등급·세부등급: 그 세부모델 비교 매물의 엔카 원래 등급(파일 머리말 enc)과 가장 많이 짝지은 것
+  function legacyGrade(s, G) {                               // 등급·세부등급: 그 세부모델 비교 매물의 매물 원래 등급(파일 머리말 enc)과 가장 많이 짝지은 것
     if (!G || !s.model || !s.grade || !G.F.enc || G.fi.en == null) return null;
     var rows = modelRows(G, s.model), fi = G.fi, c = {}, best = null;
     if (rows.some(function (r) { return G.F.grades[r[fi.g]] === s.grade; })) return null;
@@ -161,22 +161,22 @@
   }
   function legacyNote(a, b) {                                // 바꿔 연 사실을 차명 찾기 아래 안내 줄에
     if (!a && !b) return;
-    VIEW.nameMsg = '예전 엔카 이름 「' + [a && a.from, b && b.from].filter(Boolean).join(' · ') + '」을 경매 이름 「' +
+    VIEW.nameMsg = '예전 이름 「' + [a && a.from, b && b.from].filter(Boolean).join(' · ') + '」을 경매 이름 「' +
       [a && a.to, b && b.to].filter(Boolean).join(' · ') + '」으로 바꿔 열었습니다';
   }
-  function encNames(mk, grp, model) {                        // 이 세부모델에 붙은 엔카 원래 이름 [[엔카 모델그룹, 엔카 모델, 대수, 가까운 이름 대수, …], …]
+  function encNames(mk, grp, model) {                        // 이 세부모델에 붙은 매물 원래 이름 [[매물 모델그룹, 매물 모델, 대수, 가까운 이름 대수, …], …]
     var m = X.idx.makers.find(function (x) { return x.name === mk; }), g = m && m.groups.find(function (x) { return x.name === grp; });
     var e = g && g.models.find(function (x) { return x.name === model; });
     return e && e.en || [];
   }
-  function encLine(mk, grp, model) {                         // '엔카 표기: 그랜저 하이브리드 (GN7) 590대 · 더 뉴 그랜저 하이브리드 (GN7) 7대(가까운 이름)'
+  function encLine(mk, grp, model) {                         // '매물 표기: 그랜저 하이브리드 (GN7) 590대 · 더 뉴 그랜저 하이브리드 (GN7) 7대(가까운 이름)'
     var en = encNames(mk, grp, model).filter(function (e) { return e[1]; });
     if (!en.length) return '';
-    return '엔카 표기: ' + en.slice(0, 3).map(function (e) {
+    return '매물 표기: ' + en.slice(0, 3).map(function (e) {
       return e[1] + ' ' + e[2].toLocaleString() + '대' + (e[3] >= e[2] / 2 ? '(경매에 없는 이름 — 가까운 이 이름에 붙임)' : '');
     }).join(' · ') + (en.length > 3 ? ' 외' : '');
   }
-  function encOfRow(G, row) {                                // 비교 매물 한 대의 엔카 원래 이름 { model, grade, trim } — 없으면 null
+  function encOfRow(G, row) {                                // 비교 매물 한 대의 매물 원래 이름 { model, grade, trim } — 없으면 null
     if (!G.F.enc || G.fi.en == null) return null;
     var e = String(G.F.enc[row[G.fi.en]] || '').split('|');
     return e.length < 3 ? null : { model: e[0], grade: e[1], trim: e[2] };
@@ -321,7 +321,7 @@
     var grades = rows.length ? countBy(rows, fi.g, G.F.grades) : [], gfuel = gradeFuel(G, rows), fuels = [];
     grades.forEach(function (x) { var f = gfuel[x[0]] || '기타'; if (fuels.indexOf(f) < 0) fuels.push(f); });
     var glab = function (x) { return [x[0], x[0] + ' · ' + x[1].toLocaleString() + '대']; };
-    h += field('등급', fuels.length > 1                       // 연료가 둘 이상이면 연료로 묶는다(엔카처럼) — 많은 연료부터
+    h += field('등급', fuels.length > 1                       // 연료가 둘 이상이면 연료로 묶는다— 많은 연료부터
       ? selG('grade', ['', '등급 선택'], fuels.map(function (f) {
         return { label: f, opts: grades.filter(function (x) { return (gfuel[x[0]] || '기타') === f; }).map(glab) };
       }), S.grade, !S.model)
@@ -448,7 +448,7 @@
     Object.keys(fc).forEach(function (g) { out[g] = Object.keys(fc[g]).sort(function (a, b) { return fc[g][b] - fc[g][a]; })[0]; });
     return out;
   }
-  function chipsHtml() {                                     // 고른 조건 한 줄(엔카 조건 칩) — 누르면 그 칸으로. 긴 입력 칸에서 지금 조건을 한눈에
+  function chipsHtml() {                                     // 고른 조건 한 줄(조건 칩) — 누르면 그 칸으로. 긴 입력 칸에서 지금 조건을 한눈에
     var c = [], km = kmNum(S.km), cost = manNum(S.cost);
     if (S.model) c.push(['model', S.mk + ' › ' + S.model]); else if (S.grp) c.push(['grp', S.mk + ' › ' + S.grp]); else if (S.mk) c.push(['mk', S.mk]);
     if (S.grade) c.push(['grade', S.grade + (S.trim ? ' ' + S.trim : '')]);
@@ -471,7 +471,7 @@
       price: Math.round(R.price), conv: Math.round(R.converted), at: Date.now() });
     try { localStorage.setItem(RECENT, JSON.stringify(list.slice(0, 10))); } catch (e) { /* 저장 못 해도 산정은 된다 */ }
   }
-  function recentHtml() {                                    // 최근 산정(엔카 '최근 검색 조건') — 누르면 그 차를 다시 연다
+  function recentHtml() {                                    // 최근 산정— 누르면 그 차를 다시 연다
     var rl = recentList();
     if (!rl.length) return '';
     var when = function (t) { var d = new Date(t); return pad(d.getMonth() + 1) + '/' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); };
@@ -621,8 +621,8 @@
     $('res').innerHTML = miss.length ? needCard(miss) : '<div class="card"><div class="card-title">비교 매물을 불러오는 중…</div></div>';
   }
   function needCard(miss) {                                  // 남은 칸만 이름으로(누르면 그 칸으로 간다) · 처음 방문이면 사이트 설명을 위에
-    return (S.mk || VIEW.mode === 'model' ? '' : '<div class="card v2-intro"><div class="card-title">이 화면에서 하는 일</div><p>엔카에 올라온 비슷한 매물로 ' +
-      '이 차의 <b>시세(엔카 소매 호가)</b>와 <b>경매 예상가(환산가)</b>를 근거와 함께 냅니다.</p><ol><li>왼쪽 맨 위에 차명을 한 줄로 넣거나' +
+    return (S.mk || VIEW.mode === 'model' ? '' : '<div class="card v2-intro"><div class="card-title">이 화면에서 하는 일</div><p>온라인에 올라온 비슷한 매물로 ' +
+      '이 차의 <b>시세(온라인 소매 호가)</b>와 <b>경매 예상가(환산가)</b>를 근거와 함께 냅니다.</p><ol><li>왼쪽 맨 위에 차명을 한 줄로 넣거나' +
       '(예: 더 뉴 그랜저 IG 2.5 프리미엄 2020) 칸을 차례로 고르고</li><li>주행거리를 넣으면 바로 계산됩니다. 월·색상·성능 상태·수리비는 넣으면 더 정확해집니다.</li></ol>' +
       '<p>여러 대는 <a class="v2-link" href="#/price?view=batch">묶음 산정</a>에 엑셀을 붙여 넣고, 시장 흐름은 <a class="v2-link" href="#/market">시장 시황</a>에서 봅니다.</p></div>') +
       '<div class="card v2-needcard"><div class="card-title">' + (VIEW.mode === 'model' ? '모델 요약' : '한 대 산정') + '까지 남은 칸 ' +
@@ -656,7 +656,7 @@
       ' — 왼쪽 성능 상태에서 고쳐 다시 읽어 주세요.' + (S.items.length ? '' : ' 읽은 부위가 없어 상태 미상으로 계산했습니다.') + '</div>';
 
     h += '<div class="v2-cards">';
-    h += '<div class="card"><div class="eyebrow">추정 시세 · 엔카 호가 기준' + q(TIP.est) + '</div><div class="v2-big" style="margin-top:12px">' + man(r.price) + '<small>만원</small></div>' +
+    h += '<div class="card"><div class="eyebrow">추정 시세 · 온라인 소매 호가 기준' + q(TIP.est) + '</div><div class="v2-big" style="margin-top:12px">' + man(r.price) + '<small>만원</small></div>' +
       '<div class="v2-kv">범위 <b>' + man(r.range[0]) + ' ~ ' + man(r.range[1]) + '</b>만 (25~75%)' +
       (r.repair ? '<br>수리비 −' + man(r.repair) + '만 반영' : '') +
       (r.est0 != null ? '<br>상태 미상 · 무사고라면 <b>' + man(r.est0 - r.repair) + '</b>만' : '') +
@@ -724,7 +724,7 @@
       seg('sort', [['sim', '유사도순'], ['adj', '보정가순'], ['price', '호가순']], VIEW.sort, '정렬') + '</div>';
     h += '<div class="v2-tablewrap"><table class="t v2-tbl"><thead><tr><th>제외</th><th class="num">유사도' + q(TIP.sim) + '</th><th>등록</th><th class="num">주행</th>' +
       '<th>색상</th><th>등급</th><th>성능 (글로비스)</th><th class="num">호가' + q(TIP.price) + '</th><th class="num">보정 후' + q(TIP.adj) + '</th><th>상태</th>' +
-      '<th class="num">체류' + q(TIP.dwell) + '</th><th class="num">인하' + q(TIP.cut) + '</th><th>엔카</th></tr></thead><tbody>';
+      '<th class="num">체류' + q(TIP.dwell) + '</th><th class="num">인하' + q(TIP.cut) + '</th><th>매물</th></tr></thead><tbody>';
     shown.forEach(function (e) { h += rowHtml(G, e); });
     h += '</tbody></table></div>';
     if (list.length > SHOW) {
@@ -749,13 +749,13 @@
       '<td><a href="https://fem.encar.com/cars/detail/' + id + '" target="_blank" rel="noopener">보기 ↗</a></td></tr>';
   }
 
-  function encSmall(G, row) {                                // 등급 칸 아래 작게: 엔카 원래 이름 · 가까운 이름 표시(기획 v2.23 Q101·Q102)
+  function encSmall(G, row) {                                // 등급 칸 아래 작게: 매물 원래 이름 · 가까운 이름 표시(기획 v2.23 Q101·Q102)
     var e = encOfRow(G, row), q = G.fi.q != null && row[G.fi.q];
     if (!e && !q) return '';
     var t = e ? (e.model !== S.model ? e.model + ' ' : '') + e.grade + (e.trim ? ' ' + e.trim : '') : '';
     return '<small class="v2-encrow">' + (q === 1 ? '<span title="경매 데이터에 같은 이름이 없어 가장 가까운 경매 이름에 붙인 매물입니다">가까운 이름</span> '
-      : q === 2 ? '<span title="경매 데이터에 맞는 이름이 없어 엔카 이름을 그대로 쓴 매물입니다">엔카 이름</span> ' : '') +
-      (t ? '엔카: ' + esc(t) : '') + '</small>';
+      : q === 2 ? '<span title="경매 데이터에 맞는 이름이 없어 매물 이름을 그대로 쓴 매물입니다">매물 이름</span> ' : '') +
+      (t ? '매물 표기: ' + esc(t) : '') + '</small>';
   }
 
   function dmButton(G, row) {                                // 손상 부위 펼치기(기획안 5.1.3 ①) — 누르면 아래에 한 줄
@@ -1061,7 +1061,7 @@
       });
       var a = d.bk[0], z = d.bk[d.bk.length - 1];
       h += '<p class="v2-help">추정가보다 싸게 낸 매물(' + posLabel(a.lo, a.hi) + ')은 중위 ' + Math.round(a.days) + '일, 비싸게 낸 매물(' + posLabel(z.lo, z.hi) + ')은 ' +
-        Math.round(z.days) + '일 만에 팔렸습니다. 일수 = 엔카에 올라온 날부터 목록에서 사라진 날까지.</p>';
+        Math.round(z.days) + '일 만에 팔렸습니다. 일수 = 온라인에 올라온 날부터 목록에서 사라진 날까지.</p>';
     }
     // ③ 인하 — 가끔 참고(Q48)
     if (d.cut) h += '<p class="v2-kv v2-cutline">판매중 비교 매물의 <b>' + Math.round(d.cut.share * 100) + '%</b>가 첫 호가보다 내림' +
@@ -1307,7 +1307,7 @@
     }
     return X.mmCut[seg] != null ? X.mmCut[seg] : null;
   }
-  function modelMarket(G) {                                  // 모델 요약의 판매 숫자 — 지표 줄과 같은 market_models(엔카 판매중 전체) 기준
+  function modelMarket(G) {                                  // 모델 요약의 판매 숫자 — 지표 줄과 같은 market_models(온라인 판매중 전체) 기준
     var seg = G.models[S.model] && G.models[S.model].seg, mm = X.mmBy && X.mmBy[G.F.maker + '|' + S.model] || null;
     var thin = !mm || mm.on < 100, w = function (r) { return r >= 1.15 ? '빠름' : r <= 0.87 ? '느림' : '비슷'; };
     return { mm: mm, sg: X.mm && X.mm.segments && X.mm.segments[seg] || {}, sc: segCut(seg), loading: !X.mmBy,
@@ -1318,7 +1318,7 @@
     var st = modelStats(G), M = st.M, F = G.F, K = modelMarket(G), mm = K.mm, co = curveOf(G);
     var h = (miss.length ? needCard(miss) : '') +
       '<div class="card v2-headcard"><div class="v2-head">' + esc(F.maker + ' ' + S.model) + ' · 모델 요약' + (miss.length ? ' <span class="v2-ref">참고</span>' : '') +
-      '<br><span class="sub">판매중·판매율·체류일·인하·시세지수·잔존가치는 엔카 판매중 전체 · 최근 판매·시세표·등급별은 비교 가능 매물 · 기준 ' + dataDate() + '</span></div>' +
+      '<br><span class="sub">판매중·판매율·체류일·인하·시세지수·잔존가치는 온라인 판매중 전체 · 최근 판매·시세표·등급별은 비교 가능 매물 · 기준 ' + dataDate() + '</span></div>' +
       '<div class="v2-actions" style="margin:0"><button type="button" class="v2-btn" data-act="xlsxModel">엑셀 내려받기</button></div></div>';
     h += '<div class="v2-cards">' +
       tile('판매중', (mm ? mm.on : M.onsale_all != null ? M.onsale_all : st.on.length).toLocaleString(), '대', '비교 가능(성능점검 있음) ' + st.on.length.toLocaleString() + '대') +
@@ -1398,19 +1398,19 @@
       ['비교 매물(대)', R.n], ['매칭 단계', R.stepName], ['이상치 제외(대)', R.out], ['직접 제외(대)', S.ex.length], sec('보정 근거(만원, 비교 매물 평균)'));
     ['차령', '주행', '성능', '색상', '렌트', '등급', '시점'].forEach(function (k) { rows.push([k, R.basis[k]]); });
     rows.push(['보정 계수 수준', R.coefLevel], sec('산정 기준'),
-      ['데이터 기준', '엔카 ' + dataDate(true)],
+      ['데이터 기준', '온라인 매물 ' + dataDate(true)],
       ['비교 매물 파일', F.version], ['보정 계수', X.coef.version], ['환산 비율', RatesStore.label(X.rates)],
       ['비교 범위', S.sold ? '판매중 + 최근 3개월 판매' : '판매중만'], ['산정 화면 주소', location.href],
-      ['차 이름', '경매장 4단계 표기(모델·세부모델·등급·세부등급). ' + (encLine(S.mk, S.grp, S.model) || '엔카 표기 없음')],
-      ['참고', '추정 시세는 엔카 호가 기준. 환산가는 팀 환산 비율(도·소매 갭 요약치)을 적용한 값']);
-    var cr = [['유사도', '매물ID', '상태', '판매 확인일', '최초등록', '주행(km)', '색상', '등급', '세부등급', '엔카 세부모델', '엔카 등급', '엔카 세부등급', '이름 근거',
+      ['차 이름', '경매장 4단계 표기(모델·세부모델·등급·세부등급). ' + (encLine(S.mk, S.grp, S.model) || '매물 표기 없음')],
+      ['참고', '추정 시세는 온라인 소매 호가 기준. 환산가는 팀 환산 비율(도·소매 갭 요약치)을 적용한 값']);
+    var cr = [['유사도', '매물ID', '상태', '판매 확인일', '최초등록', '주행(km)', '색상', '등급', '세부등급', '매물 세부모델', '매물 등급', '매물 세부등급', '이름 근거',
       '연료', '성능등급', '사고 라벨', '손상 부위',
-      '글로비스 종합', '글로비스 감점', '호가(만원)', '보정 후(만원)', '첫 호가(만원)', '인하(만원)', '체류일', '이상치', '직접 제외', '엔카 링크']];
+      '글로비스 종합', '글로비스 감점', '호가(만원)', '보정 후(만원)', '첫 호가(만원)', '인하(만원)', '체류일', '이상치', '직접 제외', '매물 링크']];
     function line(row, x) {
       var p0 = row[fi.p0], price = row[fi.price], sold = row[fi.sold] === 1, reg = String(row[fi.reg]), e = encOfRow(G, row);
       return [x ? x.sim : null, row[fi.id], sold ? '판매' : '판매중', sold ? row[fi.sd] : null, reg.slice(0, 4) + '-' + reg.slice(4, 6), row[fi.km],
         F.colors[row[fi.col]], F.grades[row[fi.g]], F.trims[row[fi.t]] || null,
-        e ? e.model : null, e ? e.grade : null, e ? e.trim || null : null, fi.q != null ? ['정확', '가까운 이름', '엔카 이름'][row[fi.q]] || null : null,   // 엔카 원래 이름(기획 v2.23)
+        e ? e.model : null, e ? e.grade : null, e ? e.trim || null : null, fi.q != null ? ['정확', '가까운 이름', '매물 이름'][row[fi.q]] || null : null,   // 매물 원래 이름(기획 v2.23)
         F.fuels ? F.fuels[row[fi.fu]] : null, row[fi.perf], F.labels[row[fi.acc]],
         ENG.damage(G, row).join(' · ') || null,
         row[fi.gv], row[fi.gp], price, x ? Math.round(x.adj) : null, p0, p0 != null && p0 > price ? p0 - price : null,
@@ -1436,8 +1436,8 @@
       ['주간 판매율(%)', r1(mm.rate_w)], ['차급 주간 판매율(%)', r1(sg.rate_w)], ['판매율 구간', iv ? iv[0] + '→' + iv[1] : null],
       ['중위 체류일(최근 90일 판매)', K.mm ? mm.dwell : st.dw != null ? Math.round(st.dw) : null], ['차급 중위 체류일', K.mm ? sg.dwell : st.seg.dwell],
       ['가격 인하 매물 비율(%)', K.mm ? r1(mm.cut) : r1(st.cut)], ['차급 가격 인하 비율(%)', K.mm ? r1(K.sc) : r1(st.seg.cut)],
-      ['데이터 기준', '엔카 ' + dataDate(true)], ['비교 매물 파일', F.version],
-      ['참고', (K.mm ? '판매중·판매율·체류일·인하 비율은 엔카 판매중 전체 기준. ' : '시장 숫자가 없어 체류일·인하 비율은 비교 가능 매물 기준. ') +
+      ['데이터 기준', '온라인 매물 ' + dataDate(true)], ['비교 매물 파일', F.version],
+      ['참고', (K.mm ? '판매중·판매율·체류일·인하 비율은 온라인 판매중 전체 기준. ' : '시장 숫자가 없어 체류일·인하 비율은 비교 가능 매물 기준. ') +
         '최근 3개월 판매·시세표·등급별은 비교 가능 매물(성능점검 있음). 시세표 칸은 5대 미만이면 비움']];
     var mx = [['최초등록 \\ 주행'].concat(KM_BANDS.map(function (b) { return b[2] + ' 중앙 호가'; }), KM_BANDS.map(function (b) { return b[2] + ' 대수'; }))];
     st.years.forEach(function (y, i) {
@@ -1498,7 +1498,7 @@
     if (ld.cl) ld.cl.forEach(function (x) { rows.push([x.k + (x.k === ld.mine ? ' ◀ 이 차' : ''), x.n, x.k === '무사고' ? 0 : f1(x.rel * 100), ld.base0 ? mw(ld.base0 * (1 + x.rel)) : null]); });
     else rows.push(['무사고 매물이 적어 비교 안 함']);
     rows.push(['같은 모델 매물을 이 차의 차령·주행·등급·색상으로 맞춘 뒤 사고 단계별 가운데 값을 무사고와 비교(' + POS_MIN + '대 이상인 단계만)' +
-      (ld.base0 ? ' · 만원은 이 차가 무사고일 때 ' + man(ld.base0) + '만 기준' : '')], [], ['데이터 기준', '엔카 ' + dataDate(true)]);
+      (ld.base0 ? ' · 만원은 이 차가 무사고일 때 ' + man(ld.base0) + '만 기준' : '')], [], ['데이터 기준', '온라인 매물 ' + dataDate(true)]);
     return rows;
   }
 
@@ -1596,9 +1596,9 @@
       (S.cond === '입력' && S.items.length ? '(' + ISC.summary(S.items) + ')' : '');
     var h = '<div class="sh-top"><div><div class="sh-eyebrow">시세 산정 요약</div><div class="sh-title">' + esc(F.maker + ' ' + S.model) + ' · ' + esc(S.grade + (S.trim ? ' ' + S.trim : '')) + '</div>' +
       '<div class="sh-sub">' + regText() + ' 등록 · ' + car['주행km'].toLocaleString('ko-KR') + 'km · ' + esc(S.color || '색상 상관없음') + (S.rent ? ' · 렌트 번호판' : '') + ' · ' + esc(cond) + '</div>' +
-      (encLine(S.mk, S.grp, S.model) ? '<div class="sh-sub">' + esc(encLine(S.mk, S.grp, S.model)) + '</div>' : '') + '</div>' +   // 경매장 이름 옆 엔카 표기(기획 v2.23 Q102)
+      (encLine(S.mk, S.grp, S.model) ? '<div class="sh-sub">' + esc(encLine(S.mk, S.grp, S.model)) + '</div>' : '') + '</div>' +   // 경매장 이름 옆 매물 표기(기획 v2.23 Q102)
       '<div class="sh-date">데이터 기준 ' + dataDate(true) + '<br>작성 ' + stamp + '</div></div>';
-    h += '<div class="sh-nums"><div class="sh-num main"><span>추정 시세 · 엔카 소매 호가 기준</span><b>' + man(r.price) + '<small>만원</small></b><em>범위 ' + man(r.range[0]) + ' ~ ' + man(r.range[1]) +
+    h += '<div class="sh-nums"><div class="sh-num main"><span>추정 시세 · 온라인 소매 호가 기준</span><b>' + man(r.price) + '<small>만원</small></b><em>범위 ' + man(r.range[0]) + ' ~ ' + man(r.range[1]) +
       '만(보정 후 가운데 50%)' + (r.repair ? ' · 수리비 −' + man(r.repair) + '만 반영' : '') +
       (R0 ? ' · 무사고였다면 ' + man(R0.price) + '만' : r.est0 != null ? ' · 무사고라면 ' + man(r.est0 - r.repair) + '만' : '') + '</em></div>' +
       (o.conv ? '<div class="sh-num"><span>환산가 · 경매 예상가</span><b>' + man(r.converted) + '<small>만원</small></b><em>환산 비율 ' + r.rate + '% · ' + esc(r.rateSource) + '</em></div>' : '') +
@@ -1621,8 +1621,8 @@
         '<td class="num">' + (x.dwell != null ? x.dwell + '일' : '–') + '</td></tr>';
     });
     h += '</tbody></table>';
-    return h + '<div class="sh-foot">근거: 엔카 매물(' + dataDate(true) + ') 중 같은 세부모델 비교 매물 ' + kept.length + '대(판매중 ' + nOn + ' · 최근 3개월 판매 ' + (kept.length - nOn) +
-      ')를 이 차 조건으로 맞춘 값. 보정 계수: ' + esc(COEF_LEVEL[r.coefLevel] || r.coefLevel) + '. 추정 시세는 엔카 소매 호가 기준 추정치로 실제 거래가와 다를 수 있습니다. 판매 = 목록에서 사라짐(추정).' +
+    return h + '<div class="sh-foot">근거: 온라인 매물(' + dataDate(true) + ') 중 같은 세부모델 비교 매물 ' + kept.length + '대(판매중 ' + nOn + ' · 최근 3개월 판매 ' + (kept.length - nOn) +
+      ')를 이 차 조건으로 맞춘 값. 보정 계수: ' + esc(COEF_LEVEL[r.coefLevel] || r.coefLevel) + '. 추정 시세는 온라인 소매 호가 기준 추정치로 실제 거래가와 다를 수 있습니다. 판매 = 목록에서 사라짐(추정).' +
       (o.conv ? ' 환산가 = 추정 시세 × (1 − 환산 비율) − 수리비(팀 환산 비율).' : '') + (o.url ? '<br>산정 화면: ' + esc(readableUrl()) : '') + '</div>';
   }
   function readableUrl() {                                   // 주소의 한글을 풀어 읽기 쉽게(그대로 붙여 넣어도 열린다)
@@ -1741,7 +1741,7 @@
       return Promise.resolve();
     }
     S = fromHash();
-    var lm = legacyModel(S);                                 // 엔카 이름으로 된 옛 주소·최근 산정 → 경매 이름
+    var lm = legacyModel(S);                                 // 매물 이름으로 된 옛 주소·최근 산정 → 경매 이름
     if (lm) toHash();
     $('navPrice').setAttribute('href', location.hash || '#/price');
     renderInputs();

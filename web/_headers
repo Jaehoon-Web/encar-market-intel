@@ -7,7 +7,5 @@
 # 정적 코드 자산
 /styles.css
   Cache-Control: public, max-age=86400
-/app.js
-  Cache-Control: public, max-age=86400
 /assets/*
   Cache-Control: public, max-age=604800

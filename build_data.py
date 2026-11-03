@@ -126,8 +126,12 @@ def to_native(o):
     if isinstance(o, (list, tuple)): return [to_native(v) for v in o]
     return o
 
+OUT_OLD = os.path.join(SRC, "site_legacy")          # 이전 사이트 전용 집계 — 이전 사이트를 지워(2026-11-03, 기획 v2.25) 공개 폴더 밖에만 둔다
+LEGACY = {"dataset.json", "insights.json", "inventory.json", "models.json", "pricing.json", "trend.json"}
+
 def dump(name, obj):
-    path = os.path.join(OUT_DATA, name)
+    path = os.path.join(OUT_OLD if name in LEGACY else OUT_DATA, name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(to_native(obj), f, ensure_ascii=False, separators=(",", ":"))
     print(f"  [data] {name}  ({os.path.getsize(path)/1024:.0f} KB)")
@@ -573,7 +577,7 @@ trend = {
     "axis": "크롤일",
     "crawlSnapshots": crawl_snaps,            # 진짜 크롤일별 시장 추세(주 누적)
     "note": "크롤일별 스냅샷이 누적될수록 추세가 풍부해집니다. 아래 '등록월'은 단일 스냅샷에서도 보이는 보조 지표(생존편향 있음).",
-    "monthsAxis": "엔카등록월",
+    "monthsAxis": "등록월",
     "months": tr_rows,
 }
 dump("trend.json", trend)
@@ -646,8 +650,8 @@ meta = {
     "modelCount": sum(len(v["models"]) for v in tree.values()),
     "manufacturerCount": len(tree),
     "sources": {
-        "L0": {"file": "ids_all.json", "rows": N0, "desc": "엔카 등록 매물(목록, 판매완료 grace 포함) — 재고는 판매중 실매물만"},
-        "L2": {"file": "encar_final ∩ encar_cleaned", "rows": int(len(l2)), "desc": "더미·이상치 제거된 정제 데이터 = 시세 기준"},
+        "L0": {"file": "ids_all.json", "rows": N0, "desc": "등록 매물(목록, 판매완료 grace 포함) — 재고는 판매중 실매물만"},
+        "L2": {"file": "최종 ∩ 정제", "rows": int(len(l2)), "desc": "더미·이상치 제거된 정제 데이터 = 시세 기준"},
     },
 }
 dump("meta.json", meta)
@@ -691,12 +695,12 @@ if os.path.exists(_lp):
         _nm = pd.read_parquet(_lp, columns=_cols)
         _nm.index = _nm.index.astype(str)
         _k = comp["매물ID"].astype(str)
-        comp["엔카_모델"], comp["엔카_등급"] = comp["모델"], comp["등급"]
+        comp["매물_모델"], comp["매물_등급"] = comp["모델"], comp["등급"]          # 경매 이름을 붙이기 전 매물 원래 이름(공개 열 이름에 출처를 적지 않음 — 기획 v2.25)
         comp["모델"] = _k.map(_nm["모델"]).fillna(comp["모델"])
         comp["등급"] = _k.map(_nm["등급"]).fillna(comp["등급"])
         comp.insert(2, "모델그룹", _k.map(_nm["모델그룹"]))
         comp.insert(5, "세부등급", _k.map(_nm["세부등급"]))
-        comp["이름근거"] = _k.map(_nm["이름근거"])
+        comp["이름근거"] = _k.map(_nm["이름근거"]).replace({"엔카 이름": "매물 이름"})
 to_excel_csv(comp, "listings_compact.csv")
 
 # 다운로드 CSV 5: 누적 이력 (전체 크롤 스냅샷) — 판매완료 포함, 가격변동 추적용

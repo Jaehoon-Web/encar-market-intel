@@ -17,8 +17,8 @@ function ok(cond, name, extra) { n++; if (!cond) fail++; console.log((cond ? '  
 function section(t) { console.log('[' + t + ']'); }
 
 section('화면 파일');
-// 기본 주소(web/index.html)와 /v2/ 는 같은 새 화면, old.html 은 이전 사이트(2026-10-27 교체)
-for (const page of ['index.html', 'v2/index.html', 'old.html']) {
+// 기본 주소(web/index.html)와 /v2/ 는 같은 화면. 이전 사이트(old.html)는 2026-11-03에 지웠다(기획 v2.25)
+for (const page of ['index.html', 'v2/index.html']) {
   const h = fs.readFileSync(path.join(WEB, page), 'utf8'), dir = path.dirname(path.join(WEB, page));
   const refs = [...h.matchAll(/(?:src|href)="([^"#:]+)"/g)].map(m => m[1]).filter(r => !/^(https?:)?\/\//.test(r));
   const missing = refs.filter(r => !fs.existsSync(path.join(dir, r)));
@@ -26,8 +26,9 @@ for (const page of ['index.html', 'v2/index.html', 'old.html']) {
 }
 const html = fs.readFileSync(path.join(WEB, 'index.html'), 'utf8'), v2html = fs.readFileSync(path.join(V2, 'index.html'), 'utf8');
 for (const f of ['app.js', 'batch.js', 'rates.js', 'market.js', 'pulse.js', 'curve.js', 'data.js']) ok(html.includes(`src="v2/${f}"`) && v2html.includes(`src="${f}"`), `${f}를 부름(기본 주소·/v2/)`);
-ok(html.includes("location.replace('old.html'") && html.includes('href="old.html"') && !html.includes('noindex'),
-  '기본 주소: 이전 사이트 주소(#/overview 등)는 old.html로 보내고, 이전 사이트 링크가 있음');
+ok(html.includes('location.replace(TO[m[1]])') && !/old\.html/.test(html + v2html) && !html.includes('noindex'),
+  '기본 주소: 이전 사이트 주소(#/overview 등)는 같은 일을 하는 지금 화면으로, 이전 사이트 링크 없음');
+ok(/<title>카리스마R/.test(html) && /카리스마R/.test(v2html) && html.includes('CARISMA · RETAIL'), '사이트 이름 카리스마R(CARISMA · RETAIL)');
 
 section('데이터 파일');
 const idx = read(path.join(DATA, 'comps', 'index.json'));
@@ -96,6 +97,23 @@ ok(head.startsWith('제조사,모델,세부모델'), 'CSV가 CP949(엑셀용)로
 const big = fs.readdirSync(path.join(WEB, 'downloads')).concat(fs.readdirSync(DATA).map(f => '../data/' + f))
   .filter(f => { const p = path.join(WEB, 'downloads', f); return fs.statSync(p).isFile() && fs.statSync(p).size > 25 * 1048576; });
 ok(!big.length, '배포 파일 25MiB 한도 안', big.join(', '));
+
+section('출처 이름(기획 v2.25)');
+// 공개 폴더(web/)의 화면·코드·데이터·내려받기에 출처 사이트 이름이 없어야 한다 — 비교 매물의 원문 매물 링크 주소만 예외(사용자 결정 11-03)
+const ALLOW = 'fem.encar.com/cars/detail/', srcHit = [];
+(function walk(dir) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) { walk(p); continue; }
+    if (!/\.(html|js|css|json|csv|md|txt|svg)$/.test(e.name) && e.name !== '_headers') continue;
+    const b = fs.readFileSync(p), t = (e.name.endsWith('.csv') ? new TextDecoder('euc-kr').decode(b) : b.toString('utf8')).split(ALLOW).join('');
+    if (/엔카|encar/i.test(t)) srcHit.push(path.relative(WEB, p));
+  }
+})(WEB);
+ok(!srcHit.length, '공개 파일에 출처 사이트 이름 없음(원문 매물 링크 주소만 예외)', srcHit.slice(0, 8).join(', '));
+const gone = ['old.html', 'app.js', 'README.md', 'dataset.json', 'insights.json', 'inventory.json', 'models.json', 'pricing.json', 'trend.json']
+  .map(f => f.endsWith('.json') ? 'data/' + f : f).filter(f => fs.existsSync(path.join(WEB, f)));
+ok(!gone.length, '이전 사이트 파일·이전 사이트 전용 데이터가 공개 폴더에 없음', gone.join(', '));
 
 section('라이브러리 동작(실제 데이터)');
 const IS = require(path.join(WEB, 'lib', 'inspection_score.js')), PE = require(path.join(WEB, 'lib', 'price_engine.js'));

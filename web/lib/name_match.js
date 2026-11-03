@@ -1,12 +1,12 @@
 /*
- * name_match.js — 차명 자유 표기 → 엔카 분류 (기획안 D5 모델명 매칭, 묶음 산정용)
+ * name_match.js — 차명 자유 표기 → 사이트 분류 (기획안 D5 모델명 매칭, 묶음 산정용)
  *
  * 1) 세부모델: 모델그룹 이름(또는 수입차 등급 코드 520d·E300)이 있는지 + 세부모델만의 표시(세대 코드·더뉴/올뉴·하이브리드)
  *    + 등록 연도 범위 + 매물 수. 같은 이름이라도 연도로 세대를 가른다(그랜저 IG ↔ 더 뉴 그랜저 IG)
  * 2) 등급·세부등급: 그 세부모델의 등급 조합 중 연료·배기량·터보·구동·인승·트림 단어(앞부분만 써도 됨)가 가장 잘 맞는 것
  * 확신(conf): high · mid · low — 묶음 화면에서 low 는 노랗게 표시하고 후보 중에서 고르게 한다
- * 이름 체계(기획 v2.23): 사이트 이름은 경매장 4단계 표기다. 엑셀에는 엔카 표기도 오므로(Q103) 세부모델마다 붙은 엔카 원래 이름(index 의 en)을
- * 별칭 후보로 같이 맞추고 결과는 경매 이름으로 돌려준다. 등급도 그 조합의 비교 매물에 적힌 엔카 등급 글(파일 머리말 enc)과 함께 맞춘다.
+ * 이름 체계(기획 v2.23): 사이트 이름은 경매장 4단계 표기다. 엑셀에는 매물 표기도 오므로(Q103) 세부모델마다 붙은 매물 원래 이름(index 의 en)을
+ * 별칭 후보로 같이 맞추고 결과는 경매 이름으로 돌려준다. 등급도 그 조합의 비교 매물에 적힌 매물 등급 글(파일 머리말 enc)과 함께 맞춘다.
  *
  *   var nm = NameMatch.create(index);                               // comps/index.json
  *   nm.model('올뉴투싼 2.0 디젤', 2018)
@@ -79,7 +79,7 @@
         groupNames[gc] = true;
         g.models.forEach(function (m) {
           models.push(entry(mk.name, g, m, g.name, m.name, m.n, m.y0, m.y1));
-          (m.en || []).forEach(function (e) {                          // 엔카 원래 이름 [엔카 모델그룹, 엔카 모델, 대수, 가까운 이름 대수, 연도 2%, 98%]
+          (m.en || []).forEach(function (e) {                          // 매물 원래 이름 [매물 모델그룹, 매물 모델, 대수, 가까운 이름 대수, 연도 2%, 98%]
             if (!e[1] || (compact(e[1]) === compact(m.name) && compact(e[0] || '') === gc)) return;
             if (e[0] && !/^기타/.test(compact(e[0]))) groupNames[compact(e[0])] = true;
             models.push(entry(mk.name, g, m, e[0] || g.name, e[1], e[2], e[4], e[5]));
@@ -152,7 +152,7 @@
         else if (d === 1) s += 1;                            // 1.5 · 범위 1~99%로 넓히면 접두어 없는 표기에서 세대를 더 틀렸다(97.0 → 94.5%)
         else s -= 1.2 * Math.min(d - 1, 5);
       }
-      if (inp.maker && inp.maker.name !== m.maker) s -= groupNames[inp.maker.word] ? 0.5 : 1.5;   // 약하게만(현대 G80 = 엔카 제네시스 등)
+      if (inp.maker && inp.maker.name !== m.maker) s -= groupNames[inp.maker.word] ? 0.5 : 1.5;   // 약하게만(현대 G80 = 매물 표기 제네시스 등)
       s += 0.25 * Math.log(m.n + 1) / Math.LN10;
       return { maker: m.maker, group: m.group, model: m.model, file: m.file, score: s, why: why, y0: m.y0, y1: m.y1 };
     }
@@ -193,7 +193,7 @@
     function grade(grp, modelName, text) {
       var M = grp.models[modelName], F = grp.F, fi = grp.fi;
       if (!M) return null;
-      var cnt = {}, encOf = {};                              // 조합별 대수 · 그 조합 비교 매물의 엔카 원래 등급 글(대수 순 3개까지)
+      var cnt = {}, encOf = {};                              // 조합별 대수 · 그 조합 비교 매물의 매물 원래 등급 글(대수 순 3개까지)
       F.rows.forEach(function (r) {
         if (r[fi.m] !== M.idx) return;
         var k = r[fi.g] + '|' + r[fi.t];
@@ -205,7 +205,7 @@
       var list = Object.keys(cnt).map(function (k) {
         var p = k.split('|'), g = F.grades[+p[0]], t = F.trims[+p[1]], r = scoreGT(g, t);
         Object.keys(encOf[k] || {}).sort(function (a, b) { return encOf[k][b] - encOf[k][a]; }).slice(0, 3).forEach(function (ei) {
-          var e = String(F.enc[+ei] || '').split('|');                    // '엔카 모델|엔카 등급|엔카 세부등급' — 엑셀이 엔카 표기면 이것과 더 잘 맞는다
+          var e = String(F.enc[+ei] || '').split('|');                    // '매물 모델|매물 등급|매물 세부등급' — 엑셀이 매물 표기면 이것과 더 잘 맞는다
           if (e.length < 3) return;
           var x = scoreGT(e[1], e[2]);
           if (x.s > r.s) r = { s: x.s, ev: x.ev, trimHit: r.trimHit };       // 세부등급을 맞혔는지는 경매 트림 이름 기준 그대로

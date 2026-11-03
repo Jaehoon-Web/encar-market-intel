@@ -337,14 +337,14 @@ select.filter-select.v2-need, .v2-in.v2-need { border-color: var(--accent); box-
 @media (min-width: 1024px) { .v2-mbar { display: none !important; } }
 @media (max-width: 1023px) { #app { padding-bottom: 76px; } }
 
-/* 차명 한 줄로 찾기(엔카 벤치마크 A, 2026-10-28) */
+/* 차명 한 줄로 찾기(벤치마크 A, 2026-10-28) */
 .v2-namefind { margin: 0 0 14px; }
 .v2-nmsg { font-size: 12px; margin: 6px 0 0; color: var(--tx-3); line-height: 1.6; }
 .v2-nmsg b { color: var(--tx-1); font-weight: 600; }
 .v2-warnt { color: var(--down); font-weight: 700; }
 .v2-cand { margin: 4px 4px 0 0; padding: 3px 10px; font-size: 12px; }
 
-/* 조건 칩 · 최근 산정 · 첫 화면 설명(엔카 벤치마크 G·D · 실사용 점검 P3, 2026-10-28) */
+/* 조건 칩 · 최근 산정 · 첫 화면 설명(벤치마크 G·D · 실사용 점검 P3, 2026-10-28) */
 .v2-cchips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 12px; }
 .v2-cchip { font-size: 12px; color: var(--tx-1); background: var(--bg-2); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; }
 .v2-cchip:hover { border-color: var(--line-hard); }
@@ -469,7 +469,7 @@ body.v2-sheeton { overflow: hidden; }
   header .nav-tab.on::after { left: 8px; right: 8px; }
 }
 
-/* 차 이름 4단계(기획 v2.23) — 비교 매물 등급 칸 아래 엔카 원래 이름 · 가까운 이름 표시, 세부모델 아래 엔카 표기 안내 */
+/* 차 이름 4단계(기획 v2.23) — 비교 매물 등급 칸 아래 매물 원래 이름 · 가까운 이름 표시, 세부모델 아래 매물 표기 안내 */
 .v2-encrow { display: block; font-size: 11px; line-height: 1.4; color: var(--tx-4); margin-top: 2px; white-space: normal; }
 .v2-encrow span { color: var(--tx-2); font-weight: 600; }
 .v2-help.v2-enc { margin-top: 6px; }
