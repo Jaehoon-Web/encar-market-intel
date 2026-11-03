@@ -22,6 +22,7 @@
   var KM_BANDS = [[0, 3e4, '3만 미만'], [3e4, 6e4, '3~6만'], [6e4, 1e5, '6~10만'], [1e5, 1.5e5, '10~15만'], [1.5e5, Infinity, '15만 이상']];
   var X = {}, ENG = null, ISC = null, NM = null, GROUPS = {}, R = null, R0 = null, recentTimer = 0, LAST = null, timer = 0, B = null, RV = null, MK = null, DV = null, MB = '';
   var PV = null;                                             // 마켓 펄스(pulse.js)
+  var AV = null;                                             // 관리자(admin.js · 기획 v2.28)
   var VIEW = { sort: 'sim', all: false, mode: 'one', condWarn: [], condOut: [], exKeep: {}, allGrades: false, nameText: '', nameMsg: '', nameCands: [], recentOpen: false,
     posx: 'km', hl: null,                                    // posx: 내 차 위치 그림 가로축(km·age) · hl: 그림에서 누른 비교 매물 ID      // mode: one(한 대 산정) · model(모델 요약) · batch(묶음 산정) · rates(⚙ 환산 비율)
     open: {}, info: {}, carOpen: false, moreOpen: null, recOpen: null, shown: null, shownKey: '', countId: 0, riseKey: '' };   // 화면 정리(기획 v2.26·v2.27): open = 처음 접힌 섹션을 펼침 · info = 섹션 i 설명 펼침 · carOpen = 차 고르는 5칸 펼침 · moreOpen = 더 보기 · recOpen = 기록부 입력 창 · shown = 추정 시세 숫자 올라가기 · riseKey = 처음 그릴 때만 떠오르기
@@ -1816,7 +1817,7 @@
   }
 
   // ───── 화면 고르기: #/pulse = 마켓 펄스(pulse.js) · #/market = 시장 시황(market.js) · #/data = 데이터(data.js) · 그 밖 = 시세 산정(#/report 옛 주소 → 모델 요약) ─────
-  var PAGES = { pulse: '#/pulse', report: '#/report', market: '#/market', data: '#/data' }, PAGE0 = null;
+  var PAGES = { pulse: '#/pulse', report: '#/report', market: '#/market', data: '#/data', admin: '#/admin' }, PAGE0 = null;
   function route() {
     var h0 = location.hash, page = 'price';
     Object.keys(PAGES).forEach(function (k) { if (h0.indexOf(PAGES[k]) === 0) page = k; });
@@ -1829,9 +1830,12 @@
     $('mbar').hidden = true;
     $('marketView').hidden = page !== 'market';
     $('dataView').hidden = page !== 'data';
+    $('adminView').hidden = page !== 'admin';
     $('pulseView').hidden = page !== 'pulse';
     var fc = $('footConv');                                  // 아래 '환산가는 …' 안내는 시세 산정에서만(마켓 펄스·시장 시황은 외부에도 보여 주는 화면)
     if (fc) fc.hidden = page !== 'price';
+    var na = $('navAdmin');
+    if (na) na.classList.toggle('on', page === 'admin');
     [['navPrice', 'price'], ['navPulse', 'pulse'], ['navMarket', 'market'], ['navData', 'data']].forEach(function (n) {
       var a = $(n[0]);
       if (a) a.classList.toggle('on', page === n[1]);
@@ -1850,6 +1854,11 @@
       var rq = qs();
       history.replaceState(null, '', query(Object.assign(blank(), { mk: rq.get('mk') || '', grp: rq.get('grp') || '', model: rq.get('model') || '' }), 'model'));
       return route();
+    }
+    if (page === 'admin') {                                  // 관리자 대시보드(기획 v2.28 · 5.11.3) — 이용 통계, 비밀번호
+      if (!AV) AV = V2Admin.create({ esc: esc, bindTips: bindTips, fileSafe: fileSafe });
+      AV.show($('adminView'));
+      return Promise.resolve();
     }
     if (page === 'data') {
       if (!DV) DV = V2Data.create({ X: X, esc: esc, getJSON: getJSON, root: ROOT });
@@ -1948,7 +1957,8 @@
       '<div class="v2-mbar" id="mbar" hidden></div></div>' +
       '<section class="v2-batch v2-pulse" id="pulseView" aria-label="마켓 펄스" hidden></section>' +
       '<section class="v2-batch v2-mk" id="marketView" aria-label="시장 시황" hidden></section>' +
-      '<section class="v2-batch" id="dataView" aria-label="데이터" hidden></section>';
+      '<section class="v2-batch" id="dataView" aria-label="데이터" hidden></section>' +
+      '<section class="v2-batch adm" id="adminView" aria-label="관리자" hidden></section>';
     var inp = $('inp'), res = $('res'), tip = $('tip');
     inp.addEventListener('change', function (e) {
       var t = e.target, k = t.getAttribute('data-k');

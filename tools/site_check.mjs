@@ -126,6 +126,19 @@ const appSrc = fs.readFileSync(path.join(V2, 'app.js'), 'utf8'), calls = appSrc.
 ok(calls.length === 2 && calls.every(c => !/S\.(km|y|m|cost|color|cond|items|rate)\b|R\.|price/.test(c.replace(/JSON\.stringify\([^)]*\)\)/, ''))),
   '산정 결과 기록은 모델·등급만(연식·주행·상태·시세 없음)', calls.join(' | '));
 
+const aOrder = h => { const ad = h.indexOf('admin.js'), a = h.lastIndexOf('app.js'); return ad > 0 && ad < a; };
+ok(aOrder(html) && aOrder(v2html) && html.includes('href="#/admin"') && v2html.includes('href="#/admin"'), '관리자 화면 코드·링크(두 화면, 기획 v2.28 Q164)');
+const ADM = require(path.join(V2, 'admin.js')).create({ esc: s => String(s) });
+const mg = ADM._merge([{ day: 'a', sessions: 2, uids: ['u1', 'u2'], dev: { pc: 2, m: 0 }, sec: 100, scr: { pulse: { views: 2, sec: 100, sessions: 2 } }, act: { 'pulse|x': 1 }, models: {}, mmodels: {}, results: 1,
+  msum: 0, batch: 0, cars: 0, exports: {}, funnel: [2, 1, 1, 0, 0], depth: [1, 0, 0, 0, 0, 0], last: {}, lastAct: {}, abandon: 0, fields: {}, paths: {}, entry: {}, entryCar: 0, err: {}, errs: [], ready: [800], load: [] },
+  { day: 'b', empty: true }, { day: 'c', missing: true },
+  { day: 'd', sessions: 1, uids: ['u2'], dev: { pc: 0, m: 1 }, sec: 50, scr: { pulse: { views: 1, sec: 50, sessions: 1 } }, act: { 'pulse|x': 2 }, models: {}, mmodels: {}, results: 0,
+  msum: 0, batch: 0, cars: 0, exports: {}, funnel: [1, 0, 0, 0, 0], depth: [0, 0, 0, 0, 0, 0], last: {}, lastAct: {}, abandon: 0, fields: {}, paths: {}, entry: {}, entryCar: 0, err: {}, errs: [], ready: [900], load: [] }]);
+ok(mg.visitors === 2 && mg.sessions === 3 && mg.sec === 150 && mg.act['pulse|x'] === 3 && mg.scr.pulse.views === 3 && mg.funnel[0] === 3 && mg.ready.length === 2,
+  '관리자 화면: 여러 날 합치기(방문자는 익명 번호 겹침 빼고 2명, 빈 날·못 만든 날 건너뜀)', JSON.stringify([mg.visitors, mg.sessions, mg.sec]));
+ok(ADM._actName('price.one|nav:basis') === '목차 → 산정 근거' && ADM._actName('price.one|sort=price') === '비교 매물 정렬: 호가' && ADM._actName('price.batch|batch:run') === '묶음: 산정하기',
+  '관리자 화면: 기능 이름을 읽기 쉬운 말로');
+
 section('라이브러리 동작(실제 데이터)');
 const IS = require(path.join(WEB, 'lib', 'inspection_score.js')), PE = require(path.join(WEB, 'lib', 'price_engine.js'));
 const NM = require(path.join(WEB, 'lib', 'name_match.js')), RS = require(path.join(WEB, 'lib', 'rates_store.js'));

@@ -33,11 +33,11 @@
   if (!uid || !/^[a-z0-9]{16}$/.test(uid)) { uid = rand(); put('cr_uid', uid); }
   var dev = Math.min(window.innerWidth || 1200, screen.width || 1200) < 768 ? 'm' : 'pc';
   var Q = [], sid = null, scr = '', lastInput = Date.now(), lastTick = Date.now(), lastSess = 0, vis = {}, picked = {};
-  var res = { n: 0, key: '', pend: null, timer: 0, depth: 0, sent: 0 }, miss = { cur: '', sent: '', timer: 0 };
+  var res = { id: '', key: '', pend: null, timer: 0, depth: 0, sent: 0 }, miss = { cur: '', sent: '', timer: 0 };
 
-  function push(type, s, name, val) {
+  function push(type, s, name, val, t) {
     if (scr === 'admin' && type !== 'err') return;
-    Q.push([Date.now(), type, cut(s || hashScr(), 20), cut(name, 60), val == null ? '' : cut(val, 200)]);
+    Q.push([t || Date.now(), type, cut(s || hashScr(), 20), cut(name, 60), val == null ? '' : cut(val, 200)]);
     if (Q.length >= 150) flush(false);
   }
   function hashScr() {                                       // 주소로 본 지금 화면(앱이 알리기 전, 처음 들어온 화면)
@@ -72,7 +72,7 @@
       tick();
       Object.keys(vis).forEach(function (s) { if (vis[s] >= 1000) Q.push([Date.now(), 'vis', s, '', String(Math.round(vis[s] / 1000))]); });   // 초 단위
       vis = {};
-      if (res.depth > res.sent) { Q.push([Date.now(), 'depth', 'price.one', String(res.n), String(res.depth)]); res.sent = res.depth; }
+      if (res.depth > res.sent) { Q.push([Date.now(), 'depth', 'price.one', res.id, String(res.depth)]); res.sent = res.depth; }
       if (!Q.length || !sid) return;
       var body = JSON.stringify({ u: uid, s: sid, d: dev, e: Q.splice(0, 200) });
       if (beacon && navigator.sendBeacon && navigator.sendBeacon('/api/ev', new Blob([body], { type: 'application/json' }))) return;
@@ -97,15 +97,16 @@
     if (key === res.key && !res.pend) return;
     clearTimeout(res.timer);
     res.key = key;
-    res.pend = function () {
-      if (res.depth > res.sent) push('depth', 'price.one', String(res.n), String(res.depth));
-      res.n++; res.depth = 0; res.sent = 0;
-      push('result', kind === 'model' ? 'price.model' : 'price.one', model, grade || '');
+    res.pend = function () {                                  // 한 대 산정 결과는 기록 시각이 곧 번호 — 깊이 기록(depth)이 그 시각을 이름으로 가리킨다
+      if (res.depth > res.sent) push('depth', 'price.one', res.id, String(res.depth));
+      var t = Date.now();
+      res.depth = 0; res.sent = 0; res.id = kind === 'model' ? '' : String(t);
+      push('result', kind === 'model' ? 'price.model' : 'price.one', model, grade || '', t);
     };
     res.timer = setTimeout(function () { var p = res.pend; res.pend = null; if (p) p(); }, RESULT_WAIT);
   };
   CT.pick = function (model) { if (!model || picked[model]) return; if (!sid) session(); picked[model] = 1; push('pick', scr, model, ''); };
-  CT.depth = function (n) { if (n >= 2 && n > res.depth && res.n) res.depth = n; };   // 결과 안 가장 깊이 내려간 섹션(02~06, 01은 결과가 나오면 본 것)
+  CT.depth = function (n) { if (n >= 2 && n > res.depth && res.id) res.depth = n; };   // 결과 안 가장 깊이 내려간 섹션(02~06, 01은 결과가 나오면 본 것)
   CT.miss = function (list) {                                 // 비어 있는 칸 — 3초 그대로면 기록(결과 없이 방문이 끝나면 '입력하다 포기')
     list = cut(list, 120);
     if (list === miss.cur) return;

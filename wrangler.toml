@@ -19,3 +19,7 @@ id = "560f410dafd740fba1e8a624fe428f3e"
 binding = "STATS"
 database_name = "carisma-r-stats"
 database_id = "7e65736e-0f53-4330-8efb-922938ccebb5"
+
+# 매일 03:00(한국 = 18:00 UTC) 이용 통계 하루 요약 · 1년 지난 기록 지우기(worker/index.js scheduled)
+[triggers]
+crons = ["0 18 * * *"]

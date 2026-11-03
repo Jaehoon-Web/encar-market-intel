@@ -5,14 +5,19 @@
  *   GET /api/rates?rev=N    → { ok, team }                    N판(되돌리기용, 180일 보관)
  *   PUT /api/rates          본문 { password, rev, by, note, cells, models } → { ok, team }   새 판 저장
  *   POST /api/ev            본문 { u, s, d, e: [[시각, 종류, 화면, 이름, 값], …] } → 204   이용 통계(web/v2/track.js)
+ *   POST /api/admin/login   본문 { password } → { ok, token, exp }   관리자 30일 출입증(web/v2/admin.js)
+ *   GET  /api/admin/stats?days=7|30|90   머리글 Authorization: Bearer 출입증 → { ok, today, days: [하루 요약…] }
+ *   매일 03:00(한국) 예약 작업 → 전날 하루 요약을 만들고 1년 지난 기록을 지운다
  *
  * 초기값(경매 갭 분석 요약치)은 정적 파일 /data/conversion_rates.json 이고, 여기에는 팀이 고친 것만 둔다.
  *   cells  = 기준표(호가대 × 차령)와 같은 꼴의 2차원 배열. 숫자면 그 칸을 팀 값으로, null 이면 초기값 그대로
  *   models = [{ 제조사, 모델(세부모델), 연료(비우면 전체), 비율, 메모 }] — 모델별 비율(모델 예외보다 먼저)
  * 바인딩(wrangler.toml · Cloudflare 설정): RATES = KV 저장소, RATES_PASSWORD = 수정 비밀번호(비밀값), ASSETS = 정적 자산,
- *   STATS = 이용 통계 D1(없으면 기록은 조용히 건너뜀).
+ *   STATS = 이용 통계 D1(없으면 기록은 조용히 건너뜀), ADMIN_PASSWORD = 관리자 비밀번호(비밀값 — 사용자가 직접 넣음).
  * 그 밖의 주소는 정적 자산으로 넘긴다. 비밀번호가 틀리면 1초 쉬고 401(무차별 대입 방지, KV에는 쓰지 않는다).
  */
+import { summarize } from './summary.js';
+
 const KEY = 'team';
 const KEEP_DAYS = 180;
 const MAX_BODY = 64 * 1024;
@@ -151,14 +156,16 @@ const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS ev (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, day TEXT NOT NULL, uid TEXT NOT NULL, sid TEXT NOT NULL,' +
     ' dev TEXT, type TEXT NOT NULL, scr TEXT, name TEXT, val TEXT)',
   'CREATE INDEX IF NOT EXISTS ev_day ON ev(day)',
-  'CREATE INDEX IF NOT EXISTS ev_sid ON ev(sid)'
+  'CREATE INDEX IF NOT EXISTS ev_sid ON ev(sid)',
+  'CREATE TABLE IF NOT EXISTS day_sum (day TEXT PRIMARY KEY, data TEXT NOT NULL, made INTEGER NOT NULL)'
 ];
 const EV_INSERT = 'INSERT INTO ev (ts, day, uid, sid, dev, type, scr, name, val) SELECT json_extract(value, \'$[0]\'), json_extract(value, \'$[1]\'), ?2, ?3, ?4,' +
   ' json_extract(value, \'$[2]\'), json_extract(value, \'$[3]\'), json_extract(value, \'$[4]\'), json_extract(value, \'$[5]\') FROM json_each(?1)';
-let ready = null;
-function ensure(db) {                                         // 표가 없으면 만든다(Worker가 새로 뜰 때 한 번)
-  if (!ready) ready = db.batch(SCHEMA.map(q => db.prepare(q))).catch(e => { ready = null; throw e; });
-  return ready;
+const ready = new WeakMap();
+function ensure(db) {                                         // 표가 없으면 만든다(저장소마다 한 번)
+  let p = ready.get(db);
+  if (!p) { p = db.batch(SCHEMA.map(q => db.prepare(q))).catch(e => { ready.delete(db); throw e; }); ready.set(db, p); }
+  return p;
 }
 const kstDay = ms => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10);
 const empty = () => new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
@@ -192,6 +199,68 @@ async function ev(request, env) {
   return empty();
 }
 
+// ───── 관리자 대시보드(기획 v2.28 · 5.11.3) ─────
+// 출입증 = 만료 시각 + HMAC(관리자 비밀번호로 서명). 비밀번호를 바꾸면 이전 출입증은 모두 무효. 비밀번호 자체는 어디에도 저장하지 않는다.
+const ADMIN_DAYS = 30, KEEP_EV_DAYS = 365, KEEP_SUM_DAYS = 400;
+const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+async function sign(env, msg) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode('admin:' + env.ADMIN_PASSWORD), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return b64u(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(msg)));
+}
+async function admitted(request, env) {
+  if (!env.ADMIN_PASSWORD) return false;
+  const m = /^Bearer\s+(\d{12,16})\.([A-Za-z0-9_-]{20,})$/.exec(request.headers.get('authorization') || '');
+  if (!m || +m[1] < Date.now()) return false;
+  return samePassword(m[2], await sign(env, m[1]));
+}
+async function login(request, env) {
+  if (!env.ADMIN_PASSWORD) return json({ ok: false, error: '관리자 비밀번호가 아직 설정되지 않았습니다 — Cloudflare에 ADMIN_PASSWORD(비밀값)를 넣어 주세요' }, 503);
+  const text = await request.text();
+  if (text.length > 2000) return json({ ok: false, error: '보낸 내용이 너무 큽니다' }, 413);
+  let b = null;
+  try { b = JSON.parse(text); } catch (e) { /* 아래에서 틀린 비밀번호로 */ }
+  if (!(await samePassword(b && b.password != null ? b.password : '', env.ADMIN_PASSWORD))) {
+    await sleep(1000);
+    return json({ ok: false, error: '비밀번호가 맞지 않습니다' }, 401);
+  }
+  const exp = String(Date.now() + ADMIN_DAYS * 86400e3);
+  return json({ ok: true, token: exp + '.' + await sign(env, exp), exp: +exp });
+}
+
+const dayRows = (db, d) => db.prepare('SELECT sid, uid, dev, ts, type, scr, name, val FROM ev WHERE day = ?1 ORDER BY sid, ts, id').bind(d).all().then(r => r.results);
+async function rollup(db, d) {                               // 지난 날의 요약을 만들어 둔다(기록이 없는 날은 빈 요약 — 다시 찾지 않게)
+  const rows = await dayRows(db, d), sum = rows.length ? summarize(d, rows) : { day: d, empty: true };
+  await db.prepare('INSERT OR REPLACE INTO day_sum (day, data, made) VALUES (?1, ?2, ?3)').bind(d, JSON.stringify(sum), Date.now()).run();
+  return sum;
+}
+async function stats(request, env, url) {
+  if (!(await admitted(request, env))) return json({ ok: false, error: env.ADMIN_PASSWORD ? '다시 로그인해 주세요' : '관리자 비밀번호가 아직 설정되지 않았습니다' }, 401);
+  const now = Date.now(), today = kstDay(now);
+  if (!env.STATS) return json({ ok: true, store: false, today, now, days: [] });
+  const n = [7, 30, 90].indexOf(+url.searchParams.get('days')) >= 0 ? +url.searchParams.get('days') : 7, list = [];
+  for (let k = n - 1; k >= 0; k--) list.push(kstDay(now - k * 86400e3));
+  await ensure(env.STATS);
+  const have = {};
+  (await env.STATS.prepare('SELECT day, data FROM day_sum WHERE day >= ?1 AND day < ?2').bind(list[0], today).all()).results
+    .forEach(r => { have[r.day] = JSON.parse(r.data); });
+  let budget = 5;                                             // 새벽 작업 전이면 여기서 만든다(한 번에 5일까지)
+  for (const d of list.slice().reverse()) if (d !== today && !have[d] && budget-- > 0) have[d] = await rollup(env.STATS, d);   // 어제부터
+  have[today] = summarize(today, await dayRows(env.STATS, today));   // 오늘은 그때그때(진행 중)
+  return json({ ok: true, store: true, today, now, days: list.map(d => have[d] || { day: d, missing: true }) });
+}
+async function nightly(env) {                                // 매일 03:00(한국): 어제 요약(늦게 온 기록까지) · 빠진 이틀 채우기 · 1년 지난 기록 지우기
+  if (!env.STATS) return;
+  await ensure(env.STATS);
+  const now = Date.now();
+  await rollup(env.STATS, kstDay(now - 86400e3));
+  for (const k of [2, 3]) {
+    const d = kstDay(now - k * 86400e3);
+    if (!(await env.STATS.prepare('SELECT 1 FROM day_sum WHERE day = ?1').bind(d).first())) await rollup(env.STATS, d);
+  }
+  await env.STATS.prepare('DELETE FROM ev WHERE day < ?1').bind(kstDay(now - KEEP_EV_DAYS * 86400e3)).run();
+  await env.STATS.prepare('DELETE FROM day_sum WHERE day < ?1').bind(kstDay(now - KEEP_SUM_DAYS * 86400e3)).run();
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -204,7 +273,18 @@ export default {
       if (request.method !== 'POST') return json({ ok: false, error: 'POST만 됩니다' }, 405);
       try { return await ev(request, env); } catch (e) { return json({ ok: false, error: '기록하지 못했습니다' }, 500); }   // 기록 실패가 화면을 막지 않게
     }
+    if (url.pathname === '/api/admin/login') {
+      if (request.method !== 'POST') return json({ ok: false, error: 'POST만 됩니다' }, 405);
+      return login(request, env);
+    }
+    if (url.pathname === '/api/admin/stats') {
+      if (request.method !== 'GET') return json({ ok: false, error: 'GET만 됩니다' }, 405);
+      return stats(request, env, url);
+    }
     if (url.pathname.startsWith('/api/')) return json({ ok: false, error: '없는 주소입니다' }, 404);
     return env.ASSETS.fetch(request);
+  },
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(nightly(env));
   }
 };
