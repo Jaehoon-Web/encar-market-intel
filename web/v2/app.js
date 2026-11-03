@@ -335,6 +335,7 @@
     secs.forEach(function (s) { if (s.getBoundingClientRect().top <= lim) cur = s; });
     if (secs.length && window.innerHeight + window.pageYOffset >= document.documentElement.scrollHeight - 4) cur = secs[secs.length - 1];
     var id = cur && cur.getAttribute('data-sec');
+    if (window.CT && R && VIEW.mode === 'one' && cur) CT.depth(Array.prototype.indexOf.call(secs, cur) + 1);   // 이용 통계: 결과 어디까지 봤나
     nav.querySelectorAll('li [data-go]').forEach(function (b) {
       var on = b.getAttribute('data-go') === id;
       if (on === b.classList.contains('on')) return;
@@ -676,8 +677,16 @@
     markMode(VIEW.mode);                                     // 탭은 고른 그대로 — 빈 칸이 있다고 모델 요약 탭으로 넘기지 않는다
     markNeed(miss);
     pageHead();
+    if (window.CT) {                                         // 이용 통계: 고르다 만 칸(입력하다 포기) · 고른 모델(단계 흐름 '차 고름')
+      CT.miss(S.mk ? miss.map(function (x) { return x.name.split(' — ')[0]; }).join(',') : '');
+      if (S.model) CT.pick(S.model);
+    }
     R0 = null;
-    if (M && (VIEW.mode === 'model' || miss.length)) { R = null; summary(G, miss); MB = miss.length ? needBar(miss) : bar('모델 요약 보기 ↓'); return; }   // 빈 칸이 남았으면 안내 + 모델 요약(참고)
+    if (M && (VIEW.mode === 'model' || miss.length)) {
+      R = null; summary(G, miss); MB = miss.length ? needBar(miss) : bar('모델 요약 보기 ↓');
+      if (VIEW.mode === 'model' && window.CT) CT.result('model|' + S.mk + '|' + S.model, S.model, '', 'model');
+      return;
+    }   // 빈 칸이 남았으면 안내 + 모델 요약(참고)
     if (miss.length || !G) { R = null; guide(miss); MB = miss.length ? needBar(miss) : ''; return; }
     var c = condResult(), rate = S.rate === '' ? null : Number(S.rate);
     var car = {
@@ -698,6 +707,7 @@
     if (note) { note.textContent = '자동 ' + auto.rate + '%'; note.title = auto.source + (car['연료'] ? ' · ' + car['연료'] : ''); }
     LAST = { G: G, car: car, c: c };
     renderResult(G, car, c);
+    if (window.CT) CT.result(JSON.stringify(Object.assign({}, S, { ex: [] })), S.model, S.grade + (S.trim ? ' ' + S.trim : ''), 'one');   // 모델·등급만 남긴다(Q156)
     clearTimeout(recentTimer);
     recentTimer = setTimeout(saveRecent, 2500);
     MB = bar('추정 <b>' + man(R.price) + '</b>만 · 환산 <b>' + man(R.converted) + '</b>만 · 신뢰도 ' + R.grade, '결과 보기 ↓');
@@ -1790,6 +1800,7 @@
   }
   function applyMode() {                                     // 묶음 산정·환산 비율은 입력·결과 대신 각자의 화면
     var m = VIEW.mode;
+    if (window.CT) CT.screen('price.' + m);                  // 이용 통계(기획 v2.28) — 지금 화면
     pageHead();
     $('grid').hidden = m === 'batch' || m === 'rates';
     $('batch').hidden = m !== 'batch';
@@ -1829,6 +1840,7 @@
         if (l < nav.scrollLeft || l + a.offsetWidth > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = l - (nav.clientWidth - a.offsetWidth) / 2;
       }
     });
+    if (page !== 'price' && page !== 'report' && window.CT) CT.screen(page);   // 이용 통계(기획 v2.28) — 시세 산정은 applyMode 가 알린다
     if (page === 'pulse') {
       if (!PV) PV = V2Pulse.create(subCtx('#/pulse', 'navPulse'));
       PV.show($('pulseView'), qs());
@@ -2086,6 +2098,7 @@
 
   function fail(err) {
     console.error(err);
+    if (window.CT) CT.err('load', err && err.message || err);
     $('app').innerHTML = '<div class="alert">데이터를 불러오지 못했습니다: ' + esc(err && err.message || err) + '</div>';
   }
 
@@ -2105,6 +2118,7 @@
         S = fromHash();
         layout();
         marketLine();
+        if (window.CT) CT.ev('perf', 'ready', Math.round(performance.now()));   // 이용 통계: 기본 데이터를 받아 화면을 그리기까지(ms)
         X.mmWait = getJSON('market_models.json').then(function (j) {   // 세부모델 시장 숫자(시세 추세·판매 속도·지표 줄) — 늦게 와도 되므로 따로
           X.mm = j; X.mmBy = {};
           j.models.forEach(function (m) { X.mmBy[m.maker + '|' + m.model] = m; });

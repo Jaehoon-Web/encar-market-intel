@@ -1,14 +1,16 @@
 /*
- * worker/index.js — 사이트 Worker: 정적 자산(web/) + 환산 비율 팀 공용 저장소 API (기획안 5.1.6 · D6)
+ * worker/index.js — 사이트 Worker: 정적 자산(web/) + 환산 비율 팀 공용 저장소 API (기획안 5.1.6 · D6) + 이용 통계 기록 (기획안 5.11)
  *
  *   GET /api/rates          → { ok, store, writable, team }   팀이 고친 것(아직 없으면 team = null)
  *   GET /api/rates?rev=N    → { ok, team }                    N판(되돌리기용, 180일 보관)
  *   PUT /api/rates          본문 { password, rev, by, note, cells, models } → { ok, team }   새 판 저장
+ *   POST /api/ev            본문 { u, s, d, e: [[시각, 종류, 화면, 이름, 값], …] } → 204   이용 통계(web/v2/track.js)
  *
  * 초기값(경매 갭 분석 요약치)은 정적 파일 /data/conversion_rates.json 이고, 여기에는 팀이 고친 것만 둔다.
  *   cells  = 기준표(호가대 × 차령)와 같은 꼴의 2차원 배열. 숫자면 그 칸을 팀 값으로, null 이면 초기값 그대로
- *   models = [{ 제조사, 모델(엔카 세부모델), 연료(비우면 전체), 비율, 메모 }] — 모델별 비율(모델 예외보다 먼저)
- * 바인딩(wrangler.toml · Cloudflare 설정): RATES = KV 저장소, RATES_PASSWORD = 수정 비밀번호(비밀값), ASSETS = 정적 자산.
+ *   models = [{ 제조사, 모델(세부모델), 연료(비우면 전체), 비율, 메모 }] — 모델별 비율(모델 예외보다 먼저)
+ * 바인딩(wrangler.toml · Cloudflare 설정): RATES = KV 저장소, RATES_PASSWORD = 수정 비밀번호(비밀값), ASSETS = 정적 자산,
+ *   STATS = 이용 통계 D1(없으면 기록은 조용히 건너뜀).
  * 그 밖의 주소는 정적 자산으로 넘긴다. 비밀번호가 틀리면 1초 쉬고 401(무차별 대입 방지, KV에는 쓰지 않는다).
  */
 const KEY = 'team';
@@ -138,6 +140,58 @@ async function put(request, env) {
   return json({ ok: true, team: next });
 }
 
+// ───── 이용 통계(기획 v2.28 · 5.11, 인터뷰 Q148~Q173) ─────
+// 익명 번호(u · 방문 s)와 행동만 받는다. 이름·IP·위치는 받지도 적지도 않는다(요청 머리글의 IP를 읽지 않음).
+// 받은 묶음은 SQL 한 문장(json_each)으로 넣는다 — D1 무료 요금제의 '요청 한 번에 50문장' 한도와 무관하게.
+const EV_TYPES = new Set(['start', 'view', 'vis', 'act', 'export', 'result', 'pick', 'depth', 'miss', 'batch', 'err', 'perf']);
+const EV_MAX = 200;
+const ID_RE = /^[a-z0-9]{16}$/;
+const SCR_RE = /^[a-z.]{0,20}$/;
+const SCHEMA = [
+  'CREATE TABLE IF NOT EXISTS ev (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, day TEXT NOT NULL, uid TEXT NOT NULL, sid TEXT NOT NULL,' +
+    ' dev TEXT, type TEXT NOT NULL, scr TEXT, name TEXT, val TEXT)',
+  'CREATE INDEX IF NOT EXISTS ev_day ON ev(day)',
+  'CREATE INDEX IF NOT EXISTS ev_sid ON ev(sid)'
+];
+const EV_INSERT = 'INSERT INTO ev (ts, day, uid, sid, dev, type, scr, name, val) SELECT json_extract(value, \'$[0]\'), json_extract(value, \'$[1]\'), ?2, ?3, ?4,' +
+  ' json_extract(value, \'$[2]\'), json_extract(value, \'$[3]\'), json_extract(value, \'$[4]\'), json_extract(value, \'$[5]\') FROM json_each(?1)';
+let ready = null;
+function ensure(db) {                                         // 표가 없으면 만든다(Worker가 새로 뜰 때 한 번)
+  if (!ready) ready = db.batch(SCHEMA.map(q => db.prepare(q))).catch(e => { ready = null; throw e; });
+  return ready;
+}
+const kstDay = ms => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10);
+const empty = () => new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
+
+async function ev(request, env) {
+  if (!env.STATS) return empty();                              // 저장소 연결 전에도 사이트는 그대로
+  const origin = request.headers.get('origin');
+  if (origin) {
+    let host = '';
+    try { host = new URL(origin).host; } catch (e) { /* 'null' 등 */ }
+    if (host !== new URL(request.url).host) return json({ ok: false, error: '이 사이트에서만 기록합니다' }, 403);
+  }
+  if (Number(request.headers.get('content-length') || 0) > MAX_BODY) return json({ ok: false, error: '보낸 내용이 너무 큽니다' }, 413);
+  const text = await request.text();
+  if (text.length > MAX_BODY) return json({ ok: false, error: '보낸 내용이 너무 큽니다' }, 413);
+  let b;
+  try { b = JSON.parse(text); } catch (e) { return json({ ok: false, error: '내용을 읽을 수 없습니다' }, 400); }
+  if (!b || !ID_RE.test(b.u) || !ID_RE.test(b.s) || !Array.isArray(b.e)) return json({ ok: false, error: '형식이 맞지 않습니다' }, 400);
+  const now = Date.now(), rows = [];
+  for (const x of b.e.slice(0, EV_MAX)) {
+    if (!Array.isArray(x) || !EV_TYPES.has(x[1])) continue;
+    let t = Math.round(Number(x[0]));
+    if (!Number.isFinite(t) || t > now + 60e3 || t < now - 2 * 86400e3) t = now;   // 브라우저 시계가 크게 틀리면 받은 시각으로
+    const scr = str(x[2], 20);
+    if (!SCR_RE.test(scr)) continue;
+    rows.push([t, kstDay(t), x[1], scr, str(x[3], 60), str(x[4], 200)]);
+  }
+  if (!rows.length) return empty();
+  await ensure(env.STATS);
+  await env.STATS.prepare(EV_INSERT).bind(JSON.stringify(rows), b.u, b.s, b.d === 'm' ? 'm' : 'pc').run();
+  return empty();
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -145,6 +199,10 @@ export default {
       if (request.method === 'GET') return get(url, env);
       if (request.method === 'PUT') return put(request, env);
       return json({ ok: false, error: 'GET 또는 PUT만 됩니다' }, 405);
+    }
+    if (url.pathname === '/api/ev') {
+      if (request.method !== 'POST') return json({ ok: false, error: 'POST만 됩니다' }, 405);
+      try { return await ev(request, env); } catch (e) { return json({ ok: false, error: '기록하지 못했습니다' }, 500); }   // 기록 실패가 화면을 막지 않게
     }
     if (url.pathname.startsWith('/api/')) return json({ ok: false, error: '없는 주소입니다' }, 404);
     return env.ASSETS.fetch(request);

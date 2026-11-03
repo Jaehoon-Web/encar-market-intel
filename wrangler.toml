@@ -13,3 +13,9 @@ run_worker_first = ["/api/*"]
 [[kv_namespaces]]
 binding = "RATES"
 id = "560f410dafd740fba1e8a624fe428f3e"
+
+# 이용 통계(기획 v2.28 · 5.11) — 익명 행동 기록. 이름·IP·입력 조건은 넣지 않는다. 관리자 비밀번호는 비밀값 ADMIN_PASSWORD(사용자가 직접)
+[[d1_databases]]
+binding = "STATS"
+database_name = "carisma-r-stats"
+database_id = "7e65736e-0f53-4330-8efb-922938ccebb5"

@@ -115,6 +115,17 @@ const gone = ['old.html', 'app.js', 'README.md', 'dataset.json', 'insights.json'
   .map(f => f.endsWith('.json') ? 'data/' + f : f).filter(f => fs.existsSync(path.join(WEB, f)));
 ok(!gone.length, '이전 사이트 파일·이전 사이트 전용 데이터가 공개 폴더에 없음', gone.join(', '));
 
+section('이용 통계(기획 v2.28)');
+// 기록 장치는 다른 코드보다 먼저 읽혀야 오류까지 센다 · 바닥글에 익명 수집 안내 · 입력값·조건은 보내지 않는다(Q156·Q159)
+const order = h => { const t = h.indexOf('track.js'), a = h.indexOf('app.js'), l = h.indexOf('inspection_score.js'); return t > 0 && t < l && t < a; };
+ok(order(html) && order(v2html), 'track.js가 다른 화면 코드보다 먼저 읽힘(두 화면)');
+ok(html.includes('이용 통계를 익명으로') && v2html.includes('이용 통계를 익명으로'), '바닥글에 이용 통계 익명 수집 안내(두 화면)');
+const trk = fs.readFileSync(path.join(V2, 'track.js'), 'utf8').replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '');
+ok(!/\.value\b|innerText|cookie|X-Forwarded|CF-Connecting/i.test(trk), '기록 장치가 입력값·쿠키·IP를 읽지 않음');
+const appSrc = fs.readFileSync(path.join(V2, 'app.js'), 'utf8'), calls = appSrc.match(/CT\.result\([^;]*;/g) || [];
+ok(calls.length === 2 && calls.every(c => !/S\.(km|y|m|cost|color|cond|items|rate)\b|R\.|price/.test(c.replace(/JSON\.stringify\([^)]*\)\)/, ''))),
+  '산정 결과 기록은 모델·등급만(연식·주행·상태·시세 없음)', calls.join(' | '));
+
 section('라이브러리 동작(실제 데이터)');
 const IS = require(path.join(WEB, 'lib', 'inspection_score.js')), PE = require(path.join(WEB, 'lib', 'price_engine.js'));
 const NM = require(path.join(WEB, 'lib', 'name_match.js')), RS = require(path.join(WEB, 'lib', 'rates_store.js'));

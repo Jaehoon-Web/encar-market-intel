@@ -1,4 +1,4 @@
-// worker_check.mjs — 사이트 Worker(worker/index.js)의 환산 비율 저장소 API 시험 (Cloudflare 없이 Node로)
+// worker_check.mjs — 사이트 Worker(worker/index.js)의 환산 비율 저장소 API · 이용 통계 기록 API 시험 (Cloudflare 없이 Node로)
 //   node tools/worker_check.mjs
 // 가짜 KV(메모리)와 가짜 정적 자산(web/ 폴더)을 붙여 GET·PUT·비밀번호·동시 저장·값 검사·되돌리기용 판 보관을 확인한다.
 import fs from 'node:fs';
@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const worker = (await import(pathToFileURL(path.join(ROOT, 'worker', 'index.js')).href)).default;
+const { d1 } = await import(pathToFileURL(path.join(ROOT, 'tools', 'd1_shim.mjs')).href);
 
 function kv() {
   const m = new Map();
@@ -93,6 +94,46 @@ r = await call(env, 'PUT', { password: '팀비번-2026', rev: 3, by: '가'.repea
 ok(r.status === 400 || r.status === 413, '모델 501개 → 거절', r.status);
 r = await worker.fetch(new Request('https://x.test/api/rates', { method: 'PUT', body: 'x'.repeat(70000) }), env);
 ok(r.status === 413, '64KB 넘는 본문 → 413', r.status);
+
+console.log('[이용 통계 기록 /api/ev (기획 v2.28)]');
+const U = 'abcdefgh12345678', SI = 'session000000001';
+const ev = (env2, body, headers = {}) => worker.fetch(new Request('https://x.test/api/ev', {
+  method: 'POST', headers: Object.assign({ 'content-type': 'application/json' }, headers), body: typeof body === 'string' ? body : JSON.stringify(body)
+}), env2);
+r = await ev({ ASSETS }, { u: U, s: SI, e: [[Date.now(), 'view', 'pulse', '', '']] });
+ok(r.status === 204, '저장소(D1) 없음 → 204(사이트는 그대로)', r.status);
+const S1 = d1(), envS = { ASSETS, STATS: S1 }, now = Date.now();
+r = await ev(envS, { u: U, s: SI, d: 'm', e: [
+  [now, 'start', 'price.one', 'car', ''], [now, 'view', 'price.one', '', ''], [now, 'result', 'price.one', '더 뉴그랜저IG', '가솔린 2.5'],
+  [now, 'act', 'price.one', 'x'.repeat(100), 'y'.repeat(500)], [now, 'hack', 'price.one', '', ''], [now, 'view', 'Price<script>', '', ''],
+  [now + 86400e3 * 5, 'vis', 'price.one', '', '12'], ['abc', 'err', 'price.one', 'js', 'boom']
+] }, { origin: 'https://x.test' });
+ok(r.status === 204, '같은 사이트에서 보냄 → 204', r.status);
+let rows = (await S1.prepare('SELECT * FROM ev ORDER BY id').all()).results;
+ok(rows.length === 6, '모르는 종류·이상한 화면 이름은 버림(8건 중 6건)', rows.map(x => x.type + ':' + x.scr));
+ok(rows.every(x => x.uid === U && x.sid === SI && x.dev === 'm'), '익명 번호·방문·기기(m) 저장', rows[0]);
+ok(Object.keys(rows[0]).sort().join() === 'day,dev,id,name,scr,sid,ts,type,uid,val', '저장 칸은 정해진 것만(IP·이름 칸 없음)', Object.keys(rows[0]));
+ok(rows[2].name === '더 뉴그랜저IG' && rows[2].val === '가솔린 2.5', '결과는 모델·등급', rows[2]);
+ok(rows[3].name.length === 60 && rows[3].val.length === 200, '이름 60자 · 값 200자로 자름', [rows[3].name.length, rows[3].val.length]);
+ok(rows[4].ts <= Date.now() && rows[4].ts >= now - 5000 && rows[5].ts >= now - 5000, '틀린 시각(미래·글자)은 받은 시각으로', [rows[4].ts, rows[5].ts]);
+const kst = new Date(now + 9 * 3600e3).toISOString().slice(0, 10);
+ok(rows[0].day === kst, '날짜는 한국 시간 기준', [rows[0].day, kst]);
+r = await ev(envS, { u: U, s: SI, e: [[now, 'view', 'pulse', '', '']] }, { origin: 'https://evil.example' });
+ok(r.status === 403, '다른 사이트에서 보냄 → 403', r.status);
+r = await ev(envS, { u: 'short', s: SI, e: [] });
+ok(r.status === 400, '익명 번호 형식이 틀림 → 400', r.status);
+r = await ev(envS, 'not json');
+ok(r.status === 400, 'JSON 아님 → 400', r.status);
+r = await ev(envS, { u: U, s: SI, d: 'tablet', e: Array.from({ length: 260 }, () => [now, 'act', 'data', 'download', '']) });
+rows = (await S1.prepare("SELECT count(*) n, min(dev) d FROM ev WHERE scr = 'data'").all()).results[0];
+ok(r.status === 204 && rows.n === 200 && rows.d === 'pc', '한 번에 200건까지 · 모르는 기기는 pc', rows);
+r = await ev(envS, 'x'.repeat(70000));
+ok(r.status === 413, '64KB 넘는 본문 → 413', r.status);
+r = await worker.fetch(new Request('https://x.test/api/ev'), envS);
+ok(r.status === 405, 'GET → 405', r.status);
+const bad = { ASSETS, STATS: { prepare() { throw new Error('down'); }, batch() { return Promise.reject(new Error('down')); } } };
+r = await ev(bad, { u: U, s: SI, e: [[now, 'view', 'pulse', '', '']] });
+ok(r.status === 500 && (await r.json()).ok === false, '저장소 오류 → 500(화면은 기록 실패를 무시)', r.status);
 
 console.log(fail ? `\n실패 ${fail}건` : '\n모두 통과');
 process.exit(fail ? 1 : 0);

@@ -293,7 +293,7 @@
           if (i < rows.length) { progress('산정 중… ' + i + ' / ' + rows.length + '대'); setTimeout(step, 0); }
           else render();
         })();
-      }).catch(function (e) { progress('비교 매물 파일을 불러오지 못했습니다: ' + esc(e && e.message || e)); });
+      }).catch(function (e) { progress('비교 매물 파일을 불러오지 못했습니다: ' + esc(e && e.message || e)); if (window.CT) CT.err('load', e && e.message || e); });
     }
     function redo(list) {                                    // 고친 행만 다시
       var need = {};
@@ -789,7 +789,7 @@
       var a = b.getAttribute('data-b'), k = +b.getAttribute('data-k');
       if (a === 'sumSort') { sumSort = b.getAttribute('data-v'); renderOut(); return; }
       if (a === 'sumAll') { sumAll = !sumAll; renderOut(); return; }
-      if (a === 'run') run();
+      if (a === 'run') { run(); if (window.CT) CT.ev('batch', 'run', rows.length); }   // 이용 통계: 사용자가 누른 산정만(예시·저장본 복원은 안 셈) · 대수
       else if (a === 'sample') sample();
       else if (a === 'clear') { $('bPaste').value = ''; run(); }
       else if (a === 'xlsx') exportAll();

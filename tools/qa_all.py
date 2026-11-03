@@ -7,7 +7,7 @@ qa_all.py — 새 사이트 전체 점검을 한 번에 (기획안 WP3 전체 QA
 
 하나씩 돌리고 통과·실패와 걸린 시간을 표로 보여 준다. 하나라도 실패하면 종료 코드 1.
   사이트 정적 점검   tools/site_check.mjs        파일·데이터 모양·라이브러리를 실제 데이터로 한 번씩
-  저장 API           tools/worker_check.mjs      환산 비율 저장소(worker/index.js) 26개 항목
+  저장 API           tools/worker_check.mjs      환산 비율 저장소 26개 + 이용 통계 기록 16개 항목(worker/index.js)
   엑셀 작성기        tools/xlsx_writer_check.py  openpyxl 로 열어 값·서식 비교
   차명 매칭          tools/name_match_check.py   판매중 3,000대 × 표기 5가지, 합격 기준(엔카 표기 99%·확신 높음 99.5%)
   성능 계산기 일치   inspection_parity.py        판매중 성능점검 매물 전체, 17개 열 100%

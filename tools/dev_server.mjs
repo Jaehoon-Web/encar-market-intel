@@ -1,7 +1,8 @@
 // dev_server.mjs — 로컬 미리보기 서버: web/ 정적 파일 + 사이트 Worker(worker/index.js)의 /api 를 함께 띄운다
 //   node tools/dev_server.mjs [포트=8792]
 // 환산 비율 저장소(KV)는 encar_output/dev_kv.json 파일로 흉내 낸다(저장소에 올리지 않음). 수정 비밀번호는 환경 변수
-// RATES_PASSWORD, 없으면 'dev'. 실제 배포(Cloudflare)와 같은 Worker 코드를 그대로 돌리므로 화면에서 저장 흐름까지 시험할 수 있다.
+// RATES_PASSWORD, 없으면 'dev'. 이용 통계(D1)는 같은 폴더의 dev_stats.sqlite(Node 내장 SQLite)로 흉내 낸다.
+// 실제 배포(Cloudflare)와 같은 Worker 코드를 그대로 돌리므로 화면에서 저장 흐름까지 시험할 수 있다.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -12,6 +13,7 @@ const WEB = path.join(ROOT, 'web');
 const KV_FILE = path.join(ROOT, 'encar_output', 'dev_kv.json');
 const PORT = Number(process.argv[2] || 8792);
 const worker = (await import(pathToFileURL(path.join(ROOT, 'worker', 'index.js')).href)).default;
+const { d1 } = await import(pathToFileURL(path.join(ROOT, 'tools', 'd1_shim.mjs')).href);
 
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8', '.mjs': 'application/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png',
@@ -32,7 +34,8 @@ const ASSETS = {
       'content-type': TYPES[path.extname(f).toLowerCase()] || 'application/octet-stream', 'content-length': String(fs.statSync(f).size) } });
   }
 };
-const env = { RATES, ASSETS, RATES_PASSWORD: process.env.RATES_PASSWORD || 'dev' };
+fs.mkdirSync(path.dirname(KV_FILE), { recursive: true });
+const env = { RATES, ASSETS, RATES_PASSWORD: process.env.RATES_PASSWORD || 'dev', STATS: d1(path.join(path.dirname(KV_FILE), 'dev_stats.sqlite')) };
 
 http.createServer(async (req, res) => {
   try {
@@ -40,7 +43,7 @@ http.createServer(async (req, res) => {
     for await (const c of req) chunks.push(c);
     const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
     const headers = {};
-    ['content-type', 'content-length'].forEach(h => { if (req.headers[h]) headers[h] = req.headers[h]; });
+    ['content-type', 'content-length', 'origin'].forEach(h => { if (req.headers[h]) headers[h] = req.headers[h]; });
     const request = new Request('http://' + req.headers.host + req.url, { method: req.method, headers, body: hasBody ? Buffer.concat(chunks) : undefined });
     const response = await worker.fetch(request, env);
     const out = Object.fromEntries(response.headers);
