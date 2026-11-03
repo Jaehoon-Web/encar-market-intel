@@ -1,4 +1,4 @@
-name = "encar-market-intel"
+name = "carisma-r"                       # 2026-11-03 대시보드에서 Worker 이름을 바꿈(기획 v2.25) — 대시보드 이름과 같아야 자동 배포가 된다
 main = "worker/index.js"
 compatibility_date = "2025-01-01"
 

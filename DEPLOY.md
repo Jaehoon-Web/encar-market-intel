@@ -1,7 +1,7 @@
 # 배포 가이드 — Cloudflare Workers 정적 자산 (무료)
 
 ## 운영 사이트
-**https://encar-market-intel.fullsoup.workers.dev/**
+**https://carisma-r.fullsoup.workers.dev/** (카리스마R — 2026-11-03 Worker 이름을 바꿔 주소가 바뀜, 옛 주소는 열리지 않음)
 
 > 실제 배포 형태는 **Cloudflare Workers Static Assets** (`*.workers.dev`)이며, Pages(`*.pages.dev`)가 아니다.
 > 설정은 [wrangler.toml](wrangler.toml)의 `[assets] directory = "./web"`. GitHub 연동(Workers Builds)으로 **`git push` 시 자동 재배포**된다 — 파이프라인에 `wrangler` 호출 단계는 없다.
@@ -15,7 +15,7 @@
 
 ## 배포 반영 확인 (1줄)
 ```bash
-curl -s https://encar-market-intel.fullsoup.workers.dev/data/meta.json | head -c 120
+curl -s https://carisma-r.fullsoup.workers.dev/data/meta.json | head -c 120
 ```
 `collectedDate` 가 방금 크롤한 날짜면 반영 완료. (캐시 5분이라 push 후 최대 몇 분 지연)
 
@@ -92,14 +92,14 @@ python tools/qa_all.py
 
 **사용자가 Cloudflare 대시보드에서 할 일**(로그인 필요)
 1. **Storage & Databases → Workers KV → Create**로 이름 `encar-rates` 저장소를 만든다. **Namespace ID**를 복사한다.
-2. **Workers & Pages → encar-market-intel → Settings → Variables and Secrets → Add**에서 수정 비밀번호를 넣는다.
+2. **Workers & Pages → carisma-r → Settings → Variables and Secrets → Add**에서 수정 비밀번호를 넣는다.
    - Type `Secret`, Name `RATES_PASSWORD`, Value = 팀이 쓸 비밀번호.
    - 비밀값은 배포해도 지워지지 않는다.
    - 메뉴가 안 보이면 3단계 배포 뒤에 넣는다. 그동안 저장은 "비밀번호 미설정" 안내가 뜬다.
 
 **그다음(코드)** — Namespace ID를 받아 `wrangler.toml`을 아래처럼 바꾸고 커밋·push하면 Workers Builds가 배포한다.
 ```toml
-name = "encar-market-intel"
+name = "carisma-r"
 main = "worker/index.js"
 compatibility_date = "2025-01-01"
 
@@ -116,7 +116,7 @@ id = "<1단계 Namespace ID>"
 
 **확인**:
 ```bash
-curl -s https://encar-market-intel.fullsoup.workers.dev/api/rates
+curl -s https://carisma-r.fullsoup.workers.dev/api/rates
 ```
 - `{"ok":true,"store":true,"writable":true,"team":null}`가 나오면 연결된 것이다.
 - `/#/price?view=rates`에서 [수정하기]가 열린다.

@@ -23,7 +23,7 @@ except ImportError:
 ROOT = os.path.dirname(os.path.abspath(__file__))
 LOGDIR = os.path.join(ROOT, "logs")
 LOCK = os.path.join(ROOT, "auto_update.lock")
-SITE_META = "https://encar-market-intel.fullsoup.workers.dev/data/meta.json"
+SITE_META = "https://carisma-r.fullsoup.workers.dev/data/meta.json"
 STALL_MIN = 15          # 로그가 이 시간(분) 이상 갱신 안 되면 '멈춤 의심'
 
 TS = re.compile(r"^\[?(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)")
