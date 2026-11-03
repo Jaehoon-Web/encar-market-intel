@@ -173,6 +173,10 @@ ok(eng.conversionRate(1500, 4, '현대', '더 뉴 그랜저 IG', '가솔린').ra
 const B = require(path.join(V2, 'batch.js'));
 ok(B.kmOf('3.8만') === 38000 && B.regOf('22.03').y === 2022 && B.costOf('150,000') === 15 && B.colorOf('펄화이트') === '흰색·진주', '묶음 산정 값 읽기(주행·등록·수리비·색상)');
 ok(B.kmOf('4만5천') === 45000 && B.regOf('19년 3월').y === 2019 && B.regOf('19년 3월').m === 3, '묶음 산정 값 읽기(4만5천 · 19년 3월)');
+const ym = v => { const r = B.regOf(v); return r ? r.y + '-' + r.m : null; };
+const xd = ['Mar-19', 'Mar-02', 'Jul-2021', 'March 2019', '2019-Mar', '1-Mar-19', '01 Mar 2019', '3/1/2019', '2019년 3월', '2019. 3. 1.'].map(ym);
+ok(xd.join() === '2019-3,2002-3,2021-7,2019-3,2019-3,2019-3,2019-3,2019-3,2019-3,2019-3', '엑셀이 바꾼 날짜 모양 읽기(Mar-19 · 1-Mar-19 · 3/1/2019 …)', xd.join());
+ok(B.regOf('Foo-19') === null && B.formTSV().includes('2019년 3월'), '달 이름이 아니면 날짜로 안 읽음 · 양식 최초등록은 엑셀이 안 바꾸는 2019년 3월');
 const pf = [B.pullFromText('그랜저 IG 2.5 프리미엄 2019년 45000km'), B.pullFromText('푸조 2008 1.2 GT라인 2021 30000km'), B.pullFromText('아반떼 CN7 19년 3월 4만5천'), B.pullFromText('그랜저 2019 45000')];
 ok(pf[0].reg.y === 2019 && pf[0].km === 45000 && pf[0].text === '그랜저 IG 2.5 프리미엄' && pf[1].reg.y === 2021 && pf[1].text === '푸조 2008 1.2 GT라인' &&
   pf[2].reg.m === 3 && pf[2].km === 45000 && pf[3].km === 45000, '한 칸에 이어 쓴 글에서 연식·주행 꺼내기(모델 이름 속 숫자는 그대로)', JSON.stringify(pf));
