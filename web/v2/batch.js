@@ -331,14 +331,17 @@
     }
 
     // ───── 화면 ─────
+    var IB = ' <button type="button" class="v2-ibtn" data-ib aria-expanded="false" aria-label="설명">i</button>';
+    function info(t) { return '<div class="v2-info" hidden>' + t + '</div>'; }
     function progress(msg) { $('bOut').innerHTML = '<div class="card"><div class="v2-kv" style="margin:0"><span class="spinner v2-spin"></span>' + msg + '</div></div>'; }
     function frame() {
-      el.innerHTML = '<div class="card"><div class="card-title">① 엑셀에서 차량 목록을 복사해 붙여넣으세요 <span class="hint">머리글 행째로 · 한 번에 ' + LIMIT + '대까지</span></div>' +
+      el.innerHTML = '<div class="card"><div class="card-title">① 엑셀 목록 붙여넣기' + IB + '</div>' +
+        info('엑셀에서 머리글 행째로 복사해 붙여넣으세요(한 번에 ' + LIMIT + '대까지). 꼭 있어야 하는 열: 차명(모델·등급), 최초등록 또는 연식, 주행거리. ' +
+          '있으면 더 정확해지는 열: 색상, 성능 상태(예: 좌프론트휀더 X, 본넷 W — 빈칸이면 상태 미상), 수리비(만원), 차량번호(하·허·호는 렌트로 봅니다). ' +
+          '붙여넣은 글과 고친 표기는 이 브라우저에만 남습니다.') +
         '<textarea class="v2-in v2-paste" id="bPaste" spellcheck="false" wrap="off" aria-label="차량 목록 붙여넣기" placeholder="차량번호&#9;차명&#9;최초등록&#9;주행거리&#9;색상&#9;성능 상태&#10;12가3456&#9;투싼 (NX4) 1.6T 인스퍼레이션&#9;2022-03&#9;38,200&#9;흰색&#9;좌프론트휀더 X"></textarea>' +
         '<div class="v2-actions"><button type="button" class="v2-btn primary" data-b="run">산정하기</button>' +
-        '<button type="button" class="v2-btn" data-b="sample">예시 목록 넣기</button><button type="button" class="v2-btn" data-b="clear">지우기</button></div>' +
-        '<p class="v2-help">꼭 있어야 하는 열: 차명(모델·등급), 최초등록 또는 연식, 주행거리. 있으면 더 정확해지는 열: 색상, 성능 상태(예: 좌프론트휀더 X, 본넷 W — 빈칸이면 상태 미상), ' +
-        '수리비(만원), 차량번호(하·허·호는 렌트로 봅니다). 붙여넣은 글과 고친 표기는 이 브라우저에만 남습니다.</p></div>' +
+        '<button type="button" class="v2-btn" data-b="sample">예시 목록 넣기</button><button type="button" class="v2-btn" data-b="clear">지우기</button></div></div>' +
         '<div id="bCols"></div><div id="bFix"></div><div id="bOut"></div>' +
         '<datalist id="bModels">' + MODELS.map(function (m) { return '<option value="' + esc(m.label) + '"></option>'; }).join('') + '</datalist>';
       el.addEventListener('click', onClick);
@@ -367,8 +370,9 @@
     function renderCols() {
       if (!T.table.length) { $('bCols').innerHTML = ''; return; }
       var nc = T.roles.length, head = T.header ? T.table[0] : null, data = (T.header ? T.table.slice(1) : T.table).slice(0, 3);
-      var h = '<div class="card"><div class="v2-tools"><div class="card-title">② 열 확인 <span class="hint">자동으로 알아본 열 · 틀리면 고르세요</span></div>' +
+      var h = '<div class="card"><div class="v2-tools"><div class="card-title">② 열 확인' + IB + '</div>' +
         '<label class="v2-chk" style="margin:0"><input type="checkbox" data-b="header"' + (T.header ? ' checked' : '') + '> 첫 줄은 머리글</label></div>' +
+        info('자동으로 알아본 열입니다. 틀리면 열 위의 칸에서 쓰임을 고르세요.') +
         '<div class="v2-tablewrap"><table class="t v2-tbl v2-ctbl"><thead><tr>';
       for (var c = 0; c < nc; c++) {
         h += '<th><select class="v2-csel" data-role="' + c + '" aria-label="' + colName(c) + '열의 쓰임">' + ROLES.map(function (o) {
@@ -397,7 +401,8 @@
       var missKm = rows.filter(function (r) { return r.km == null; }).length, missReg = rows.filter(function (r) { return !r.reg; }).length;
       var remembered = Object.keys(FIX.name).length + Object.keys(FIX.grade).length + Object.keys(FIX.cond).length;
       if (!order.length && !low && !none && !guess && !missKm && !missReg && !remembered) { $('bFix').innerHTML = ''; return; }
-      var h = '<div class="card"><div class="card-title">③ 확인할 것 <span class="hint">같은 표기는 한 번 고치면 모두 적용됩니다</span></div>';
+      var h = '<div class="card"><div class="card-title">③ 확인할 것' + IB + '</div>' + info('같은 표기는 한 번 고치면 모두 적용됩니다. 쓸 수 있는 성능 표기: ' +
+        '부위(프론트 휀더·도어·후드·트렁크·쿼터·루프·필러…) + 좌·우 + 상태(X 교환 · W 판금 · 용접 · 절단 · U 요철 · T 손상 · C 부식 · A 흠집). 여러 부위는 쉼표로 나눕니다.');
       if (order.length) {
         h += '<div class="v2-sub">못 읽은 성능 표기 ' + order.length + '가지 — 고치기 전에는 그 차를 계산하지 않습니다</div><div class="v2-fixes">';
         order.forEach(function (t, k) {
@@ -406,8 +411,7 @@
             '<button type="button" class="v2-btn" data-b="tokFix" data-k="' + k + '">적용</button>' +
             '<button type="button" class="v2-btn" data-b="tokSkip" data-k="' + k + '">무시하고 계산</button></div>';
         });
-        h += '</div><p class="v2-help">쓸 수 있는 표기: 부위(프론트 휀더·도어·후드·트렁크·쿼터·루프·필러…) + 좌·우 + 상태(X 교환 · W 판금 · 용접 · 절단 · U 요철 · T 손상 · C 부식 · A 흠집). ' +
-          '여러 부위는 쉼표로 나눕니다.</p>';
+        h += '</div>';
         T.unk = order;
       }
       var notes = [];
@@ -417,7 +421,7 @@
       if (missKm) notes.push('주행거리가 없는 차 <b>' + missKm + '대</b>');
       if (guess) notes.push('연식만 있어 <b>6월</b> 등록으로 계산한 차 <b>' + guess + '대</b>(표에 * 표시)');
       if (notes.length) h += '<ul class="v2-notes">' + notes.map(function (n) { return '<li>' + n + '</li>'; }).join('') + '</ul>';
-      if (remembered) h += '<p class="v2-help">이 브라우저에 기억한 고침: 차명 ' + Object.keys(FIX.name).length + ' · 등급 ' + Object.keys(FIX.grade).length +
+      if (remembered) h += '<p class="v2-note">이 브라우저에 기억한 고침: 차명 ' + Object.keys(FIX.name).length + ' · 등급 ' + Object.keys(FIX.grade).length +
         ' · 성능 표기 ' + Object.keys(FIX.cond).length + ' <button type="button" class="v2-btn" data-b="forget">모두 잊기</button></p>';
       $('bFix').innerHTML = h + '</div>';
     }
@@ -491,7 +495,8 @@
       var gap = s.imp - s.used, adv = Math.abs(gap) < 1.5 ? '지금 쓰는 비율과 비슷합니다' :
         '지금 비율보다 <b>' + Math.abs(gap).toFixed(1) + '%p ' + (gap > 0 ? '높습니다' : '낮습니다') + '</b> — ' + (s.n < 5 ? '건수가 적어 참고만 하세요' :
           '⚙ 환산 비율에서 해당 호가대·차령 칸이나 모델별 비율을 ' + (gap > 0 ? '올리는' : '내리는') + ' 것을 검토하세요');
-      var h = '<div class="card"><div class="card-title">실제 건 비교 <span class="hint">붙여넣은 실제 낙찰가 대비 환산가 · + 는 환산가가 실제보다 높음</span></div>' +
+      var h = '<div class="card"><div class="card-title">실제 건 비교' + IB + '</div>' + info('붙여넣은 실제 낙찰가 대비 환산가입니다. + 는 환산가가 실제보다 높다는 뜻입니다. ' +
+        '실제 비율 = 1 − (실제 낙찰가 + 수리비) ÷ 수리비 빼기 전 추정 시세. 같은 호가대·차령에서 실제 비율이 꾸준히 다르면 ⚙ 환산 비율에서 그 칸을 고칩니다.') +
         '<div class="v2-kv">비교 <b>' + s.n + '대</b> · 오차 중위(절댓값) <b>' + s.mdape.toFixed(1) + '%</b> · 치우침 <b>' + sgn(s.bias) + '</b> · ±10% 안 <b>' +
         Math.round(s.within * 100) + '%</b><br>실제 낙찰가로 거꾸로 구한 환산 비율 중위 <b>' + s.imp.toFixed(1) + '%</b> · 지금 쓰는 비율 중위 <b>' + s.used.toFixed(1) +
         '%</b> → ' + adv + '</div><div class="v2-tablewrap"><table class="t v2-tbl"><thead><tr><th class="num">행</th><th>세부모델 · 등급</th><th class="num">추정 시세</th>' +
@@ -501,7 +506,7 @@
           '<td class="num">' + man(r.R.converted) + '</td><td class="num"><b>' + man(r.actual) + '</b></td><td class="num">' + sgn(s.err[k]) + '</td>' +
           '<td class="num">' + r.R.rate + '%</td><td class="num">' + s.impl[k].toFixed(1) + '%</td><td>' + esc(r.R.rateSource) + '</td></tr>';
       });
-      return h + '</tbody></table></div><p class="v2-help">실제 비율 = 1 − (실제 낙찰가 + 수리비) ÷ 수리비 빼기 전 추정 시세. 같은 호가대·차령에서 실제 비율이 꾸준히 다르면 ⚙ 환산 비율에서 그 칸을 고칩니다.</p></div>';
+      return h + '</tbody></table></div></div>';
     }
 
     function rowHtml(r, i) {                                 // 한 행 = 차(번호판·붙여넣은 글) · 매칭(세부모델/등급) · 등록·주행 · 성능 · 결과
@@ -536,7 +541,8 @@
       var span = z - a, step = Math.pow(10, Math.floor(Math.log(span / n) / Math.LN10)), e = span / n / step;
       if (e >= 7.5) step *= 10; else if (e >= 3.5) step *= 5; else if (e >= 1.5) step *= 2;
       var t = [];
-      for (var v = Math.ceil(a / step) * step; v <= z; v += step) t.push(Math.round(v / step) * step);
+      var dp = Math.max(0, -Math.floor(Math.log(step) / Math.LN10 + 1e-9));   // 소수 꼬리 없이
+      for (var v = Math.ceil(a / step) * step; v <= z + step * 1e-9; v += step) t.push(+(Math.round(v / step) * step).toFixed(dp));
       return t;
     }
     function logTicks(a, z) {                                // 로그 눈금: 1·2·5 × 10ⁿ
@@ -590,7 +596,7 @@
           '<span class="v' + (off ? ' off' : '') + '"><b>' + man(R.price) + '</b><small>' + man(R.converted) + '</small></span>';
       });
       h += '<span></span><span class="ax">' + tk.map(function (t) { return '<i style="left:' + pc(t) + '">' + man(t) + '</i>'; }).join('') + '</span><span class="ax-u">만원</span></div>';
-      if (log) h += '<p class="v2-help">묶음 안 값 차이가 커서(' + man(raw[0]) + '만 ~ ' + man(raw[1]) + '만) 눈금을 로그(비율)로 그렸습니다 — 같은 너비 = 같은 비율.</p>';
+      if (log) h += '<p class="v2-note">값 차이가 커서 눈금을 로그(비율)로 · 같은 너비 = 같은 비율</p>';
       if (list.length > SUM_SHOW) h += '<div class="v2-actions"><button type="button" class="v2-btn" data-b="sumAll">' + (sumAll ? '처음 ' + SUM_SHOW + '대만 보기' : '전체 ' + list.length + '대 보기') + '</button></div>';
       return h;
     }
@@ -601,7 +607,7 @@
         return '<tr' + (tot ? ' class="tot"' : '') + '><td>' + esc(name) + '</td><td class="num">' + b.n + '</td><td class="gr">' + gb(b) + '</td><td class="num">' + man(b.p) +
           '</td><td class="num">' + man(b.c) + '</td><td class="num">' + (b.e ? (b.er / b.e).toFixed(1) + '%' : '–') + '</td></tr>';
       };
-      var h = '<div class="v2-ssub">차급별 <span class="hint">합계에 넣는 차 · 만원</span></div><div class="v2-tablewrap"><table class="t v2-bseg"><thead><tr><th>차급</th><th class="num">대수</th>' +
+      var h = '<div class="v2-ssub">차급별 · 합계에 넣는 차</div><div class="v2-tablewrap"><table class="t v2-bseg"><thead><tr><th>차급</th><th class="num">대수</th>' +
         '<th>신뢰도</th><th class="num">추정 시세 합계</th><th class="num">환산가 합계</th><th class="num">평균 환산 비율</th></tr></thead><tbody>' +
         ag.order.map(function (s) { return row(s, ag.by[s]); }).join('') + row('합계', ag.tot, true) + '</tbody></table></div>';
       h += '<div class="v2-ssub">신뢰도별</div><div class="v2-tablewrap"><table class="t v2-bseg"><thead><tr><th>신뢰도</th><th class="num">대수</th><th class="num">추정 시세 합계</th>' +
@@ -610,20 +616,20 @@
           return '<tr><td><span class="v2-gb ' + g + '">' + g + '</span> ' + { A: '믿을 만함', B: '조건을 조금 넓힘', C: '참고값' }[g] + '</td><td class="num">' + b.n + '</td><td class="num">' + man(b.p) +
             '</td><td class="num">' + man(b.c) + '</td><td class="num">' + (ag.tot.p ? Math.round(b.p / ag.tot.p * 100) + '%' : '–') + '</td></tr>';
         }).join('') + '</tbody></table></div>';
-      return h + '<p class="v2-help">평균 환산 비율은 추정 시세로 가중한 값입니다. ' + (ag.off ? '차명 확인이 필요한 ' + ag.off + '대(등록연도가 모델 기간 밖)는 합계에서 뺐습니다. ' : '') +
-        '신뢰도 C는 같은 세부모델 전체로 넓혀 찾은 참고값이라, 합계 중 C 비중이 크면 "열기"로 근거를 확인하세요.</p>';
+      return h + (ag.off ? '<p class="v2-note">차명 확인이 필요한 ' + ag.off + '대(등록연도가 모델 기간 밖)는 합계에서 뺐습니다</p>' : '');
     }
 
     function sumCard(done) {
       if (!done.length) return '';
       var hasAct = done.some(function (r) { return r.actual != null; }), skip = rows.length - done.length;
-      return '<div class="card"><div class="v2-tools"><div class="card-title">묶음 요약 <span class="hint">차량별 추정 범위 · 굵은 숫자 = 추정 시세, 작은 숫자 = 환산가(만원)</span></div>' +
+      return '<div class="card"><div class="v2-tools"><div class="card-title">묶음 요약' + IB + '</div>' +
         '<div class="segmented" role="group" aria-label="요약 그림 정렬">' + [['price', '시세 높은 순'], ['row', '행 순서'], ['width', '범위 넓은 순']].map(function (o) {
           return '<button type="button" data-b="sumSort" data-v="' + o[0] + '" class="' + (sumSort === o[0] ? 'on' : '') + '">' + o[1] + '</button>';
-        }).join('') + '</div></div><div class="v2-bsumwrap"><div>' +
+        }).join('') + '</div></div>' + info('차량별 추정 범위입니다. 굵은 숫자 = 추정 시세, 작은 숫자 = 환산가(만원). 평균 환산 비율은 추정 시세로 가중한 값입니다. ' +
+          '신뢰도 C는 같은 세부모델 전체로 넓혀 찾은 참고값이라, 합계 중 C 비중이 크면 "열기"로 근거를 확인하세요.') + '<div class="v2-bsumwrap"><div>' +
         '<div class="v2-legend"><span><i class="v2-brng"></i>추정 범위(25~75%) · 색 = 신뢰도</span><span><i class="v2-best"></i>추정 시세</span><span><i class="v2-bcv"></i>환산가</span>' +
         (hasAct ? '<span><i class="v2-bac"></i>실제 낙찰가</span>' : '') + '</div>' + sumChart(done) +
-        (skip ? '<p class="v2-help">계산 안 된 ' + skip + '대는 그림·표에서 뺐습니다(이유는 아래 표).</p>' : '') + '</div><div>' + sumTable(aggregate(done)) + '</div></div></div>';
+        (skip ? '<p class="v2-note">계산 안 된 ' + skip + '대는 빼고 그림 · 이유는 아래 표</p>' : '') + '</div><div>' + sumTable(aggregate(done)) + '</div></div></div>';
     }
     function focusRow(no) {                                  // 요약 그림에서 누른 차 → 아래 결과 표의 그 행(확인할 차만 보기면 풀고)
       var tr = el.querySelector('tr[data-no="' + no + '"]');
@@ -642,14 +648,15 @@
       done.filter(counted).forEach(function (r) { sumP += r.R.price; sumC += r.R.converted; });
       done.forEach(function (r) { if (r.R.grade === 'C') cN++; });
       var chk = rows.filter(needsCheck).length, skip = rows.length - done.length, offNote = off ? ' · 차명 확인 ' + off + '대는 합계 제외' : '';
-      var h = '<div class="card v2-headcard"><div class="v2-head">④ 결과 · ' + rows.length + '대<br><span class="sub">추정 시세는 온라인 소매 호가 기준 · 환산가는 팀 환산 비율 적용 · ' +
-        '"열기"는 그 차의 한 대 산정 화면(근거·비교 매물)</span></div><div class="v2-actions" style="margin:0">' +
+      var h = '<div class="card"><div class="v2-headcard"><div class="v2-head">④ 결과 · ' + rows.length + '대' + IB + '</div><div class="v2-actions" style="margin:0">' +
         '<label class="v2-chk" style="margin:0"><input type="checkbox" data-b="only"' + (onlyCheck ? ' checked' : '') + '> 확인할 차만 보기</label>' +
-        '<button type="button" class="v2-btn primary" data-b="xlsx"' + (done.length ? '' : ' disabled') + '>엑셀 내려받기</button></div></div>';
+        '<button type="button" class="v2-btn primary" data-b="xlsx"' + (done.length ? '' : ' disabled') + '>엑셀 내려받기</button></div></div>' +
+        info('추정 시세는 온라인 소매 호가 기준, 환산가는 팀 환산 비율을 적용한 값입니다. "열기"는 그 차의 한 대 산정 화면(근거·비교 매물)입니다. ' +
+          '표의 노란 칸 = 확신이 낮은 매칭(맞는지 확인) · 빨간 칸 = 찾지 못함 · ✓ = 직접 고름 · 금액은 만원. 신뢰도 C는 같은 세부모델 전체로 넓혀 찾은 참고값입니다.') + '</div>';
       h += '<div class="v2-cards v2-bcards">' +
         ctx.tile('산정', String(done.length), '대', skip ? '계산 안 됨 ' + skip + '대 · 이유는 표에' : '전부 계산됨') +
-        ctx.tile('추정 시세 합계', man(sumP), '만원', eok(sumP) + '만 · 온라인 소매 호가 기준 · 수리비 반영' + offNote) +
-        ctx.tile('환산가 합계', man(sumC), '만원', eok(sumC) + '만 · 팀 환산 비율 적용' + offNote) +
+        ctx.tile('추정 시세 합계', man(sumP), '만원', eok(sumP) + '만 · 수리비 반영' + offNote) +
+        ctx.tile('환산가 합계', man(sumC), '만원', eok(sumC) + '만' + offNote) +
         ctx.tile('확인할 차', String(chk + skip), '대', '신뢰도 C ' + cN + '대 · 차명 확인 ' + chk + '대') + '</div>';
       var vs = verify();
       if (vs) h += verifyCard(vs);
@@ -659,8 +666,7 @@
         '<th>차(붙여넣은 글)</th><th>매칭 — 세부모델 / 등급·세부등급</th><th>등록 · 주행</th><th>성능</th>' +
         '<th class="num">추정 시세 · 범위</th><th class="num">환산가 · 비율</th><th>신뢰도 · 비교</th><th></th></tr></thead><tbody>' +
         shown.map(function (x) { return rowHtml(x[0], x[1]); }).join('') + '</tbody></table></div>' +
-        (shown.length ? '' : '<p class="v2-kv">확인할 차가 없습니다.</p>') +
-        '<p class="v2-help">노란 칸 = 확신이 낮은 매칭(맞는지 확인) · 빨간 칸 = 찾지 못함 · ✓ = 직접 고름 · 금액은 만원. 신뢰도 C는 같은 세부모델 전체로 넓혀 찾은 참고값입니다.</p></div>';
+        (shown.length ? '' : '<p class="v2-kv">확인할 차가 없습니다.</p>') + '</div>';
       $('bOut').innerHTML = h;
     }
     function render() { renderCols(); renderFix(); renderOut(); }

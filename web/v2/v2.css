@@ -14,11 +14,7 @@
 /* 레이아웃 */
 .v2-mode { margin-bottom: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .v2-mode button[disabled] { color: var(--tx-4); cursor: default; }
-.v2-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
-@media (min-width: 1024px) {
-  .v2-grid { grid-template-columns: 400px minmax(0, 1fr); }
-  .v2-input { position: sticky; top: 70px; max-height: calc(100vh - 86px); overflow-y: auto; }
-}
+.v2-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; align-items: start; }   /* 위 조건 패널 · 아래 결과(기획 v2.27 Q145) */
 .v2-result { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
 
 /* 입력 */
@@ -473,3 +469,77 @@ body.v2-sheeton { overflow: hidden; }
 .v2-encrow { display: block; font-size: 11px; line-height: 1.4; color: var(--tx-4); margin-top: 2px; white-space: normal; }
 .v2-encrow span { color: var(--tx-2); font-weight: 600; }
 .v2-help.v2-enc { margin-top: 6px; }
+
+/* ───── 화면 정리(기획 v2.26 · 5.9, 인터뷰 Q120~Q143) — 번호 섹션 · 섹션마다 i 하나 · 오른쪽 내비게이터 · 접는 입력 패널 ───── */
+.v2-sec { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; scroll-margin-top: 84px; }   /* 넓은 표가 섹션을 밀지 않게(표는 안에서 가로 스크롤) */
+.v2-sech { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 30px; }
+.v2-sech h2 { font-size: 18px; font-weight: 700; color: var(--tx-1); margin: 0; letter-spacing: -0.01em; }
+.v2-secno { display: inline-flex; flex: none; width: 24px; height: 24px; border-radius: 50%; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; background: var(--tx-1); color: var(--bg-1); font-variant-numeric: tabular-nums; }
+.v2-peek { font-size: 13px; color: var(--tx-2); }
+.v2-sectools { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.v2-ibtn { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%;
+  border: 1px solid var(--line-hard); background: var(--bg-1); color: var(--tx-3); font: italic 700 12px/1 Georgia, 'Times New Roman', serif; cursor: pointer; }
+.v2-ibtn:hover, .v2-ibtn[aria-expanded="true"] { border-color: var(--tx-2); color: var(--tx-1); }
+.v2-ibtn[aria-expanded="true"] { background: var(--bg-2); }
+.v2-info { background: var(--bg-2); border-radius: var(--r-md); padding: 12px 16px; font-size: 13px; line-height: 1.7; color: var(--tx-2); }
+.v2-info[hidden] { display: none; }
+.v2-info p { margin: 0; }
+.v2-info p + p { margin-top: 6px; }
+.v2-info b { color: var(--tx-1); }
+.v2-sec.is-folded > :not(.v2-sech):not(.v2-info) { display: none; }
+.v2-sec.is-folded > .v2-sech { background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 12px 16px; }
+.v2-foldbtn { padding: 5px 12px; }
+.v2-sec .v2-flow .why { display: none; }                       /* 보정 이유는 막대 이름에 마우스를 올리면(data-tip) */
+.v2-sec .v2-flow { grid-template-columns: 96px minmax(0, 1fr) 72px; }
+.v2-sec .v2-flow .k[data-tip] { cursor: help; text-decoration: underline dotted var(--line-hard); text-underline-offset: 3px; }
+.v2-note { font-size: 12px; color: var(--tx-3); margin: 8px 0 0; }
+.v2-starter { font-size: 15px; color: var(--tx-1); display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+
+/* 오른쪽 내비게이터(Q128~Q131) — 1200px 이상은 결과 오른쪽에 세로로 고정, 좁으면 결과 위 가로 줄 */
+.v2-rescol { min-width: 0; }
+.v2-snav[hidden] { display: none !important; }
+.v2-snav .nv-top { background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 12px 14px; display: grid; gap: 4px; }
+.v2-snav .nv-top div { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.v2-snav .nv-top span { font-size: 12px; color: var(--tx-3); white-space: nowrap; }
+.v2-snav .nv-top b { font-family: var(--ff-display); font-size: 21px; font-weight: 700; color: var(--tx-1); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.v2-snav .nv-top b.g-A { color: var(--up); }
+.v2-snav .nv-top b.g-B { color: var(--info); }
+.v2-snav .nv-top b.g-C { color: #8A6A1E; }
+.v2-snav ol { list-style: none; margin: 12px 0 0; padding: 0; border-left: 2px solid var(--line); }
+.v2-snav li button { width: 100%; display: flex; gap: 8px; align-items: baseline; padding: 7px 10px; margin-left: -2px; border-left: 2px solid transparent;
+  text-align: left; color: var(--tx-2); font-size: 13px; line-height: 1.35; border-radius: 0 6px 6px 0; }
+.v2-snav li button .no { flex: none; width: 14px; font-size: 11px; color: var(--tx-3); font-variant-numeric: tabular-nums; }
+.v2-snav li button .v { margin-left: auto; font-size: 12px; color: var(--tx-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.v2-snav li button:hover { color: var(--tx-1); background: var(--bg-2); }
+.v2-snav li button.on { border-left-color: var(--accent); color: var(--tx-1); font-weight: 700; background: var(--accent-wash); }
+.v2-snav li button.on .v { color: var(--tx-1); }
+.v2-snav .nv-up { margin: 10px 0 0 10px; font-size: 12px; color: var(--tx-3); }
+.v2-snav .nv-up:hover { color: var(--tx-1); }
+@media (min-width: 1200px) {
+  .v2-rescol { display: grid; grid-template-columns: minmax(0, 1fr) 168px; gap: 24px; align-items: start; }
+  .v2-rescol > .v2-snav { order: 2; position: sticky; top: 70px; }
+}
+@media (max-width: 1199px) {
+  .v2-snav { position: sticky; top: var(--hdr, 54px); z-index: 30; background: var(--bg-0); margin: 0 0 12px; padding: 6px 0; display: flex; gap: 10px;
+    align-items: center; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--line); }
+  .v2-snav::-webkit-scrollbar { display: none; }
+  .v2-snav .nv-top { display: flex; flex: none; gap: 12px; padding: 4px 10px; position: sticky; left: 0; z-index: 1; }   /* 목차가 옆으로 밀려도 숫자는 왼쪽에 남게 */
+  .v2-snav .nv-top div { gap: 4px; }
+  .v2-snav .nv-top b { font-size: 16px; }
+  .v2-snav ol { display: flex; flex: none; margin: 0; border-left: 0; }
+  .v2-snav li button { white-space: nowrap; border-left: 0; border-bottom: 2px solid transparent; margin: 0; padding: 6px 10px; border-radius: 0; }
+  .v2-snav li button.on { border-bottom-color: var(--accent); }
+  .v2-snav .nv-up { display: none; }
+}
+@media (max-width: 639px) {
+  .v2-snav .nv-top div:nth-child(3) { display: none; }
+  .v2-snav li button .v { display: none; }
+}
+
+/* 글자 크기 3단(기획 v2.26 5.9.2) — 결과 안 라벨·범례·버튼은 13px, 12px 이하는 표 머리·숫자 옆 대수 정도만 */
+.v2-sec .eyebrow, .v2-sec .v2-legend, .v2-sec .v2-fsub, .v2-sec .v2-ssub, .v2-sec .card-title .hint, .v2-sec .v2-btn,
+.v2-sec .v2-kv, .v2-sec .cv-tgrid .v2-kv, .v2-sec .v2-note, .v2-sec .v2-dmb { font-size: 13px; }
+.v2-sec .eyebrow { letter-spacing: 0.04em; }
+.v2-sec .v2-tbl th, .v2-sec .v2-mtx th, .v2-sec .v2-gtbl th { font-size: 12px; }
+.v2-sec .v2-cell small, .v2-sec .v2-hrow .v small { font-size: 12px; }

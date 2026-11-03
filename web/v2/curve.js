@@ -35,7 +35,7 @@
       });
     });
     var BP = X.mi && X.mi.base_period ? md(X.mi.base_period[0]) + '~' + md(X.mi.base_period[1]) : '7월 초';
-    var TIP = {                                              // 용어 설명(? 말풍선) — 모델 리포트에서 옮김
+    var TIP = {                                              // 용어 설명 — 섹션 i(info())와 지표 제목 말풍선(기획 v2.26)
       rate: '지난 수집 구간에 목록에서 사라진(판매된) 매물 ÷ 구간 시작 판매중 매물을 7일 기준으로 맞춘 값입니다. 구간 시작이 10대 이상일 때만 냅니다. ' +
         '동급 = 같은 차급·국산/수입 전체. 판매중 100대 이상일 때 동급의 1.15배 이상이면 빠름, 0.87배 이하이면 느림으로 씁니다(마켓 펄스와 같은 기준).',
       weeks: '지금 판매중 매물이 다 팔리는 데 걸리는 주(1 ÷ 주간 판매율)입니다. 짧을수록 빨리 팔립니다.',
@@ -51,7 +51,6 @@
     };
 
     // ───── 도우미 ─────
-    function q(t) { return ' <span class="v2-q" tabindex="0" role="note" aria-label="' + esc(t) + '" data-tip="' + esc(t) + '">?</span>'; }
     function md(s) { return s ? (+s.slice(5, 7)) + '/' + (+s.slice(8, 10)) : ''; }
     function n0(v) { return Math.round(v).toLocaleString('ko-KR'); }
     function pc(v, d) { return (v * 100).toFixed(d == null ? 1 : d); }
@@ -64,7 +63,8 @@
     function niceTicks(a, z, n) {
       var span = z - a || 1, step = Math.pow(10, Math.floor(Math.log(span / n) / Math.LN10)), e = span / n / step, t = [];
       if (e >= 7.5) step *= 10; else if (e >= 3.5) step *= 5; else if (e >= 1.5) step *= 2;
-      for (var v = Math.ceil(a / step) * step; v <= z + 1e-9; v += step) t.push(Math.round(v / step) * step);
+      var dp = Math.max(0, -Math.floor(Math.log(step) / Math.LN10 + 1e-9));   // 소수 꼬리 없이
+      for (var v = Math.ceil(a / step) * step; v <= z + 1e-9; v += step) t.push(+(Math.round(v / step) * step).toFixed(dp));
       return t;
     }
     function compact(v) {                                    // 축 눈금: 1.2만 · 5,000
@@ -135,7 +135,7 @@
 
     // ───── 지표 6개 ─────
     function tile(label, tip, val, unit, sub) {
-      return '<div class="card"><div class="eyebrow">' + esc(label) + q(tip) + '</div><div class="v2-big v2-mid" style="margin-top:8px">' + esc(val) +
+      return '<div class="card"><div class="eyebrow" title="' + esc(tip) + '">' + esc(label) + '</div><div class="v2-big v2-mid" style="margin-top:8px">' + esc(val) +
         (unit ? '<small>' + esc(unit) + '</small>' : '') + '</div><div class="v2-kv">' + sub + '</div></div>';
     }
     function tiles(o) {
@@ -144,11 +144,11 @@
       var k = o.mk + '|' + o.model, wait = !MM || !IDX, mm = MM && MM.by[k], J = MM && MM.j || {}, sg = (J.segments || {})[o.seg] || null, iv = J.speed_interval;
       var r = IDX && IDX.models ? IDX.models[k] : null;
       var none = wait ? '불러오는 중…' : MM.err ? '시장 숫자 파일을 불러오지 못했습니다' : !mm ? '판매중 매물이 없어 생략합니다' : '';
-      var t = [], segTxt = function (v) { return '동급 <b>' + v + '</b>'; };
+      var t = [], segTxt = function (v) { return '<span class="peer">동급 <b>' + v + '</b></span>'; };
+      var tag = function (txt, tone) { return '<span class="v2-pill ' + (tone || '') + '">' + txt + '</span>'; };
       var thin = mm && mm.on < SPEED_N, spd = function (ratio) { return thin ? thinTag('빠름·느림') : speed(ratio); };
       if (mm && mm.rate_w != null) t.push(tile('주간 판매율', TIP.rate, pc(mm.rate_w), '%',
-        (sg && sg.rate_w ? segTxt(pc(sg.rate_w) + '%') + spd(mm.rate_w / sg.rate_w) : '동급 값 없음') +
-        (iv ? '<br><span class="v2-dim">구간 ' + md(iv[0]) + '→' + md(iv[1]) + '</span>' : '')));
+        (sg && sg.rate_w ? segTxt(pc(sg.rate_w) + '%') + spd(mm.rate_w / sg.rate_w) : '동급 값 없음')));
       else t.push(tile('주간 판매율', TIP.rate, '–', '', none || (iv ? '구간 시작 판매중이 10대 미만이라 생략' : '주간 수집 구간이 아직 없음')));
       if (mm && mm.weeks != null) t.push(tile('재고 소진', TIP.weeks, String(mm.weeks), '주', sg && sg.weeks ? segTxt(sg.weeks + '주') + spd(sg.weeks / mm.weeks) : '동급 값 없음'));
       else t.push(tile('재고 소진', TIP.weeks, '–', '', none || (mm && mm.rate_w === 0 ? '구간에 판매가 없음' : '주간 판매율이 없어 생략')));
@@ -158,20 +158,19 @@
       if (mm && mm.cut != null && mm.on) {
         var dc = sc != null ? Math.round(mm.cut * 100) - Math.round(sc * 100) : null;
         t.push(tile('인하 매물', TIP.cut, pc(mm.cut, 0), '%', sc == null ? '동급 값 없음' : segTxt(pc(sc, 0) + '%') +
-          (thin ? thinTag('많음·적음') : ' · ' + (dc ? Math.abs(dc) + '%p ' + (dc > 0 ? '많음' : '적음') : '같음'))));
+          (thin ? thinTag('많음·적음') : dc ? tag(Math.abs(dc) + '%p ' + (dc > 0 ? '많음' : '적음'), dc > 0 ? 'dn' : 'up') : tag('같음'))));
       } else t.push(tile('인하 매물', TIP.cut, '–', '', none || '판매중 매물이 없어 생략'));
       var si = segIdx(o.seg);
       if (mm && mm.pidx != null) {
         var dp = si ? mm.pidx - si.v : null;
-        t.push(tile('시세지수', TIP.pidx, Number(mm.pidx).toFixed(1), '', si ? segTxt(si.v.toFixed(1)) + (si.name !== segName(o.seg) ? '(' + esc(si.name) + ')' : '') + ' · ' +
-          (Math.abs(dp) < 0.05 ? '같음' : Math.abs(dp).toFixed(1) + ' ' + (dp > 0 ? '높음' : '낮음')) : '동급 값 없음'));
+        t.push(tile('시세지수', TIP.pidx, Number(mm.pidx).toFixed(1), '', si ? segTxt(si.v.toFixed(1) + (si.name !== segName(o.seg) ? '(' + esc(si.name) + ')' : '')) +
+          (Math.abs(dp) < 0.05 ? tag('같음') : tag(Math.abs(dp).toFixed(1) + ' ' + (dp > 0 ? '높음' : '낮음'), dp > 0 ? 'up' : 'dn')) : '동급 값 없음'));
       } else t.push(tile('시세지수', TIP.pidx, '–', '', none || '기준기간이나 최근 신규 매물이 10대 미만이라 생략'));
-      if (r && r.rvi != null) t.push(tile('잔존가치 지수', TIP.rvi, r.rvi.toFixed(1), '', '동급 <b>= 100</b> · ' +
-        (Math.abs(r.rvi - 100) < 0.05 ? '같음' : Math.abs(r.rvi - 100).toFixed(1) + '% ' + (r.rvi > 100 ? '높음' : '낮음')) + '<br><span class="v2-dim">' + n0(r.rvn) + '대 기준</span>'));
+      if (r && r.rvi != null) t.push(tile('잔존가치 지수', TIP.rvi, r.rvi.toFixed(1), '', segTxt('100') +
+        (Math.abs(r.rvi - 100) < 0.05 ? tag('같음') : tag(Math.abs(r.rvi - 100).toFixed(1) + '% ' + (r.rvi > 100 ? '높음' : '낮음'), r.rvi > 100 ? 'up' : 'dn'))));
       else t.push(tile('잔존가치 지수', TIP.rvi, '–', '', !IDX ? '불러오는 중…' : !r || !r.on || !r.rvn ? rvWhy(r) + ' 생략' :
         r.rvn < RV_OK ? '잔존율을 계산한 판매중이 ' + n0(r.rvn) + '대라 생략' : '같은 연차 동급 잔존율이 모자라 생략'));
-      return '<div class="cv-tiles" id="cvTiles"><div class="cv-thead">' + esc(segName(o.seg) || '차급 미상') + ' 동급 대비 · ' + esc(o.model) + ' 전체(등급 무관)</div>' +
-        '<div class="v2-cards cv-tgrid">' + t.join('') + '</div></div>';
+      return '<div class="cv-tiles" id="cvTiles"><div class="v2-cards cv-tgrid">' + t.join('') + '</div></div>';   // 동급 이름은 섹션 머리(기획 v2.26)
     }
 
     // ───── 감가 곡선 ─────
@@ -211,8 +210,7 @@
       setKey(o.mk + '|' + o.model);
       var rvMode = V.unit === 'rv', sr = rvMode && IDX && IDX.seg_rv ? IDX.seg_rv[o.seg] || [] : [], sx = series(o), r = IDX && IDX.models ? IDX.models[o.mk + '|' + o.model] : null;
       var myY = me ? (rvMode ? (me.op ? me.est / me.op : null) : me.est) : null;
-      var h = '<div class="card" id="cvCard"><div class="v2-tools"><div class="card-title">감가 곡선' + q(TIP.curve) + ' <span class="hint">' +
-        (rvMode ? '차령별 잔존율(호가 ÷ 출고가) · 판매중' : '차령별 호가 가운데 값(만원) · 판매중') + ' · ' + esc(o.model) + ' 전체(등급 무관)</span></div>' +
+      var h = '<div class="card" id="cvCard"><div class="v2-tools"><div class="card-title">감가 곡선 <span class="hint">' + (rvMode ? '잔존율 = 호가 ÷ 출고가' : '호가 가운데 값') + '</span></div>' +
         '<div class="segmented" role="group" aria-label="세로축">' + [['rv', '잔존율'], ['amt', '금액']].map(function (x) {
           return '<button type="button" data-cv="unit" data-v="' + x[0] + '" aria-pressed="' + (V.unit === x[0]) + '" class="' + (V.unit === x[0] ? 'on' : '') + '">' + x[1] + '</button>';
         }).join('') + '</div></div>';
@@ -224,31 +222,36 @@
         h += '<span class="cv-lg">' + keyIcon(s.st) + '<span>' + esc(s.label) + st + '</span>' +
           (i ? '<button type="button" class="cv-x" data-cv="rm" data-k="' + esc(s.k) + '" aria-label="겹쳐 보기에서 빼기: ' + esc(s.label) + '" title="빼기">×</button>' : '') + '</span>';
       });
-      if (myY != null) h += '<span class="cv-lg"><svg class="cv-key" viewBox="0 0 26 12" aria-hidden="true">' + star(13, 6, 6) + '</svg><span>내 차(추정 시세)</span></span>';
+      if (myY != null) h += '<span class="cv-lg"><svg class="cv-key" viewBox="0 0 26 12" aria-hidden="true">' + star(13, 6, 6) + '</svg><span>내 차</span></span>';
       if (rvMode && sx[0].rv.length) h += '<span><i class="v2-band"></i>가운데 50%</span>';
       if (rvMode && sr.length) h += '<span class="cv-lg">' + keyIcon(SEG_LINE) + '<span>동급 ' + esc(segName(o.seg)) + '</span></span>';
-      if (!rvMode && sx.some(function (s) { return s.rv.length; })) h += '<span class="v2-dim">금액은 연차별 가운데 값만 — 가운데 50% 띠와 동급 선은 잔존율에서</span>';
       if (sx.some(function (s) { return s.rv.some(function (x) { return x[5] < RV_OK; }); })) h += '<span><i style="background:var(--tx-3);opacity:.4"></i>' + RV_OK + '대 미만(참고)</span>';
       h += '</div>';
       var any = sx.some(function (s) { return s.rv.length; }) || sr.length;
       if (any) h += svg(o, sx, sr, rvMode, W, me, myY);
-      if (!sx[0].rv.length) h += '<p class="v2-kv">이 세부모델은 ' + esc(rvWhy(r)) + ' 감가 곡선을 그리지 않습니다' + (any && sr.length ? '(점선은 동급)' : '') + '.</p>';
-      if (me && rvMode && myY == null) h += '<p class="v2-help">비교 매물에 출고가가 없어 잔존율에는 내 차 ★을 찍지 않습니다 — 금액으로 바꾸면 보입니다.</p>';
-      if (me && myY != null) h += '<p class="v2-kv">' + myLine(o, sx[0], me, rvMode, myY) + '</p>';
+      if (!sx[0].rv.length) h += '<p class="v2-note">' + esc(rvWhy(r)) + ' 곡선 없음' + (any && sr.length ? ' · 점선은 동급' : '') + '</p>';
+      if (me && rvMode && myY == null) h += '<p class="v2-note">출고가가 없어 ★은 금액에서만</p>';
+      V.tag = me && myY != null ? myLine(o, sx[0], me, rvMode, myY) : null;
+      if (V.tag) h += '<p class="v2-kv">' + V.tag.html + '</p>';
       h += picker(o);
-      var hi100 = rvMode && (sx.some(function (s) { return over100(s.rv); }) || over100(sr));
-      return h + '<p class="v2-help">' + RVRULE + '</p>' + (hi100 ? '<p class="v2-help">' + OVER100 + '</p>' : '') + '</div>';
+      V.hi100 = rvMode && (sx.some(function (s) { return over100(s.rv); }) || over100(sr));
+      return h + '</div>';
     }
-    function myLine(o, s, me, rvMode, myY) {                 // ★ 한 줄 설명: 같은 연차 이 모델 가운데 값과 견줌
+    function myLine(o, s, me, rvMode, myY) {                 // 내 차 짧은 표시(기획 v2.26 Q133): 같은 연차 이 모델 가운데 값과 견줌 → { html, nav }
       var a = Math.min(12, Math.floor(me.age)), row = rowAt(s.rv, a);
-      var base = '내 차는 차령 <b>' + me.age.toFixed(1) + '년</b> · 추정 시세 <b>' + man(me.est) + '만</b>' + (me.op ? ' · 잔존율 <b>' + pc(me.est / me.op) + '%</b>(비교 매물 출고가 가운데 ' + man(me.op) + '만 기준)' : '');
-      if (!row) return base + '.';
-      var mv = rvMode ? row[1] : row[4], d = myY / mv - 1;
-      return base + ' — 같은 연차(' + ageTxt(a) + ') ' + esc(o.model) + ' 가운데 ' + (rvMode ? pc(row[1]) + '%' : man(row[4]) + '만') + '보다 <b>' +
-        (Math.abs(d) < 0.005 ? '비슷' : Math.abs(d * 100).toFixed(1) + '% ' + (d > 0 ? '높음' : '낮음')) + '</b>(등급·주행·상태가 달라 차이가 날 수 있음).';
+      var base = '★ 내 차 ' + me.age.toFixed(1) + '년 · ' + (rvMode && me.op ? '잔존율 <b>' + pc(me.est / me.op) + '%</b>' : '<b>' + man(me.est) + '만</b>');
+      if (!row) return { html: base, nav: '' };
+      var d = myY / (rvMode ? row[1] : row[4]) - 1, same = Math.abs(d) < 0.005, t = same ? '비슷' : (d > 0 ? '▲ ' : '▼ ') + Math.abs(d * 100).toFixed(1) + '%';
+      return { html: base + ' <span class="v2-pill ' + (same ? '' : d > 0 ? 'up' : 'dn') + '">' + t + ' · 같은 연차(' + ageTxt(a) + ') 대비</span>',
+        nav: same ? '비슷' : (d > 0 ? '▲' : '▼') + Math.abs(d * 100).toFixed(0) + '%' };
+    }
+    function info() {                                        // 섹션 i 설명(기획 v2.26 Q132) — 지표·곡선의 읽는 법을 한곳에
+      return [['주간 판매율', TIP.rate], ['재고 소진', TIP.weeks], ['중위 체류일', TIP.dwell], ['인하 매물', TIP.cut], ['시세지수', TIP.pidx], ['잔존가치 지수', TIP.rvi],
+        ['감가 곡선', TIP.curve], ['내 차 ★', '비교 매물 출고가의 가운데 값으로 나눈 잔존율을 같은 연차의 이 모델 가운데 값과 견줍니다(등급·주행·상태가 달라 차이가 날 수 있음).'],
+        ['쓰는 매물', RVRULE], V.hi100 ? ['100% 넘는 칸', OVER100] : null];
     }
     function picker(o) {
-      if (V.cmp.length >= MAX_CMP) return '<p class="v2-help">겹쳐 보기는 ' + MAX_CMP + '개까지입니다 — 범례의 ×로 빼고 다시 고르세요.</p>';
+      if (V.cmp.length >= MAX_CMP) return '<p class="v2-note">겹쳐 보기는 ' + MAX_CMP + '개까지 · 범례의 ×로 빼기</p>';
       var by = {}, me = String(o.seg).split('·')[1] || '', k0 = o.mk + '|' + o.model;    // 차급별 후보 — 같은 차급이 맨 위, 다음은 같은 국산/수입 → 판매중 많은 차급 순
       Object.keys(IDX.models).forEach(function (k) {
         var x = IDX.models[k];
@@ -261,7 +264,7 @@
       }).sort(function (a, b) { return (a.r - b.r) || (b.t - a.t); });
       if (!segs.length) return '';
       var mo = function (k) { var x = KEY[k]; return opt(k, x.mk + ' ' + x.model + (yrTxt(x) ? ' (' + yrTxt(x) + ')' : '') + ' · 판매중 ' + n0(on(k)) + '대'); };
-      return '<div class="cv-cmp"><select class="filter-select" data-cv="cmp" aria-label="다른 모델 겹쳐 보기"><option value="">+ 다른 모델 겹쳐 보기 (최대 ' + MAX_CMP + '개 · 같은 차급이 맨 위)</option>' +
+      return '<div class="cv-cmp"><select class="filter-select" data-cv="cmp" aria-label="다른 모델 겹쳐 보기"><option value="">+ 다른 모델 겹쳐 보기 (최대 ' + MAX_CMP + '개)</option>' +
         segs.map(function (x) {
           return '<optgroup label="' + esc((x.r ? '' : '같은 차급 · ') + (segName(x.s) || '차급 미상')) + '">' + by[x.s].sort(function (a, b) { return on(b) - on(a); }).map(mo).join('') + '</optgroup>';
         }).join('') + '</select></div>';
@@ -366,7 +369,7 @@
       redrawCard([PICK, FIRST_RM]);
       getFile(KEY[k] && KEY[k].file).then(function () { redrawCard([PICK, FIRST_RM]); });
     });
-    return { tiles: tiles, card: card, load: load, refresh: refresh, state: V };
+    return { tiles: tiles, card: card, load: load, refresh: refresh, state: V, info: info, tag: function () { return V.tag ? V.tag.nav : ''; } };
   }
 
   var api = { create: create };

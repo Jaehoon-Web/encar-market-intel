@@ -12,6 +12,9 @@
   // 사이트 뿌리 = 이 파일(v2/app.js)의 한 단계 위 — 기본 주소(/)와 /v2/ 어디서 열어도 data/·downloads/ 가 같은 곳
   var ROOT = new URL('../', document.currentScript.src).href, DATA = ROOT + 'data/';
   var COLORS = ['흰색·진주', '검정', '회색·은색', '청색', '기타'];
+  var COLOR_SW = { '': 'repeating-conic-gradient(#e7e5e4 0 25%, #fff 0 50%) 0 0/8px 8px', '흰색·진주': 'linear-gradient(135deg, #ffffff, #ece6da)',   // 색상 스와치(기획 v2.27 디자인 D)
+    '검정': 'linear-gradient(135deg, #3a3a3a, #0a0a0a)', '회색·은색': 'linear-gradient(135deg, #d4d6da, #8c9099)', '청색': 'linear-gradient(135deg, #4a6fb5, #1e3566)',
+    '기타': 'conic-gradient(#ef4444, #f59e0b, #22c55e, #3b82f6, #a855f7, #ef4444)' };
   var FIXES = ['외장', '내장', '광택', '룸클리닝', '휠', '타이어', '유리'];
   var STATUS_LABEL = { X: 'X 교환', W: 'W 판금', '절단': '용접·절단', U: 'U 요철', T: 'T 손상', C: 'C 부식', A: 'A 흠집' };
   var COEF_LEVEL = { '모델': '이 세부모델 자체 값', '차급': '같은 차급 평균 값(이 모델 표본이 없어서)', '시장': '시장 평균 값' };
@@ -20,7 +23,8 @@
   var X = {}, ENG = null, ISC = null, NM = null, GROUPS = {}, R = null, R0 = null, recentTimer = 0, LAST = null, timer = 0, B = null, RV = null, MK = null, DV = null, MB = '';
   var PV = null;                                             // 마켓 펄스(pulse.js)
   var VIEW = { sort: 'sim', all: false, mode: 'one', condWarn: [], condOut: [], exKeep: {}, allGrades: false, nameText: '', nameMsg: '', nameCands: [], recentOpen: false,
-    posx: 'km', hl: null };                                  // posx: 내 차 위치 그림 가로축(km·age) · hl: 그림에서 누른 비교 매물 ID      // mode: one(한 대 산정) · model(모델 요약) · batch(묶음 산정) · rates(⚙ 환산 비율)
+    posx: 'km', hl: null,                                    // posx: 내 차 위치 그림 가로축(km·age) · hl: 그림에서 누른 비교 매물 ID      // mode: one(한 대 산정) · model(모델 요약) · batch(묶음 산정) · rates(⚙ 환산 비율)
+    open: {}, info: {}, carOpen: false, moreOpen: null, shown: null, shownKey: '', countId: 0, riseKey: '' };   // 화면 정리(기획 v2.26·v2.27): open = 처음 접힌 섹션을 펼침 · info = 섹션 i 설명 펼침 · carOpen = 차 고르는 5칸 펼침 · moreOpen = 더 보기 · shown = 추정 시세 숫자 올라가기 · riseKey = 처음 그릴 때만 떠오르기
   var TIP = {                                                // 용어 설명(결과 카드·비교 매물 표의 ? — 마우스를 올리거나 누르면)
     est: '비슷한 온라인 매물(판매중 + 최근 3개월 판매)의 호가를 이 차 조건으로 맞춘 값(보정 후) 가운데 값입니다. 비슷한 매물일수록 크게 반영합니다. ' +
       '온라인 소매 호가 기준이라 실제 거래가와는 다릅니다. 범위는 보정 후 값의 가운데 50%입니다.',
@@ -70,7 +74,6 @@
   function pad(m) { return ('0' + m).slice(-2); }
   function ym(v) { v = String(v); return v.slice(2, 4) + '-' + v.slice(4, 6); }
   function mmdd(s) { return s ? s.slice(5, 7) + '/' + s.slice(8, 10) : ''; }
-  function q(t) { return ' <span class="v2-q" tabindex="0" role="note" aria-label="' + esc(t) + '" data-tip="' + esc(t) + '">?</span>'; }
   function dataDate(full) {                                  // 데이터 기준일 = 목록을 받은 날(시황·지수와 같은 날) · 수집을 마친 날이 다르면 함께
     var cs = X.mi.crawls || [], c = cs[cs.length - 1];
     if (!c) return '';
@@ -278,93 +281,188 @@
       }).join('') + '</select>';
   }
   function field(label, html) { return '<div class="v2-f"><span class="v2-l">' + label + '</span>' + html + '</div>'; }
-  function seg(k, opts, cur, aria) {
+  function seg(k, opts, cur, aria) {                         // opts = [값, 이름(, 말풍선)]
     return '<div class="segmented" role="group" aria-label="' + aria + '">' + opts.map(function (o) {
-      return '<button type="button" data-seg="' + k + '" data-v="' + esc(o[0]) + '" class="' + (String(cur) === String(o[0]) ? 'on' : '') + '">' + esc(o[1]) + '</button>';
+      return '<button type="button" data-seg="' + k + '" data-v="' + esc(o[0]) + '" class="' + (String(cur) === String(o[0]) ? 'on' : '') + '"' +
+        (o[2] ? ' title="' + esc(o[2]) + '"' : '') + '>' + esc(o[1]) + '</button>';
     }).join('') + '</div>';
   }
+
+  // ───── 결과 섹션 · 내비게이터(기획 v2.26 · 5.9) — 번호 + 제목 + i(설명은 접어 둠), 오른쪽 목차에 핵심 숫자 ─────
+  function sec(id, no, title, info, body, o) {                // o.fold: 처음 접힘 · o.peek: 제목 옆 짧은 숫자 · o.tools: 오른쪽 조작
+    o = o || {};
+    var folded = !!o.fold && !VIEW.open[id], infoOpen = !!VIEW.info[id], has = info && info.filter(Boolean).length;
+    return '<section class="v2-sec' + (folded ? ' is-folded' : '') + '" id="sec-' + id + '" data-sec="' + id + '" aria-labelledby="sech-' + id + '">' +
+      '<div class="v2-sech' + (o.headless ? ' v2-sr' : '') + '"><span class="v2-secno" aria-hidden="true">' + (no < 10 ? '0' : '') + no + '</span><h2 id="sech-' + id + '">' + esc(title) + '</h2>' +
+      (has && !o.headless ? infoBtn(id, title) : '') +
+      (o.peek ? '<span class="v2-peek">' + o.peek + '</span>' : '') +
+      '<span class="v2-sectools">' + (folded ? '' : o.tools || '') + (o.fold ? '<button type="button" class="v2-btn v2-foldbtn" data-fold="' + id + '" aria-expanded="' + !folded + '">' +
+        (folded ? '펼치기 ▾' : '접기 ▴') + '</button>' : '') + '</span></div>' +
+      (has ? '<div class="v2-info" id="info-' + id + '"' + (infoOpen ? '' : ' hidden') + '>' + info.filter(Boolean).map(function (x) {
+        return '<p>' + (x[0] ? '<b>' + esc(x[0]) + '</b> ' : '') + esc(x[1]) + '</p>';
+      }).join('') + '</div>' : '') + body + '</section>';
+  }
+  function infoBtn(id, title) {                              // 섹션 i 단추(머리 없는 섹션은 본문 안에 둔다)
+    return '<button type="button" class="v2-ibtn" data-info="' + id + '" aria-expanded="' + !!VIEW.info[id] + '" aria-controls="info-' + id + '" aria-label="' + esc(title) + ' 설명">i</button>';
+  }
+  function navSet(top, items) {                              // top = [[이름, 값, 클래스]] · items = [[id, 번호, 이름, 값]]
+    var el = $('snav');
+    if (!el) return;
+    if (!items) { el.hidden = true; el.innerHTML = ''; return; }
+    el.innerHTML = '<div class="nv-top">' + top.map(function (t) { return '<div><span>' + esc(t[0]) + '</span><b class="' + (t[2] || '') + '">' + t[1] + '</b></div>'; }).join('') + '</div>' +
+      '<ol>' + items.map(function (x) {
+        return '<li><button type="button" data-go="' + x[0] + '"><span class="no">' + x[1] + '</span><span>' + esc(x[2]) + '</span>' + (x[3] ? '<span class="v">' + x[3] + '</span>' : '') + '</button></li>';
+      }).join('') + '</ol><button type="button" class="nv-up" data-go="top">↑ 조건 바꾸기</button>';
+    el.hidden = false;
+    spy();
+  }
+  function navVal(id, v) {                                   // 나중에 오는 숫자(시장 숫자·감가 곡선)만 그 자리에서 바꾼다
+    var b = $('snav') && $('snav').querySelector('[data-go="' + id + '"]');
+    if (!b) return;
+    var s = b.querySelector('.v');
+    if (!v) { if (s) s.remove(); return; }
+    if (!s) { s = document.createElement('span'); s.className = 'v'; b.appendChild(s); }
+    s.textContent = v;
+  }
+  var spyRaf = 0;
+  function spy() {                                           // 지금 보는 섹션 = 화면 위쪽 선을 지난 마지막 섹션(맨 아래까지 내리면 마지막 섹션)
+    spyRaf = 0;
+    var nav = $('snav'), bar = $('condbar'), inp = $('inp');
+    if (bar) bar.hidden = !bar.innerHTML || !nav || nav.hidden || !inp || inp.getBoundingClientRect().bottom > hdrBottom() + 8;
+    if (!nav || nav.hidden) return;
+    var secs = $('res').querySelectorAll('.v2-sec'), lim = window.innerWidth >= 1200 ? 140 : 190, cur = secs[0] || null;
+    secs.forEach(function (s) { if (s.getBoundingClientRect().top <= lim) cur = s; });
+    if (secs.length && window.innerHeight + window.pageYOffset >= document.documentElement.scrollHeight - 4) cur = secs[secs.length - 1];
+    var id = cur && cur.getAttribute('data-sec');
+    nav.querySelectorAll('li [data-go]').forEach(function (b) {
+      var on = b.getAttribute('data-go') === id;
+      if (on === b.classList.contains('on')) return;
+      b.classList.toggle('on', on);
+      if (on) {
+        b.setAttribute('aria-current', 'true');
+        if (window.innerWidth < 1200) { var l = b.offsetLeft - nav.clientWidth / 2 + b.offsetWidth / 2; nav.scrollTo({ left: Math.max(0, l) }); }   // 가로 줄에서 지금 섹션이 보이게
+      } else b.removeAttribute('aria-current');
+    });
+  }
+  function hdrBottom() { var hd = document.querySelector('header'); return hd ? hd.getBoundingClientRect().bottom : 54; }
+  function goSec(id) {
+    if (id === 'top') { window.scrollTo({ top: 0, behavior: 'smooth' }); var nt = $('nameText'); if (nt) nt.focus({ preventScroll: true }); return; }   // 조건은 맨 위(기획 v2.27)
+    var el = $('sec-' + id);
+    if (!el) return;
+    if (el.classList.contains('is-folded')) { foldSec(id); el = $('sec-' + id); }   // 다시 그려 새 요소
+    var nav = $('snav'), off = hdrBottom() + (window.innerWidth >= 1200 && $('condbar') && $('condbar').innerHTML ? 56 : 0);
+    if (window.innerWidth < 1200 && nav && !nav.hidden) off += nav.offsetHeight;
+    window.scrollTo({ top: el.getBoundingClientRect().top + window.pageYOffset - off - 12, behavior: 'smooth' });
+  }
+  function foldSec(id) {                                     // 접힌 섹션 펼치기·접기 — 내용은 이미 그려 두었으므로 클래스만 바꾼다
+    var el = $('sec-' + id);
+    if (!el) return;
+    VIEW.open[id] = el.classList.contains('is-folded');
+    compute();                                               // 도구(정렬 등)·숫자까지 같은 모양으로 다시
+  }
+  function infoSec(id, b) {
+    VIEW.info[id] = !VIEW.info[id];
+    var p = $('info-' + id);
+    if (p) p.hidden = !VIEW.info[id];
+    b.setAttribute('aria-expanded', String(VIEW.info[id]));
+  }
+  function segLabel(seg) { var s = String(seg || '').split('·'); return s.length > 1 ? s[1] + ' ' + s[0] : String(seg || ''); }   // '대형·국산' → '국산 대형'
   function chip(k, v, label, on) {
     return '<button type="button" class="seg-chip' + (on ? ' on' : '') + '" data-chip="' + k + '" data-v="' + esc(v) + '">' + esc(label) + '</button>';
   }
 
-  function renderInputs() {
+  function cell(label, html, cls) {                          // 조건 패널 한 칸(기획 v2.27 디자인 D) — 라벨 위, 값 아래
+    return '<div class="v2-f v2-ccell' + (cls ? ' ' + cls : '') + '"><span class="v2-l">' + label + '</span>' + html + '</div>';
+  }
+  function renderInputs() {                                   // 맨 위 조건 패널(기획 v2.27 Q145): 찾기 → 차(다 고르면 한 줄 경로) → 연식·주행·수리비 → 색상·성능·렌트 → 더 보기
     var mk = makerOf(), g = groupOf(), G = grp(), rows = G && S.model ? modelRows(G, S.model) : [], fi = G && G.fi;
-    var h = '<p class="v2-auto">조건을 넣는 즉시 결과가 다시 계산됩니다 — 따로 누를 조회 버튼은 없습니다.</p><div class="v2-sect">대상 차</div>';
-    h += '<div class="v2-namefind"><div class="v2-text"><input class="v2-in" id="nameText" autocomplete="off" placeholder="차명으로 찾기 — 예: 더 뉴 그랜저 IG 2.5 프리미엄 2020" value="' +
-      esc(VIEW.nameText) + '"><button type="button" class="v2-btn" data-act="findName">찾기</button></div>' +
-      '<div class="v2-nmsg" id="nameMsg">' + (VIEW.nameMsg || '아래 다섯 칸을 차명 한 줄로 한 번에 채웁니다(연도를 적으면 등록 연도도)') + '</div></div>';
-    h += recentHtml() + chipsHtml();
-    var mlab = function (m) { return [m.name, m.name + ' · ' + total(m).toLocaleString() + '대']; };
-    var dom = X.idx.makers.filter(function (m) { return m.origin === '국산'; })
-      .sort(function (a, b) { return DOM_ORDER.indexOf(a.name) - DOM_ORDER.indexOf(b.name); });
-    var imp = X.idx.makers.filter(function (m) { return m.origin !== '국산'; }).sort(function (a, b) { return total(b) - total(a); });
-    h += field('제조사', selG('mk', ['', '제조사 선택'], [{ label: '국산', opts: dom.map(mlab) }, { label: '수입 · 많은 순', opts: imp.slice(0, 8).map(mlab) },
-      { label: '수입 · 가나다순', opts: imp.slice(8).sort(function (a, b) { return a.name.localeCompare(b.name, 'ko'); }).map(mlab) }], S.mk));
-    h += field('모델', sel('grp', [['', mk ? '모델 선택' : '—']].concat((mk ? mk.groups.slice().sort(byN) : []).map(function (x) {
-      return [x.name, x.name + ' · ' + x.n.toLocaleString() + '대'];
-    })), S.grp, !mk));
-    var mopts = [];
-    if (G) {                                                   // 최신 세대부터(같으면 매물 많은 순) — 등록 연도를 넣었으면 맞는 세대가 위로, 안 맞는 세대는 구분선 아래
-      var ms = G.F.models.slice().sort(function (a, b) {
-        var ra = yrN(a.name) || [0, 0], rb = yrN(b.name) || [0, 0];
-        return (fitScore(b.name) - fitScore(a.name)) || (rb[1] - ra[1]) || (rb[0] - ra[0]) || (b.n - a.n);
-      });
-      ms.forEach(function (x) {
-        if (S.y && !fits(x.name) && mopts.length && fits(mopts[mopts.length - 1][0])) mopts.push(['-', '── 등록 ' + S.y + '년과 안 맞는 세대 ──', true]);
-        mopts.push([x.name, x.name + yrOf(S.mk, S.grp, x.name) + ' · ' + x.n.toLocaleString() + '대']);
-      });
+    var h = '<div class="v2-crow">' +
+      '<div class="v2-search"><span class="ic" aria-hidden="true">⌕</span><input class="v2-in" id="nameText" autocomplete="off" aria-label="차명 한 줄로 찾기" placeholder="차명 한 줄로 찾기 · 예: 그랜저 IG 2.5 프리미엄 2020" value="' +
+      esc(VIEW.nameText) + '"><button type="button" class="v2-btn primary" data-act="findName">찾기</button></div>' +
+      '<div class="v2-nmsg" id="nameMsg"' + (VIEW.nameMsg ? '>' + VIEW.nameMsg : ' hidden>') + '</div>' + recentHtml() +
+      '<div class="v2-cacts"><button type="button" class="v2-btn" data-act="share">링크 복사</button><button type="button" class="v2-btn" data-act="reset">초기화</button>' +
+      (S.model ? '' : '<button type="button" class="v2-btn primary" data-act="example">예시로 채워 보기</button>') + '</div></div>';
+
+    var outYr = S.model && S.y && !fits(S.model) ? '<p class="v2-help v2-bad">등록 ' + S.y + '년은 이 세대' + yrOf(S.mk, S.grp, S.model) + ' 기간 밖입니다 — 다른 세대인지 확인하세요</p>' : '';
+    var path = '';
+    if (S.model && S.grade && !VIEW.carOpen) {                // 다 골랐으면 한 줄 경로로(Q138·Q145) — 누르면 다시 다섯 칸
+      path = '<button type="button" class="v2-path" data-act="carOpen" aria-label="차 다시 고르기"><span class="v2-l">차</span><span class="pv">' +
+        esc([S.mk, S.grp, S.model + yrOf(S.mk, S.grp, S.model), S.grade, S.trim || '세부등급 상관없음'].join(' › ')) + '</span><small>바꾸기</small></button>';
+    } else {
+      var mlab = function (m) { return [m.name, m.name + ' · ' + total(m).toLocaleString() + '대']; };
+      var dom = X.idx.makers.filter(function (m) { return m.origin === '국산'; })
+        .sort(function (a, b) { return DOM_ORDER.indexOf(a.name) - DOM_ORDER.indexOf(b.name); });
+      var imp = X.idx.makers.filter(function (m) { return m.origin !== '국산'; }).sort(function (a, b) { return total(b) - total(a); });
+      var mopts = [];
+      if (G) {                                                 // 최신 세대부터(같으면 매물 많은 순) — 등록 연도를 넣었으면 맞는 세대가 위로, 안 맞는 세대는 구분선 아래
+        var ms = G.F.models.slice().sort(function (a, b) {
+          var ra = yrN(a.name) || [0, 0], rb = yrN(b.name) || [0, 0];
+          return (fitScore(b.name) - fitScore(a.name)) || (rb[1] - ra[1]) || (rb[0] - ra[0]) || (b.n - a.n);
+        });
+        ms.forEach(function (x) {
+          if (S.y && !fits(x.name) && mopts.length && fits(mopts[mopts.length - 1][0])) mopts.push(['-', '── 등록 ' + S.y + '년과 안 맞는 세대 ──', true]);
+          mopts.push([x.name, x.name + yrOf(S.mk, S.grp, x.name) + ' · ' + x.n.toLocaleString() + '대']);
+        });
+      }
+      var grades = rows.length ? countBy(rows, fi.g, G.F.grades) : [], gfuel = gradeFuel(G, rows), fuels = [];
+      grades.forEach(function (x) { var f = gfuel[x[0]] || '기타'; if (fuels.indexOf(f) < 0) fuels.push(f); });
+      var glab = function (x) { return [x[0], x[0] + ' · ' + x[1].toLocaleString() + '대']; };
+      var trims = S.grade && rows.length ? countBy(rows.filter(function (r) { return G.F.grades[r[fi.g]] === S.grade; }), fi.t, G.F.trims)
+        .filter(function (x) { return x[0]; }) : [];              // 주소로 열 때는 모델그룹 파일을 받기 전에도 그린다
+      h += '<div class="v2-cgrid">' +
+        cell('제조사', selG('mk', ['', '제조사 선택'], [{ label: '국산', opts: dom.map(mlab) }, { label: '수입 · 많은 순', opts: imp.slice(0, 8).map(mlab) },
+          { label: '수입 · 가나다순', opts: imp.slice(8).sort(function (a, b) { return a.name.localeCompare(b.name, 'ko'); }).map(mlab) }], S.mk)) +
+        cell('모델', sel('grp', [['', mk ? '모델 선택' : '—']].concat((mk ? mk.groups.slice().sort(byN) : []).map(function (x) {
+          return [x.name, x.name + ' · ' + x.n.toLocaleString() + '대'];
+        })), S.grp, !mk)) +
+        cell('세부모델', sel('model', [['', G ? '세부모델 선택' : (g ? '불러오는 중…' : '—')]].concat(mopts), S.model, !G)) +
+        cell('등급', fuels.length > 1                         // 연료가 둘 이상이면 연료로 묶는다— 많은 연료부터
+          ? selG('grade', ['', '등급 선택'], fuels.map(function (f) {
+            return { label: f, opts: grades.filter(function (x) { return (gfuel[x[0]] || '기타') === f; }).map(glab) };
+          }), S.grade, !S.model)
+          : sel('grade', [['', S.model ? '등급 선택' : '—']].concat(grades.map(glab)), S.grade, !S.model)) +
+        cell('세부등급', sel('trim', [['', trims.length ? '상관없음' : '—']].concat(trims.map(function (x) {
+          return [x[0], x[0] + ' · ' + x[1].toLocaleString() + '대'];
+        })), S.trim, !trims.length)) + '</div>' + outYr;
     }
-    h += field('세부모델', sel('model', [['', G ? '세부모델 선택' : (g ? '불러오는 중…' : '—')]].concat(mopts), S.model, !G) +
-      (S.model && S.y && !fits(S.model) ? '<p class="v2-help v2-bad">등록 ' + S.y + '년은 이 세대' + yrOf(S.mk, S.grp, S.model) +
-        ' 기간 밖입니다 — 다른 세대인지 확인하세요</p>' : '') +
-      (S.model && encLine(S.mk, S.grp, S.model) ? '<p class="v2-help v2-enc">' + esc(encLine(S.mk, S.grp, S.model)) + '</p>' : ''));   // 이름은 경매장 표기(기획 v2.23)
-    var grades = rows.length ? countBy(rows, fi.g, G.F.grades) : [], gfuel = gradeFuel(G, rows), fuels = [];
-    grades.forEach(function (x) { var f = gfuel[x[0]] || '기타'; if (fuels.indexOf(f) < 0) fuels.push(f); });
-    var glab = function (x) { return [x[0], x[0] + ' · ' + x[1].toLocaleString() + '대']; };
-    h += field('등급', fuels.length > 1                       // 연료가 둘 이상이면 연료로 묶는다— 많은 연료부터
-      ? selG('grade', ['', '등급 선택'], fuels.map(function (f) {
-        return { label: f, opts: grades.filter(function (x) { return (gfuel[x[0]] || '기타') === f; }).map(glab) };
-      }), S.grade, !S.model)
-      : sel('grade', [['', S.model ? '등급 선택' : '—']].concat(grades.map(glab)), S.grade, !S.model));
-    var trims = S.grade && rows.length ? countBy(rows.filter(function (r) { return G.F.grades[r[fi.g]] === S.grade; }), fi.t, G.F.trims)
-      .filter(function (x) { return x[0]; }) : [];                // 주소로 열 때는 모델그룹 파일을 받기 전에도 그린다
-    h += field('세부등급<em>선택</em>', sel('trim', [['', trims.length ? '상관없음' : '—']].concat(trims.map(function (x) {
-      return [x[0], x[0] + ' · ' + x[1].toLocaleString() + '대'];
-    })), S.trim, !trims.length));
+
     var years = [];                                            // 세부모델 전이면 모델그룹 전체 연도 — 연도를 먼저 넣으면 맞는 세대가 위로 온다
     (rows.length ? rows : G ? G.F.rows : []).forEach(function (r) { var y = Math.floor(r[fi.reg] / 100); if (years.indexOf(y) < 0) years.push(y); });
     if (S.y && years.indexOf(+S.y) < 0) years.push(+S.y);
     years.sort(function (a, b) { return b - a; });
-    h += field('최초등록<em>월은 몰라도 됨 — 6월로 계산</em>', '<div class="v2-two">' +
-      sel('y', [['', '연도']].concat(years.map(function (y) { return [y, y + '년']; })), S.y, !G) +
-      sel('m', [['', '월 모름']].concat([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(function (m) { return [m, m + '월']; })), S.m, !G) + '</div>');
-    h += field('주행거리', '<div class="v2-unit"><input class="v2-in" data-k="km" inputmode="numeric" autocomplete="off" placeholder="예: 42000 또는 4.2만" value="' + esc(S.km) + '"><span>km</span></div>');
-    h += field('색상', '<div class="v2-chips">' + [['', '상관없음']].concat(COLORS.map(function (c) { return [c, c]; })).map(function (c) {
-      return chip('color', c[0], c[1], S.color === c[0]);
-    }).join('') + '</div>');
-    h += '<label class="v2-chk"><input type="checkbox" data-k="rent"' + (S.rent ? ' checked' : '') + '> 렌트 번호판(하·허·호)</label>';
+    var kmv = kmNum(S.km);
+    h += '<div class="v2-cgrid' + (path ? ' v2-cgrid-path' : '') + '">' + path +
+      cell('최초등록 · 월 모르면 6월', '<div class="v2-two">' + sel('y', [['', '연도']].concat(years.map(function (y) { return [y, y + '년']; })), S.y, !G) +
+        sel('m', [['', '월 모름']].concat([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(function (m) { return [m, m + '월']; })), S.m, !G) + '</div>') +
+      cell('주행거리', '<div class="v2-unit"><input class="v2-in" data-k="km" inputmode="numeric" autocomplete="off" placeholder="42,000" value="' +
+        esc(kmv != null && /^\d+$/.test(String(S.km).trim()) ? kmv.toLocaleString('ko-KR') : S.km) + '"><span>km</span></div>', 'v2-ccell-km') +
+      cell('예상 수리비', '<div class="v2-unit"><input class="v2-in" data-k="cost" inputmode="numeric" autocomplete="off" placeholder="0" title="시세·환산가에서 그대로 뺍니다" value="' +
+        esc(S.cost) + '"><span>만원</span></div>') + '</div>' + (path ? outYr : '');
 
-    h += '<div class="v2-sect">성능 상태</div>';
-    h += seg('cond', [['미상', '미상'], ['무사고', '무사고'], ['입력', '기록부 입력']], S.cond, '성능 상태');
-    h += '<p class="v2-help">' + (S.cond === '입력' ? '성능·상태점검기록부의 부위 37곳을 그대로 옮겨 적습니다. 한 부위에 여러 상태면 가장 심한 것을 고릅니다.'
-      : S.cond === '무사고' ? '이상 없음을 직접 고른 상태입니다.' : '입력하지 않은 상태입니다. 무사고로 치지 않습니다.') + '</p>';
+    var note = S.cond === '입력' ? (S.items.length ? '기록부 ' + S.items.length + '곳으로 계산' : '부위를 넣기 전엔 상태 미상') : '';   // 미상·무사고 뜻은 단추 말풍선으로
+    h += '<div class="v2-crow3"><div class="v2-cgroup"><span class="v2-glabel">색상</span><div class="v2-cpills" role="group" aria-label="색상">' +
+      [['', '상관없음']].concat(COLORS.map(function (c) { return [c, c]; })).map(function (c) {
+        var on = S.color === c[0];
+        return '<button type="button" class="v2-cpill' + (on ? ' on' : '') + '" data-chip="color" data-v="' + esc(c[0]) + '" aria-pressed="' + on + '">' +
+          '<span class="sw" style="background:' + COLOR_SW[c[0]] + '"></span>' + esc(c[1]) + '</button>';
+      }).join('') + '</div></div>' +
+      '<div class="v2-cgroup"><span class="v2-glabel">성능 상태</span>' + seg('cond', [['미상', '미상', '넣지 않음 — 성능 보정 없이 계산하고, 무사고라면 값을 함께 보여 줍니다'],
+        ['무사고', '무사고', '이상 없음을 직접 고름'], ['입력', '기록부 입력', '성능·상태점검기록부 부위 37곳을 옮겨 적습니다(한 부위에 여러 상태면 가장 심한 것)']], S.cond, '성능 상태') + '</div>' +
+      '<label class="v2-toggle"><input type="checkbox" data-k="rent"' + (S.rent ? ' checked' : '') + '><span class="trk" aria-hidden="true"></span>렌트 번호판(하·허·호)</label>' +
+      (note ? '<span class="v2-cnote">' + esc(note) + '</span>' : '') + '</div>';
     if (S.cond === '입력') h += condPanel();
     h += '<div class="notebox v2-condout" id="condOut"></div>';
 
-    h += '<div class="v2-sect">수리 상태</div>';
-    h += field('단순수리', seg('sr', [['auto', '자동'], ['yes', '있음'], ['no', '없음']], S.sr, '단순수리'));
-    h += field('기계 결함<em>표시만 — 호가 영향이 거의 없음</em>', seg('mech', [['0', '없음'], ['1', '경미'], ['2', '결함']], S.mech, '기계 결함'));
-    h += field('수리 필요<em>기록용 — 값에는 아래 예상 수리비만 반영</em>', '<div class="v2-chips">' +
-      FIXES.map(function (f) { return chip('fix', f, f, S.fixes.indexOf(f) >= 0); }).join('') + '</div>' +
-      (S.fixes.length && !manNum(S.cost) ? '<p class="v2-help">고른 수리 항목은 값에 반영되지 않습니다 — 아래 예상 수리비를 넣으세요</p>' : ''));
-    h += field('예상 수리비<em>시세·환산가에서 그대로 뺍니다</em>', '<div class="v2-unit"><input class="v2-in" data-k="cost" inputmode="numeric" autocomplete="off" placeholder="0" value="' + esc(S.cost) + '"><span>만원</span></div>');
-
-    h += '<div class="v2-sect">비교 범위 · 환산</div>';
-    h += '<label class="v2-chk"><input type="checkbox" data-k="sold"' + (S.sold ? ' checked' : '') + '> 최근 3개월 판매 매물 포함</label>';
-    h += field('환산 비율<em>비우면 자동</em>', '<div class="v2-unit"><input class="v2-in" data-k="rate" inputmode="decimal" autocomplete="off" placeholder="자동" value="' + esc(S.rate) + '"><span>%</span></div><p class="v2-help" id="rateNote"></p>');
-    h += '<div class="v2-actions"><button type="button" class="v2-btn" data-act="share">링크 복사</button>' +
-      '<button type="button" class="v2-btn" data-act="reset">조건 초기화</button>' +
-      (S.model ? '' : '<button type="button" class="v2-btn primary" data-act="example">예시로 채워 보기</button>') + '</div>';
+    var nonDef = S.sr !== 'auto' || S.mech !== '0' || S.fixes.length > 0 || !S.sold || S.rate !== '';   // 기본값이 아니면 더 보기를 펼쳐 둔다(바꾼 것이 숨지 않게)
+    h += '<details class="v2-more"' + ((VIEW.moreOpen == null ? nonDef : VIEW.moreOpen) ? ' open' : '') + '><summary>더 보기 <small>수리 상태 · 환산 비율 · 최근 판매</small>' +
+      (nonDef ? '<i>바꾼 값 있음</i>' : '') + '</summary><div class="v2-cgrid">' +
+      cell('단순수리', seg('sr', [['auto', '자동'], ['yes', '있음'], ['no', '없음']], S.sr, '단순수리')) +
+      cell('기계 결함', seg('mech', [['0', '없음'], ['1', '경미', '표시만 — 호가 영향이 거의 없음'], ['2', '결함', '표시만 — 호가 영향이 거의 없음']], S.mech, '기계 결함')) +
+      cell('환산 비율', '<div class="v2-unit"><input class="v2-in" data-k="rate" inputmode="decimal" autocomplete="off" placeholder="비우면 자동" value="' + esc(S.rate) +
+        '"><span>%</span></div><p class="v2-rate" id="rateNote"></p>') + '</div>' +
+      '<div class="v2-cgrid">' + cell('수리 필요 · 기록용', '<div class="v2-chips">' + FIXES.map(function (f) { return chip('fix', f, f, S.fixes.indexOf(f) >= 0); }).join('') + '</div>' +
+        (S.fixes.length && !manNum(S.cost) ? '<p class="v2-note">값에는 예상 수리비만 반영됩니다</p>' : ''), 'v2-ccell-wide') + '</div>' +
+      '<label class="v2-toggle"><input type="checkbox" data-k="sold"' + (S.sold ? ' checked' : '') + '><span class="trk" aria-hidden="true"></span>최근 3개월 판매 매물 포함</label></details>';
     $('inp').innerHTML = h;
     updateCond();
     markNeed(missing());
@@ -408,9 +506,10 @@
     var year = ym ? ym.y : (S.y ? +S.y : null);
     NM = NM || NameMatch.create(X.idx);
     var res0 = NM.model(text, year);
-    if (!res0.best) { VIEW.nameMsg = '<span class="v2-bad">못 찾았습니다 — 아래에서 직접 고르세요</span>'; VIEW.nameCands = []; renderInputs(); return; }
+    if (!res0.best) { VIEW.nameMsg = '<span class="v2-bad">못 찾았습니다 — 아래에서 직접 고르세요</span>'; VIEW.nameCands = []; VIEW.carOpen = true; renderInputs(); return; }
     var top = res0.best.score, files = [];
     res0.cands.forEach(function (c) { if (c.score >= top - 2.5 && files.indexOf(c.file) < 0) files.push(c.file); });
+    $('nameMsg').hidden = false;
     $('nameMsg').textContent = '찾는 중…';
     loadFiles(files).then(function () {
       var res = NM.refine(res0, text, year, function (f) { return GROUPS[f] || null; });
@@ -430,7 +529,7 @@
   }
   function setModel(b, text, conf) {                         // 찾은(고른) 세부모델로 다섯 칸을 채운다
     var G = GROUPS[b.file], gr = G ? NM.grade(G, b.model, text) : null, lab = esc(b.maker + ' › ' + b.group + ' › ' + b.model) + yrOf(b.maker, b.group, b.model);
-    S.mk = b.maker; S.grp = b.group; S.model = b.model; S.grade = gr ? gr.grade : ''; S.trim = gr ? gr.trim || '' : ''; S.ex = []; VIEW.exKeep = {};
+    S.mk = b.maker; S.grp = b.group; S.model = b.model; S.grade = gr ? gr.grade : ''; S.trim = gr ? gr.trim || '' : ''; S.ex = []; VIEW.exKeep = {}; VIEW.carOpen = false;
     var g = gr ? ' · ' + esc(gr.grade + (gr.trim ? ' ' + gr.trim : '')) : ' · 등급은 직접 고르세요';
     VIEW.nameMsg = (conf === 'high' ? '찾음: <b>' + lab + g + '</b>' : conf === 'pick' ? '고름: <b>' + lab + g + '</b>' :
       '<span class="v2-warnt">확인 필요</span> <b>' + lab + g + '</b>') + (gr && gr.conf === 'low' ? ' — 등급은 확인하세요' : '') +
@@ -447,21 +546,6 @@
     rows.forEach(function (r) { var g = G.F.grades[r[fi.g]], f = G.F.fuels[r[fi.fu]] || '기타'; (fc[g] = fc[g] || {})[f] = (fc[g][f] || 0) + 1; });
     Object.keys(fc).forEach(function (g) { out[g] = Object.keys(fc[g]).sort(function (a, b) { return fc[g][b] - fc[g][a]; })[0]; });
     return out;
-  }
-  function chipsHtml() {                                     // 고른 조건 한 줄(조건 칩) — 누르면 그 칸으로. 긴 입력 칸에서 지금 조건을 한눈에
-    var c = [], km = kmNum(S.km), cost = manNum(S.cost);
-    if (S.model) c.push(['model', S.mk + ' › ' + S.model]); else if (S.grp) c.push(['grp', S.mk + ' › ' + S.grp]); else if (S.mk) c.push(['mk', S.mk]);
-    if (S.grade) c.push(['grade', S.grade + (S.trim ? ' ' + S.trim : '')]);
-    if (S.y) c.push(['y', S.m ? S.y + '-' + pad(S.m) : S.y + '년']);
-    if (km != null) c.push(['km', (km / 1e4).toFixed(1) + '만km']);
-    if (S.color) c.push(['color', S.color]);
-    if (S.rent) c.push(['rent', '렌트']);
-    if (S.cond === '무사고') c.push(['cond', '무사고']);
-    if (S.cond === '입력') c.push(['cond', S.items.length ? ISC.summary(S.items.slice(0, 1)) + (S.items.length > 1 ? ' 외 ' + (S.items.length - 1) + '곳' : '') : '기록부(부위 없음)']);
-    if (cost) c.push(['cost', '수리비 ' + cost + '만']);
-    if (!c.length) return '';
-    return '<div class="v2-cchips">' + c.map(function (x) { return '<button type="button" class="v2-cchip" data-need="' + x[0] + '">' + esc(x[1]) + '</button>'; }).join('') +
-      '<button type="button" class="v2-link" data-act="reset">초기화</button></div>';
   }
   function recentList() { try { return JSON.parse(localStorage.getItem(RECENT) || '[]'); } catch (e) { return []; } }
   function saveRecent() {                                    // 결과가 나온 차를 이 브라우저에 최근 10대로(같은 조건이면 맨 위로)
@@ -492,9 +576,9 @@
     var el = $('condOut');
     if (!el) return;
     var c = condResult();
+    el.hidden = c['상태'] === '미상' && S.cond !== '입력';    // 미상 설명은 버튼 말풍선으로(기획 v2.26)
     if (c['상태'] === '미상') {
-      el.innerHTML = S.cond === '입력' ? '기록부 입력 — 아직 부위가 없어 <b>상태 미상</b>으로 계산합니다(무사고로 치지 않음). 부위를 고르거나 텍스트를 읽어 넣으세요.'
-        : '상태 미상 — 성능 보정 없이 비교 매물의 평균 상태로 계산하고, <b>무사고라면</b> 값을 함께 보여 줍니다.';
+      el.innerHTML = S.cond === '입력' ? '부위를 고르거나 텍스트로 읽어 넣으세요 — 그 전엔 <b>상태 미상</b>으로 계산합니다.' : '';
       return;
     }
     var h = '<b>' + esc(c['사고라벨']) + '</b> · 성능 <b>' + c['성능등급'] + '등급</b> · 감가율 <b>' + c['성능감가율'] + '%</b> · 점수 <b>' + c['성능점검점수'] + '</b>' +
@@ -542,7 +626,7 @@
     timer = setTimeout(compute, 120);
   }
 
-  // 꼭 필요한데 빈 칸 — 오른쪽 '남은 칸' 안내와 왼쪽 테두리에 같이 쓴다. 모델 요약은 세부모델까지만 있으면 된다
+  // 꼭 필요한데 빈 칸 — 결과 자리 '남은 칸' 안내와 조건 칸 테두리에 같이 쓴다. 모델 요약은 세부모델까지만 있으면 된다
   function missing() {
     var out = [], open = !!S.model, km = String(S.km || '').trim();   // 등급·최초등록은 세부모델을 골라야 열린다
     function add(name, keys, on) { out.push({ name: name, keys: keys.trim().split(' '), on: on }); }
@@ -574,6 +658,7 @@
     var G = grp(), miss = missing(), km = kmNum(S.km), M = G && S.model && G.models[S.model];
     markMode(VIEW.mode);                                     // 탭은 고른 그대로 — 빈 칸이 있다고 모델 요약 탭으로 넘기지 않는다
     markNeed(miss);
+    pageHead();
     R0 = null;
     if (M && (VIEW.mode === 'model' || miss.length)) { R = null; summary(G, miss); MB = miss.length ? needBar(miss) : bar('모델 요약 보기 ↓'); return; }   // 빈 칸이 남았으면 안내 + 모델 요약(참고)
     if (miss.length || !G) { R = null; guide(miss); MB = miss.length ? needBar(miss) : ''; return; }
@@ -593,7 +678,7 @@
     var yrs = Math.floor(G.F.now_ym / 100) - Math.floor(car['등록연월'] / 100);
     var auto = ENG.conversionRate(R.est, yrs, G.F.maker, S.model, car['연료']);
     var note = $('rateNote');
-    if (note) note.textContent = '자동: ' + auto.rate + '% (' + auto.source + (car['연료'] ? ' · ' + car['연료'] : '') + ')';
+    if (note) { note.textContent = '자동 ' + auto.rate + '%'; note.title = auto.source + (car['연료'] ? ' · ' + car['연료'] : ''); }
     LAST = { G: G, car: car, c: c };
     renderResult(G, car, c);
     clearTimeout(recentTimer);
@@ -618,67 +703,121 @@
   }
 
   function guide(miss) {
+    navSet();
+    condBar(null, null);
     $('res').innerHTML = miss.length ? needCard(miss) : '<div class="card"><div class="card-title">비교 매물을 불러오는 중…</div></div>';
   }
-  function needCard(miss) {                                  // 남은 칸만 이름으로(누르면 그 칸으로 간다) · 처음 방문이면 사이트 설명을 위에
-    return (S.mk || VIEW.mode === 'model' ? '' : '<div class="card v2-intro"><div class="card-title">이 화면에서 하는 일</div><p>온라인에 올라온 비슷한 매물로 ' +
-      '이 차의 <b>시세(온라인 소매 호가)</b>와 <b>경매 예상가(환산가)</b>를 근거와 함께 냅니다.</p><ol><li>왼쪽 맨 위에 차명을 한 줄로 넣거나' +
-      '(예: 더 뉴 그랜저 IG 2.5 프리미엄 2020) 칸을 차례로 고르고</li><li>주행거리를 넣으면 바로 계산됩니다. 월·색상·성능 상태·수리비는 넣으면 더 정확해집니다.</li></ol>' +
-      '<p>여러 대는 <a class="v2-link" href="#/price?view=batch">묶음 산정</a>에 엑셀을 붙여 넣고, 시장 흐름은 <a class="v2-link" href="#/market">시장 시황</a>에서 봅니다.</p></div>') +
-      '<div class="card v2-needcard"><div class="card-title">' + (VIEW.mode === 'model' ? '모델 요약' : '한 대 산정') + '까지 남은 칸 ' +
-      '<span class="hint">채우는 즉시 계산됩니다</span></div><div class="v2-needs">' + miss.map(function (x) {
+  function needCard(miss) {                                  // 남은 칸만 이름으로(누르면 그 칸으로 간다) · 한 줄 시작 안내와 예시 단추는 제목 줄·조건 패널에 있다(기획 v2.27)
+    return '<div class="card v2-needcard"><div class="card-title">' + (VIEW.mode === 'model' ? '모델 요약' : '한 대 산정') + '까지 남은 칸</div><div class="v2-needs">' + miss.map(function (x) {
         return '<button type="button" class="v2-needchip" data-need="' + x.keys[0] + '">' + esc(x.name) + '</button>';
       }).join('') + '</div>' +
-      (VIEW.mode === 'model' ? '' : '<p class="v2-help">성능 상태·색상·수리비는 넣지 않아도 계산됩니다. 성능 상태를 넣지 않으면 "상태 미상"으로, 무사고 기준 값을 함께 보여 줍니다.</p>') +
-      (S.model ? '' : '<div class="v2-actions"><button type="button" class="v2-btn primary" data-act="example">예시로 채워 보기</button></div>') + '</div>';
+      (S.mk && !S.model ? '<div class="v2-actions"><button type="button" class="v2-btn primary" data-act="example">예시로 채워 보기</button></div>' : '') + '</div>';
   }
 
   function noComps(G) {
     var M = G.models[S.model];
+    navSet();
+    condBar(null, null);
     $('res').innerHTML = '<div class="card"><div class="card-title">비교 매물이 5대 미만이라 산정할 수 없습니다</div>' +
       '<p class="v2-kv">' + esc(S.model) + ' 비교 매물 ' + (M ? M.n + '대(판매중 ' + M.onsale + '대)' : '없음') +
       (S.sold ? '' : ' · 최근 판매 매물을 포함하면 늘어날 수 있습니다') + (S.ex.length ? ' · 직접 뺀 매물 ' + S.ex.length + '대' : '') + '</p></div>';
   }
 
-  // ───── 결과 ─────
+  // ───── 결과(기획 v2.26 · v2.27 디자인 D) — 제목(차 이름) 아래 ① 시세(히어로) ② 산정 근거 ③ 동급 대비 ④ 판매·추세(처음 접힘) ⑤ 가격 사다리 ⑥ 비교 매물 ─────
+  function shortSrc(s) { return String(s || '').replace('호가대×차령 기준표', '기준표'); }
+  function pageHead() {                                      // 페이지 제목 = 지금 차(없으면 화면 이름) · 아래 줄 = 조건 한 줄
+    var t = $('pTitle'), sub = $('pSub');
+    if (!t) return;
+    var mode = VIEW.mode, F = grp() && grp().F, mk = (F && F.maker) || S.mk, km = kmNum(S.km), enc = S.model ? encLine(S.mk, S.grp, S.model) : '';
+    var title = mode === 'batch' ? '묶음 산정' : mode === 'rates' ? '환산 비율' : S.model ? esc(mk + ' ' + S.model) +
+      (mode === 'one' && S.grade ? '<span> · ' + esc(S.grade + (S.trim ? ' ' + S.trim : '')) + '</span>' : '<span>' + esc(yrOf(S.mk, S.grp, S.model)) + '</span>') : mode === 'model' ? '모델 요약' : '시세 산정';
+    var line = mode === 'batch' ? '엑셀 목록을 붙여 넣으면 여러 대를 한 번에 산정합니다' : mode === 'rates' ? '경매 낙찰가로 정한 팀 환산 비율' :
+      mode === 'model' ? (S.model ? '세부모델 한눈에 보기 · 등급 무관' : '세부모델까지 고르면 바로 나옵니다') :
+      S.model && S.y && km != null ? regText() + ' 등록' + (S.m ? '' : '(월 미상 · 6월로 계산)') + ' · ' + km.toLocaleString('ko-KR') + 'km · 색상 ' + (S.color || '상관없음') +
+        ' · ' + condTxt() + (S.rent ? ' · 렌트 번호판' : '') : '차명을 넣거나 아래에서 차를 고르면 바로 시세가 나옵니다';
+    t.innerHTML = title;
+    sub.innerHTML = esc(line) + (enc && (mode === 'one' || mode === 'model') ? '<small>' + esc(enc) + '</small>' : '');
+  }
+  function countUp(to, key) {                                // 추정 시세 숫자 올라가기(900ms, easeOutQuart) — 같은 차는 이전 값에서, 새 차는 0에서
+    var el = $('heroNum');
+    if (!el) return;
+    var from = VIEW.shownKey === key && VIEW.shown != null ? VIEW.shown : 0, id = ++VIEW.countId;
+    VIEW.shown = to; VIEW.shownKey = key;
+    if (from === to || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) { el.textContent = man(to); return; }
+    var t0 = performance.now();
+    setTimeout(function () { if (id === VIEW.countId && el.isConnected) el.textContent = man(to); }, 1000);   // 화면이 가려져 프레임이 멈춰도 최종 값은 보이게
+    (function step(now) {
+      if (id !== VIEW.countId || !el.isConnected) return;
+      var k = Math.min(1, (now - t0) / 900), e = 1 - Math.pow(1 - k, 4);
+      el.textContent = man(from + (to - from) * e);
+      if (k < 1) requestAnimationFrame(step);
+    })(t0);
+  }
+  function condTxt() {                                      // 제목 줄·조건 바의 상태 말
+    return S.cond === '입력' ? (S.items.length ? '기록부 ' + S.items.length + '곳' : '상태 미상(기록부 입력 전)') : S.cond === '무사고' ? '무사고' : '상태 미상';
+  }
+  function condBar(G, car) {                                 // 스크롤하면 위에 붙는 작은 조건 바(기획 v2.27 Q145)
+    var el = $('condbar');
+    if (!el) return;
+    el.innerHTML = !car ? '' : '<div class="cb"><span class="t">' + esc(S.model + ' · ' + S.grade + (S.trim ? ' ' + S.trim : '')) + '</span><span class="s">' + regText() + ' · ' +
+      (car['주행km'] / 1e4).toFixed(1) + '만 km · ' + esc(S.color || '색상 상관없음') + ' · ' + esc(condTxt()) + '</span>' +
+      '<button type="button" class="v2-btn" data-act="toCond">조건 바꾸기 ↑</button></div>';
+  }
+  function rise(key) { var on = VIEW.riseKey !== key; VIEW.riseKey = key; return on; }   // 새 차를 처음 그릴 때만 섹션이 떠오른다(조건을 바꿀 때마다 깜빡이지 않게)
   function renderResult(G, car, c) {
-    var r = R, F = G.F;
+    var r = R, M = G.models[S.model], co = curveOf(G), km = VIEW.posx === 'km', cf = ENG.prepare(G, S.model).cf.b, key = S.mk + '|' + S.model + '|' + S.grade + '|' + S.trim;
     var stepNo = r.stepName.split(' ')[0], stepName = r.stepName.slice(stepNo.length + 1);
-    var h = '<div class="card v2-headcard"><div class="v2-head">' + esc(F.maker + ' ' + S.model) + ' · ' + esc(S.grade + (S.trim ? ' ' + S.trim : '')) +
-      '<br><span class="sub">' + regText() + ' 등록 · ' + car['주행km'].toLocaleString('ko-KR') + 'km · ' + esc(S.color || '색상 상관없음') +
-      (S.rent ? ' · 렌트' : '') + ' · ' + (c['상태'] === '미상' ? '상태 미상' : esc(c['사고라벨']) + ' · 성능 ' + c['성능등급'] + '등급 · 글로비스 ' +
-        c['글로비스_종합평가점'] + '점·' + esc(c['글로비스_사고평가점'])) + '</span></div>' +
-      '<div class="v2-actions" style="margin:0">' + (batch().hasCar(batchCar()) ? '<button type="button" class="v2-btn" data-act="openBatch">묶음에 있음 · 묶음 산정 열기</button>' :
-        '<button type="button" class="v2-btn" data-act="toBatch" title="이 차를 묶음 산정 목록에 한 줄로 더합니다. 단순수리·기계 결함·직접 뺀 매물·직접 넣은 환산 비율은 넘어가지 않습니다">묶음에 추가</button>') +
-      '<button type="button" class="v2-btn" data-act="xlsx">엑셀 내려받기</button>' +
-      '<button type="button" class="v2-btn" data-act="sheet" title="인쇄·PDF용 한 장. 환산가는 고를 때만 넣습니다">한 장 요약</button></div></div>';
-    if (VIEW.condWarn.length) h += '<div class="notebox v2-warnbox"><b>성능 상태 중 못 읽은 표기는 계산에 넣지 않았습니다:</b> ' + esc(VIEW.condWarn.join(', ')) +
-      ' — 왼쪽 성능 상태에서 고쳐 다시 읽어 주세요.' + (S.items.length ? '' : ' 읽은 부위가 없어 상태 미상으로 계산했습니다.') + '</div>';
+    var span = Math.max(1, r.range[1] - r.range[0]), lo0 = r.range[0] - span / 2, hi0 = r.range[1] + span / 2, at = function (v) { return Math.max(0, Math.min(100, (v - lo0) / (hi0 - lo0) * 100)).toFixed(1) + '%'; };
+    var dR0 = R0 ? (r.price - R0.price) / R0.price * 100 : 0;
+    var hero = '<div class="v2-hero-row"><div class="v2-hero"><div class="v2-hero-top"><span class="v2-hlabel"><i aria-hidden="true"></i>추정 시세 · 온라인 소매 호가 기준' + infoBtn('price', '시세') + '</span>' +
+      '<div class="v2-hacts">' + (batch().hasCar(batchCar()) ? '<button type="button" class="v2-btn" data-act="openBatch">묶음에 있음 · 열기</button>' :
+        '<button type="button" class="v2-btn" data-act="toBatch" title="이 차를 묶음 산정 목록에 한 줄로 더합니다. 단순수리·기계 결함·직접 뺀 매물·직접 넣은 환산 비율은 넘어가지 않습니다">＋ 묶음에 추가</button>') +
+      '<button type="button" class="v2-btn" data-act="xlsx">엑셀 ↓</button><button type="button" class="v2-btn primary" data-act="sheet" title="인쇄·PDF용 한 장. 환산가는 고를 때만 넣습니다">한 장 요약 →</button></div></div>' +
+      '<div class="v2-hnum"><span id="heroNum">' + man(VIEW.shownKey === key && VIEW.shown != null ? VIEW.shown : 0) + '</span><small>만원</small></div>' +
+      '<div class="v2-range" role="img" aria-label="가운데 50% 범위 ' + man(r.range[0]) + '~' + man(r.range[1]) + '만, 추정 ' + man(r.price) + '만">' +
+      '<div class="trk"></div><div class="iqr" style="left:' + at(r.range[0]) + ';right:calc(100% - ' + at(r.range[1]) + ')"></div><div class="knob" style="left:' + at(r.price) + '"></div>' +
+      '<div class="lab"><span>' + man(r.range[0]) + '만</span><span>가운데 50% 범위</span><span>' + man(r.range[1]) + '만</span></div></div>' +
+      '<div class="v2-hchips">' + (r.est0 != null ? '<span>무사고라면 <b>' + man(r.est0 - r.repair) + '만</b></span>' : '') +
+      (R0 ? '<span>무사고였다면 <b>' + man(R0.price) + '만</b> · 성능 ' + pct(dR0) + '</span>' : '') +
+      (r.repair ? '<span>수리비 <b>−' + man(r.repair) + '만</b> 반영</span>' : '') +
+      '<span>비교 매물 <b>' + r.n + '대</b>' + (r.out ? ' · 이상치 제외 ' + r.out + '대' : '') + '</span></div></div>' +
+      '<div class="v2-hside"><div class="v2-conv"><div class="lab">환산가 · 경매 예상가</div><div class="num"><b>' + man(r.converted) + '</b><small>만원</small></div>' +
+      '<div class="foot"><span class="rt">−' + r.rate + '%</span>환산 비율 · ' + esc(shortSrc(r.rateSource)) + (r.repair ? ' · 수리비 반영' : '') + '</div></div>' +
+      '<div class="v2-conf"><div class="ring g-' + r.grade + '" style="--p:' + ({ A: 88, B: 62, C: 34 }[r.grade] || 50) + '"><span>' + r.grade + '</span></div><div>' +
+      '<div class="lab">신뢰도</div><div class="big">' + stepNo + '단계 · ' + esc(stepName) + '</div><div class="sm">비교 매물 ' + r.n + '대 기준' +
+      (S.ex.length ? ' · 직접 뺀 ' + S.ex.length + '대 <button type="button" class="v2-link" data-act="exClear">되돌리기</button>' : '') + (r.grade === 'C' ? ' · 참고값' : '') + '</div></div></div></div></div>';
+    if (VIEW.condWarn.length) hero += '<div class="notebox v2-warnbox"><b>못 읽은 성능 표기는 계산에 넣지 않았습니다:</b> ' + esc(VIEW.condWarn.join(', ')) +
+      (S.items.length ? '' : ' — 읽은 부위가 없어 상태 미상으로 계산') + '</div>';
+    var h = sec('price', 1, '시세', [['추정 시세', TIP.est], ['환산가', TIP.conv], ['신뢰도', TIP.grade],
+      ['비교 매물 찾기', stepNo + '단계(' + stepName + ')까지 넓혀 찾았습니다. ' + TIP.step], R0 ? ['무사고였다면', TIP.cond] : null], hero, { headless: true });
 
-    h += '<div class="v2-cards">';
-    h += '<div class="card"><div class="eyebrow">추정 시세 · 온라인 소매 호가 기준' + q(TIP.est) + '</div><div class="v2-big" style="margin-top:12px">' + man(r.price) + '<small>만원</small></div>' +
-      '<div class="v2-kv">범위 <b>' + man(r.range[0]) + ' ~ ' + man(r.range[1]) + '</b>만 (25~75%)' +
-      (r.repair ? '<br>수리비 −' + man(r.repair) + '만 반영' : '') +
-      (r.est0 != null ? '<br>상태 미상 · 무사고라면 <b>' + man(r.est0 - r.repair) + '</b>만' : '') +
-      (R0 ? '<br>무사고였다면 <b>' + man(R0.price) + '</b>만 · 성능 상태로 <b>' + (r.price < R0.price ? '−' : '+') + man(Math.abs(r.price - R0.price)) + '만</b>(' +
-        (r.price < R0.price ? '−' : '+') + Math.abs((r.price - R0.price) / R0.price * 100).toFixed(1) + '%)' + q(TIP.cond) : '') + '</div></div>';
-    h += '<div class="card"><div class="eyebrow">환산가 · 경매 예상가' + q(TIP.conv) + '</div><div class="v2-big" style="margin-top:12px">' + man(r.converted) + '<small>만원</small></div>' +
-      '<div class="v2-kv">환산 비율 <b>' + r.rate + '%</b> · ' + esc(r.rateSource) + (r.repair ? '<br>수리비 −' + man(r.repair) + '만 반영' : '') + '</div></div>';
-    h += '<div class="card"><div class="eyebrow">신뢰도' + q(TIP.grade) + '</div><div style="display:flex;gap:14px;align-items:center;margin-top:12px">' +
-      '<span class="v2-grade ' + r.grade + '">' + r.grade + '</span><div class="v2-kv" style="margin:0">비교 매물 <b>' + r.n + '대</b> · ' +
-      stepNo + '단계(' + esc(stepName) + ')' + q(TIP.step) + '<br>이상치 제외 ' + r.out + '대' +
-      (S.ex.length ? ' · 직접 제외 ' + S.ex.length + '대 <button type="button" class="v2-link" data-act="exClear">모두 되돌리기</button>' : '') + '</div></div>' +
-      (r.grade === 'C' ? '<div class="v2-kv">참고용 — 같은 세부모델 전체로 넓혀 찾은 값입니다</div>' : '') + '</div>';
-    h += '</div>';
-    var co = curveOf(G);
-    h += cv().tiles(co);                                       // 동급 대비 지표 6개(기획 v2.24 Q113 — 모델 리포트에서 옮김)
+    h += sec('basis', 2, '산정 근거', [['내 차 위치', TIP.pos],
+      ['점선', '이 차에서 ' + (km ? '주행만' : '연식만') + ' 다를 때의 값 — ' + (km ? '주행 1만km 늘 때마다 ' : '1년 오래될 때마다 ') + pct((Math.exp(km ? cf[1] : cf[0] * 12) - 1) * 100) + '.'],
+      ['보정 흐름', TIP.flow + ' 항목 이름에 마우스를 올리면 그 보정의 이유가 나옵니다.'], ['보정 계수', (COEF_LEVEL[R.coefLevel] || R.coefLevel) + '(매주 데이터에서 추정).']],
+      posCard(G, car) + flowCard(G, car, c));
 
-    h += '<div class="v2-two-col v2-wide">' + posCard(G, car) + flowCard(G, car, c) + '</div>';   // 보강안 1단계(기획 5.1.3-2): 그림 먼저, 표는 아래
-    h += cv().card(co, myCurve(G, car), chartW(1200, 9999));   // 감가 곡선 — 내 차 위치·보정 흐름 바로 아래(Q114)
-    h += '<div class="v2-two-col">' + speedCard(G) + trendCard(G) + '</div>';
-    h += ladderCard(G, car, c);
-    h += compsTable(G);
+    h += sec('market', 3, '동급 대비', cv().info(), cv().tiles(co) + cv().card(co, myCurve(G, car), chartW(1100, 9999)),
+      { peek: M && M.seg ? esc(segLabel(M.seg)) + ' · ' + esc(S.model) + ' 전체(등급 무관)' : '' });
+
+    var sd = speedData(G), mm = sd.mm, speedV = mm && mm.rate_w != null ? '주 ' + (mm.rate_w * 100).toFixed(1) + '%' : '';
+    h += sec('speed', 4, '판매 · 추세', [['판매 속도', TIP.speed], ['시세 추세', TIP.trend], ['방향', '매주 수집이 4주 쌓이기 전에는 짧은 기간으로 보고 "짧음"을 붙입니다.']],
+      speedCard(G) + trendCard(G), { fold: true, peek: [speedV, mm && mm.pidx != null ? '시세지수 ' + Number(mm.pidx).toFixed(1) : ''].filter(Boolean).join(' · ') });
+
+    var ld = ladderData(G, car, c);
+    h += sec('ladder', 5, '가격 사다리', [['가격 사다리', TIP.ladder], ['연식 × 주행', '굵은 칸 = 이 차. 칸을 누르면 그 조건으로 다시 산정합니다. 판매중 5대 미만 칸은 비웁니다.'],
+      ['성능 상태별', ladderNote(ld)]], ladderCard(G, car, c, ld), { tools: S.grade ? seg('mgrade', [['one', S.grade + '만'], ['all', '전체 등급']], VIEW.allGrades ? 'all' : 'one', '시세표 등급') : '' });
+
+    h += sec('comps', 6, '비교 매물', [['빼기', '체크하면 그 매물을 빼고 다시 계산합니다. 뺀 매물은 표에 흐리게 남고, 신뢰도의 되돌리기로 모두 되돌립니다.'],
+      ['유사도', TIP.sim], ['호가', TIP.price], ['보정 후', TIP.adj], ['체류', TIP.dwell], ['인하', TIP.cut], ['금액', '표의 금액은 모두 만원입니다.'],
+      ['매물 표기', '경매 이름을 붙이기 전 매물에 적힌 이름입니다. 가까운 이름 = 경매 데이터에 같은 이름이 없어 가장 가까운 경매 이름에 붙인 매물, 매물 이름 = 맞는 경매 이름이 없어 매물 이름을 그대로 쓴 매물.']],
+      compsTable(G), { peek: R.comps.length + '대 · 만원', tools: seg('sort', [['sim', '유사도순'], ['adj', '보정가순'], ['price', '호가순']], VIEW.sort, '정렬') });
     $('res').innerHTML = h;
+    $('res').classList.toggle('v2-rise', rise(key));
+    countUp(Math.round(r.price), key);
+    condBar(G, car);
+    navSet([['추정 시세', man(r.price)], ['환산가', man(r.converted)], ['신뢰도', r.grade, 'g-' + r.grade]],
+      [['price', 1, '시세', man(r.price)], ['basis', 2, '산정 근거'], ['market', 3, '동급 대비', cv().tag()],
+        ['speed', 4, '판매 · 추세', speedV], ['ladder', 5, '가격 사다리'], ['comps', 6, '비교 매물', R.comps.length + '대']]);
     loadCurve(co);
   }
 
@@ -699,7 +838,7 @@
   }
   function loadCurve(co) {                                    // 리포트 자료·시장 숫자가 오면 지표 줄·곡선만 다시(같은 세부모델일 때)
     var key = co.mk + '|' + co.model;
-    cv().load(co).then(function () { if (S.mk + '|' + S.model === key) cv().refresh(); });
+    cv().load(co).then(function () { if (S.mk + '|' + S.model === key) { cv().refresh(); navVal('market', VIEW.mode === 'one' ? cv().tag() : ''); } });
   }
 
   function compsTable(G) {
@@ -719,12 +858,13 @@
       if (key) while (i < list.length && key(list[i]) <= key(e)) i++; else i = list.length;
       list.splice(i, 0, e);
     });
-    var shown = (VIEW.all ? list : list.slice(0, SHOW + keep.length)).concat(tail);
-    var h = '<div class="card"><div class="v2-tools"><div class="card-title">비교 매물 <span class="hint">체크하면 그 매물을 빼고 다시 계산합니다</span></div>' +
-      seg('sort', [['sim', '유사도순'], ['adj', '보정가순'], ['price', '호가순']], VIEW.sort, '정렬') + '</div>';
-    h += '<div class="v2-tablewrap"><table class="t v2-tbl"><thead><tr><th>제외</th><th class="num">유사도' + q(TIP.sim) + '</th><th>등록</th><th class="num">주행</th>' +
-      '<th>색상</th><th>등급</th><th>성능 (글로비스)</th><th class="num">호가' + q(TIP.price) + '</th><th class="num">보정 후' + q(TIP.adj) + '</th><th>상태</th>' +
-      '<th class="num">체류' + q(TIP.dwell) + '</th><th class="num">인하' + q(TIP.cut) + '</th><th>매물</th></tr></thead><tbody>';
+    var shown = (VIEW.all ? list : list.slice(0, SHOW + keep.length)).concat(tail), ec = {};
+    R.comps.forEach(function (x) { var t = encText(G, x.row); ec[t] = (ec[t] || 0) + 1; });
+    ENC_MAIN = Object.keys(ec).sort(function (a, b) { return ec[b] - ec[a]; })[0] || '';
+    var h = '<div class="card">';
+    h += '<div class="v2-tablewrap"><table class="t v2-tbl"><thead><tr><th title="체크하면 그 매물을 빼고 다시 계산합니다">빼기</th><th class="num">유사도</th><th>등록</th><th class="num">주행</th>' +
+      '<th>색상</th><th>등급</th><th>성능 (글로비스)</th><th class="num">호가</th><th class="num">보정 후</th><th>상태</th>' +
+      '<th class="num">체류</th><th class="num">인하</th><th>매물</th></tr></thead><tbody>';
     shown.forEach(function (e) { h += rowHtml(G, e); });
     h += '</tbody></table></div>';
     if (list.length > SHOW) {
@@ -749,10 +889,15 @@
       '<td><a href="https://fem.encar.com/cars/detail/' + id + '" target="_blank" rel="noopener">보기 ↗</a></td></tr>';
   }
 
-  function encSmall(G, row) {                                // 등급 칸 아래 작게: 매물 원래 이름 · 가까운 이름 표시(기획 v2.23 Q101·Q102)
-    var e = encOfRow(G, row), q = G.fi.q != null && row[G.fi.q];
-    if (!e && !q) return '';
-    var t = e ? (e.model !== S.model ? e.model + ' ' : '') + e.grade + (e.trim ? ' ' + e.trim : '') : '';
+  function encText(G, row) {                                 // 비교 매물 한 대의 매물 표기 한 줄
+    var e = encOfRow(G, row);
+    return e ? (e.model !== S.model ? e.model + ' ' : '') + e.grade + (e.trim ? ' ' + e.trim : '') : '';
+  }
+  var ENC_MAIN = '';                                         // 비교 매물에서 가장 흔한 매물 표기 — 같은 것은 행마다 되풀이하지 않는다(기획 v2.26, ① 조건 차량에 한 번)
+  function encSmall(G, row) {                                // 등급 칸 아래 작게: 흔한 것과 다른 매물 표기 · 가까운 이름 표시(기획 v2.23 Q101·Q102)
+    var q = G.fi.q != null && row[G.fi.q], t = encText(G, row);
+    if (t === ENC_MAIN) t = '';
+    if (!t && !q) return '';
     return '<small class="v2-encrow">' + (q === 1 ? '<span title="경매 데이터에 같은 이름이 없어 가장 가까운 경매 이름에 붙인 매물입니다">가까운 이름</span> '
       : q === 2 ? '<span title="경매 데이터에 맞는 이름이 없어 매물 이름을 그대로 쓴 매물입니다">매물 이름</span> ' : '') +
       (t ? '매물 표기: ' + esc(t) : '') + '</small>';
@@ -784,12 +929,9 @@
 
   // ───── 내 차 위치(보강안 1단계, 기획 5.1.3-2) — 비교 매물의 실제 호가 위에 이 차의 추정 범위와 같은 조건 기준선 ─────
   function posCard(G, car) {
-    var km = VIEW.posx === 'km', W = chartW(620), cf = ENG.prepare(G, S.model).cf.b;
-    var H = ($('res').clientWidth || 0) >= 976 ? 430 : Math.max(260, Math.min(340, Math.round(W * 0.62)));   // 두 칸일 때는 옆 보정 흐름 높이에 맞춰 크게
-    return '<div class="card"><div class="v2-tools"><div class="card-title">내 차 위치' + q(TIP.pos) + ' <span class="hint">비교 매물 ' + R.comps.length + '대의 실제 호가</span></div>' +
-      seg('posx', [['km', '주행 × 호가'], ['age', '차령 × 호가']], VIEW.posx, '가로축') + '</div>' + posLegend() + posSvg(G, car, W, H, '') +
-      '<p class="v2-help">점선: 이 차에서 ' + (km ? '주행만' : '연식만') + ' 다를 때의 값 — ' + (km ? '주행 1만km 늘 때마다 ' : '1년 오래될 때마다 ') +
-      pct((Math.exp(km ? cf[1] : cf[0] * 12) - 1) * 100) + '(' + esc(COEF_LEVEL[R.coefLevel] || R.coefLevel) + ').</p></div>';
+    var W = chartW(1100, 9999), H = W >= 700 ? 380 : Math.max(260, Math.min(340, Math.round(W * 0.62)));   // 한 줄 전체 폭(기획 v2.26 Q127) — 설명은 섹션 i
+    return '<div class="card"><div class="v2-tools"><div class="card-title">내 차 위치</div>' +
+      seg('posx', [['km', '주행 × 호가'], ['age', '차령 × 호가']], VIEW.posx, '가로축') + '</div>' + posLegend() + posSvg(G, car, W, H, '') + '</div>';
   }
 
   function posLegend() {
@@ -797,7 +939,7 @@
     return '<div class="v2-legend"><span><i style="background:var(--accent)"></i>판매중</span>' +
       '<span><i style="background:var(--bg-1);box-shadow:inset 0 0 0 2px var(--accent)"></i>최근 3개월 판매</span>' +
       (hasOut ? '<span><i style="background:var(--tx-4)"></i>이상치</span>' : '') +
-      '<span><i class="v2-star" aria-hidden="true">★</i>내 차 추정 · <i class="v2-rng" aria-hidden="true"></i>범위 ' + man(R.lo) + '~' + man(R.hi) + '만</span>' +
+      '<span><i class="v2-medot" aria-hidden="true"></i>내 차 ' + man(R.est) + '만</span>' +
       '<span><i class="v2-dash"></i>같은 조건 기준선</span></div>';
   }
 
@@ -821,13 +963,14 @@
     function py(v) { return T + (y1 - v) / (y1 - y0) * (H - T - B); }
     var h = '<svg class="v2-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="비교 매물 ' + R.comps.length + '대의 ' + (km ? '주행거리' : '등록 연월') +
       '와 호가, 이 차의 추정 시세 ' + man(R.est) + '만원과 범위"><defs><clipPath id="' + clip + '"><rect x="' + L + '" y="' + T + '" width="' + (W - L - RR) +
-      '" height="' + (H - T - B) + '"/></clipPath></defs>';
+      '" height="' + (H - T - B) + '"/></clipPath><radialGradient id="' + clip + 'g"><stop offset="0" stop-color="var(--accent)" stop-opacity=".35"/>' +
+      '<stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></radialGradient></defs>';
     niceTicks(y0, y1, 5).forEach(function (t) {
       h += '<line x1="' + L + '" x2="' + (W - RR) + '" y1="' + py(t).toFixed(1) + '" y2="' + py(t).toFixed(1) + '" stroke="var(--line)" stroke-width="1"/>' +
         '<text x="' + (L - 8) + '" y="' + (py(t) + 4).toFixed(1) + '" text-anchor="end">' + man(t) + '</text>';
     });
     var xt = [];
-    if (km) xt = niceTicks(x0, x1, Math.max(3, Math.round(W / 95))).map(function (t) { return [t, t + '만']; });
+    if (km) xt = niceTicks(x0, x1, Math.max(3, Math.round(W / 140))).map(function (t) { return [t, t + '만']; });
     else {                                                   // 1월(기간이 짧으면 7월도) 눈금
       var sm = x1 - x0 > 40 ? 12 : 6;
       for (var m = Math.ceil((x0 - 1) / sm) * sm + 1; m <= x1; m += sm) xt.push([m, Math.floor((m - 1) / 12) + ((m - 1) % 12 ? '.7' : '')]);
@@ -843,12 +986,12 @@
     var bx = px(tx);
     var bl = [];
     for (var i = 0; i <= 40; i++) { var v = x0 + (x1 - x0) * i / 40; bl.push(px(v).toFixed(1) + ',' + py(base(v)).toFixed(1)); }
-    h += '<polyline clip-path="url(#' + clip + ')" fill="none" stroke="var(--tx-3)" stroke-width="1.5" stroke-dasharray="5 4" points="' + bl.join(' ') + '"/>';
+    h += '<polyline clip-path="url(#' + clip + ')" fill="none" stroke="var(--tx-1)" stroke-opacity=".35" stroke-width="1.5" stroke-dasharray="4 5" points="' + bl.join(' ') + '"/>';
     var order = function (p) { return p.ex ? 0 : p.c.outlier ? 1 : p.c.sold ? 2 : 3; };   // 흐린 것부터 그려 진한 점이 위로
     pts.sort(function (a, b) { return order(a) - order(b); }).forEach(function (p) {
       var x = p.c, row = x.row, id = row[fi.id], st = p.ex ? 'ex' : x.outlier ? 'out' : x.sold ? 'sold' : 'on';
-      var fill = { on: 'var(--accent)', sold: 'var(--bg-1)', out: 'var(--tx-4)', ex: 'none' }[st];
-      var stroke = { on: 'var(--bg-1)', sold: 'var(--accent)', out: 'var(--bg-1)', ex: 'var(--tx-4)' }[st];
+      var fill = { on: 'var(--accent)', sold: 'var(--bg-1)', out: 'var(--line-hard)', ex: 'none' }[st];
+      var stroke = { on: 'var(--accent)', sold: 'var(--accent)', out: 'var(--line-hard)', ex: 'var(--tx-4)' }[st];
       var tip = '호가 ' + man(row[fi.price]) + '만 · ' + (x.sold ? '판매 ' + mmdd(row[fi.sd]) + '(마지막 호가)' : '판매중') + '\n' + ym(row[fi.reg]) + ' 등록 · ' +
         (row[fi.km] / 1e4).toFixed(1) + '만km · ' + G.F.grades[row[fi.g]] + '\n성능 ' + row[fi.perf] + '등급 · ' + G.F.labels[row[fi.acc]] +
         (x.adj != null && !p.ex ? ' · 보정 후 ' + man(x.adj) + '만' : '') + (p.ex ? '\n직접 뺀 매물(계산 제외)' : x.outlier ? '\n이상치(계산 제외)' : '') + '\n누르면 아래 표에서 보기';
@@ -856,20 +999,12 @@
         '" stroke-width="' + (st === 'sold' ? 1.6 : 1) + '"' + (st === 'ex' ? ' stroke-dasharray="2 2"' : '') + ' data-tip="' + esc(tip) + '"/>';
       if (String(VIEW.hl) === String(id)) h += '<circle cx="' + px(p.x).toFixed(1) + '" cy="' + py(p.y).toFixed(1) + '" r="8" fill="none" stroke="var(--tx-1)" stroke-width="2"/>';
     });
-    var sy = py(R.est), yl = py(R.lo), yh = py(R.hi), sp = [];
-    for (var j = 0; j < 10; j++) {                           // 별(이 차 추정 시세)
-      var a = Math.PI / 5 * j - Math.PI / 2, rr = j % 2 ? 5 : 12;
-      sp.push((bx + rr * Math.cos(a)).toFixed(1) + ',' + (sy + rr * Math.sin(a)).toFixed(1));
-    }
-    var right = bx < W - RR - 130, side = function (d) { return (bx + (right ? d : -d)).toFixed(1); }, anc = right ? 'start' : 'end';
+    var sy = py(R.est), right = bx < W - RR - 140, lw = 112, lx = right ? bx + 14 : bx - 14 - lw, ly = Math.max(T, sy - 40);
     var rtip = esc('이 차 추정 시세 ' + man(R.est) + '만' + (R.repair ? '(수리비 전)' : '') + '\n범위 ' + man(R.lo) + '~' + man(R.hi) + '만(보정 후 가운데 50%)');
-    h += '<g stroke-linecap="round" fill="none">' + [['var(--bg-1)', 6], ['var(--tx-1)', 2.5]].map(function (k) {   // 범위 막대(흰 테두리로 점 위에서도 보이게)
-      return '<path d="M' + (bx - 7) + ' ' + yh.toFixed(1) + 'H' + (bx + 7) + 'M' + bx + ' ' + yh.toFixed(1) + 'V' + yl.toFixed(1) + 'M' + (bx - 7) + ' ' + yl.toFixed(1) +
-        'H' + (bx + 7) + '" stroke="' + k[0] + '" stroke-width="' + k[1] + '"/>';
-    }).join('') + '</g><polygon points="' + sp.join(' ') + '" fill="var(--tx-1)" stroke="var(--bg-1)" stroke-width="2.5" stroke-linejoin="round" data-tip="' + rtip + '"/>' +
-      '<text class="lbl v2-halo" x="' + side(16) + '" y="' + (sy + 4).toFixed(1) + '" text-anchor="' + anc + '">내 차 ' + man(R.est) + '만' + (R.repair ? '(수리비 전)' : '') + '</text>' +
-      '<text class="v2-halo" x="' + side(12) + '" y="' + (yl + 4).toFixed(1) + '" text-anchor="' + anc + '">' + man(R.lo) + '</text>' +
-      '<text class="v2-halo" x="' + side(12) + '" y="' + (yh + 4).toFixed(1) + '" text-anchor="' + anc + '">' + man(R.hi) + '</text></svg>';
+    h += '<circle cx="' + bx.toFixed(1) + '" cy="' + sy.toFixed(1) + '" r="44" fill="url(#' + clip + 'g)" pointer-events="none"/>' +
+      '<circle class="v2-me" cx="' + bx.toFixed(1) + '" cy="' + sy.toFixed(1) + '" r="8" fill="var(--tx-1)" stroke="var(--bg-1)" stroke-width="3" data-tip="' + rtip + '"/>' +
+      '<rect x="' + lx.toFixed(1) + '" y="' + ly.toFixed(1) + '" width="' + lw + '" height="28" rx="14" fill="var(--tx-1)" pointer-events="none"/>' +
+      '<text class="v2-mel" x="' + (lx + lw / 2).toFixed(1) + '" y="' + (ly + 18).toFixed(1) + '" text-anchor="middle">내 차 ' + man(R.est) + '만' + (R.repair ? '*' : '') + '</text></svg>';
     return h;
   }
 
@@ -924,7 +1059,7 @@
       var ud = r.t === 'tot' ? '' : r.d >= 0 ? 'up' : 'dn';
       var mark = r.t === 'tot' ? '<i class="tick" style="left:' + at(r.v) + '"></i>'
         : '<i class="seg ' + ud + '" style="left:' + at(Math.min(r.a, r.b)) + ';width:max(2px,' + (Math.abs(r.b - r.a) / (hi - lo) * 100).toFixed(2) + '%)"></i>';
-      out += '<span class="k' + (r.main ? ' main' : '') + '">' + esc(r.k) + '</span><span class="trk">' + mark + '</span>' +
+      out += '<span class="k' + (r.main ? ' main' : '') + '"' + (r.why ? ' data-tip="' + esc(r.why) + '" tabindex="0"' : '') + '>' + esc(r.k) + '</span><span class="trk">' + mark + '</span>' +
         '<span class="v ' + ud + (r.main ? ' main' : '') + '">' + (r.t === 'tot' ? man(r.v) : signed(r.d)) + '</span><span class="why">' + esc(r.why) + '</span>';
     });
     return out + '</div>';
@@ -932,55 +1067,36 @@
 
   function flowCard(G, car, c) {
     var f = flowData(G, car, c), rows = f.rows, split = f.split;
-    var h = '<div class="card"><div class="card-title">보정 흐름' + q(TIP.flow) + ' <span class="hint">만원 · 보정은 비교 매물 평균</span></div>' +
-      flowBlock(rows.slice(0, split)) + flowBlock([rows[split - 1]].concat(rows.slice(split)), '환산 — 경매 예상가까지(눈금이 위와 다름)');
-    return h + '<div class="v2-fsub">보정 후 비교 매물 — 가운데 값이 추정 시세, 가운데 50%가 범위</div>' + distSvg(G) +
-      '<p class="v2-help">보정 계수: ' + esc(COEF_LEVEL[R.coefLevel] || R.coefLevel) + '(매주 데이터에서 추정)</p></div>';
+    var h = '<div class="card"><div class="card-title">보정 흐름 <span class="hint">만원 · 보정은 비교 매물 평균</span></div>' + flowBlock(rows.slice(0, split)) +
+      '<div class="v2-convbar"><span>' + man(R.est) + (R.repair ? ' − 수리비 ' + man(R.repair) : '') + '</span><em>→ −' + R.rate + '% · −' + man(R.est * R.rate / 100) + ' →</em><b>환산가 ' + man(R.converted) + '</b></div>';
+    return h + '<div class="v2-fsub">보정 후 비교 매물 분포 · 가운데 50% 범위</div>' + distHist() + '</div>';
   }
 
   function niceTicks(a, z, n) {
     var span = z - a, step = Math.pow(10, Math.floor(Math.log(span / n) / Math.LN10)), e = span / n / step;
     if (e >= 7.5) step *= 10; else if (e >= 3.5) step *= 5; else if (e >= 1.5) step *= 2;
     var t = [];
-    for (var v = Math.ceil(a / step) * step; v <= z; v += step) t.push(Math.round(v / step) * step);
+    var dp = Math.max(0, -Math.floor(Math.log(step) / Math.LN10 + 1e-9));   // 0.2 단위면 소수 한 자리(4.6000000001 같은 꼬리 없이)
+    for (var v = Math.ceil(a / step) * step; v <= z + step * 1e-9; v += step) t.push(+(Math.round(v / step) * step).toFixed(dp));
     return t;
   }
 
-  function distSvg(G) {                                      // 보정 후 가격 점 그래프(겹치지 않게 위아래로 쌓음) — 보정 흐름 아래 띠
-    var fi = G.fi, W = chartW(620), H = 132, L = 16, RR = 16, T = 26, B = 26, cy = (T + H - B) / 2;
-    var vals = R.comps.map(function (x) { return x.adj; }).concat([R.lo, R.hi, R.est]);
-    var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals), sp = (mx - mn) || mx * 0.1 || 1;
-    var a = mn - sp * 0.05, z = mx + sp * 0.05;
-    function px(v) { return L + (v - a) / (z - a) * (W - L - RR); }
-    var h = '<svg class="v2-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="보정 후 비교 매물 가격 분포">';
-    niceTicks(a, z, 5).forEach(function (t) {
-      h += '<line x1="' + px(t) + '" x2="' + px(t) + '" y1="' + T + '" y2="' + (H - B) + '" stroke="var(--line)" stroke-width="1"/>' +
-        '<text x="' + px(t) + '" y="' + (H - B + 16) + '" text-anchor="middle">' + man(t) + '</text>';
-    });
-    h += '<rect x="' + px(R.lo) + '" y="' + T + '" width="' + Math.max(px(R.hi) - px(R.lo), 1) + '" height="' + (H - B - T) + '" fill="var(--accent-wash)"/>';
-    var placed = [], pts = R.comps.slice().sort(function (p, q) { return p.adj - q.adj; });
-    pts.forEach(function (x) {
-      var cx = px(x.adj), y = cy;
-      for (var k = 1; k < 40; k++) {
-        var hit = placed.some(function (p) { return Math.abs(p[0] - cx) < 8 && Math.abs(p[1] - y) < 8; });
-        if (!hit) break;
-        y = cy + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 8;
-      }
-      y = Math.max(T + 5, Math.min(H - B - 5, y));
-      placed.push([cx, y]);
-      var fill = x.outlier ? 'var(--tx-4)' : x.sold ? 'var(--bg-1)' : 'var(--accent)';
-      var stroke = x.outlier ? 'var(--bg-1)' : x.sold ? 'var(--accent)' : 'var(--bg-1)';
-      var tip = '보정 후 ' + man(x.adj) + '만\n호가 ' + man(x.row[fi.price]) + '만 · ' + ym(x.row[fi.reg]) + ' 등록 · ' +
-        (x.row[fi.km] / 1e4).toFixed(1) + '만km\n유사도 ' + x.sim + ' · ' + (x.sold ? '최근 판매' : '판매중') + (x.outlier ? ' · 이상치(제외)' : '') + '\n누르면 아래 표에서 보기';
-      h += '<circle class="v2-pt" data-pt="' + x.row[fi.id] + '" cx="' + cx.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="3.6" fill="' + fill + '" stroke="' + stroke +
-        '" stroke-width="1.5" data-tip="' + esc(tip) + '"/>';
-    });
-    var ex = px(R.est), anchor = ex < 70 ? 'start' : ex > W - 70 ? 'end' : 'middle';
-    h += '<line x1="' + ex + '" x2="' + ex + '" y1="' + (T - 4) + '" y2="' + (H - B) + '" stroke="var(--tx-1)" stroke-width="2"/>' +
-      '<text class="lbl" x="' + ex + '" y="' + (T - 9) + '" text-anchor="' + anchor + '">추정 ' + man(R.est) + '만' + (R.repair ? '(수리비 전)' : '') + '</text>';
-    return h + '</svg>';
+  function distHist() {                                      // 보정 후 가격 분포 막대(디자인 D) — 내 차 구간은 진하게, 가운데 50%는 옅게
+    var vals = R.comps.filter(function (x) { return !x.outlier; }).map(function (x) { return x.adj; });
+    if (!vals.length) return '';
+    var lo = Math.min.apply(null, vals.concat([R.lo])), hi = Math.max.apply(null, vals.concat([R.hi])), n = 28, w = (hi - lo) / n || 1, bins = [];
+    for (var i = 0; i < n; i++) bins.push(0);
+    vals.forEach(function (v) { bins[Math.min(n - 1, Math.floor((v - lo) / w))]++; });
+    var top = Math.max.apply(null, bins), me = Math.min(n - 1, Math.floor((R.est - lo) / w));
+    var bars = bins.map(function (c, i) {
+      var a = lo + i * w, b = a + w, cls = i === me ? 'me' : (b > R.lo && a < R.hi ? 'iqr' : '');
+      return '<i class="' + cls + '" style="height:' + Math.max(4, c / top * 100).toFixed(0) + '%" data-tip="' + man(a) + '~' + man(b) + '만 · ' + c + '대"></i>';
+    }).join('');
+    var ticks = niceTicks(lo, hi, 4).filter(function (t) { return t >= lo && t <= hi; });
+    return '<div class="v2-hist">' + bars + '</div><div class="v2-histx">' + ticks.map(function (t) {
+      return '<span style="left:' + ((t - lo) / (hi - lo) * 100).toFixed(1) + '%">' + man(t) + '</span>';
+    }).join('') + '</div>';
   }
-
   function showComp(id) {                                    // 그림에서 누른 매물 → 아래 비교 매물 표의 그 행(10행 밖이면 펼친다) · 그림에도 고리 표시
     VIEW.hl = id;
     if (!$('res').querySelector('tr[data-id="' + id + '"]')) VIEW.all = true;
@@ -1032,7 +1148,7 @@
 
   function speedCard(G) {
     var d = speedData(G), mm = d.mm, sg = d.sg, sname = d.sname;
-    var h = '<div class="card"><div class="card-title">판매 속도' + q(TIP.speed) + ' <span class="hint">소매 시장 기준 · 판매 = 목록에서 사라짐(추정)</span></div>' +
+    var h = '<div class="card"><div class="card-title">판매 속도</div>' +
       '<div class="v2-kv">같은 조건 판매중 <b>' + d.on + '대</b>' + (S.sold ? ' · 최근 3개월 판매 <b>' + d.sold + '대</b>' : ' · 최근 판매 매물은 빼고 보는 중') + '</div>';
     // ① 차급 대비 — 주간 판매율. 없으면 중위 체류일로
     if (d.loading) h += '<p class="v2-kv">차급 비교를 불러오는 중…</p>';
@@ -1042,30 +1158,24 @@
           (v / mx * 100).toFixed(1) + '%"></i></span><span class="v">주 ' + (v * 100).toFixed(1) + '%</span></div>';
       };
       h += '<div class="v2-ssub">차급 대비 <span class="v2-pill ' + vsCls(d.vs.word) + '">' + sname + '보다 ' + d.vs.word + ' ' + pct((d.vs.ratio - 1) * 100) + '</span></div>' +
-        bar('이 세부모델', mm.rate_w, 'me', true) + bar(sname, sg.rate_w, 'base') +
-        '<p class="v2-help">주간 판매율 = 지난 구간(' + mmdd(X.mm.speed_interval[0]) + '→' + mmdd(X.mm.speed_interval[1]) + ') 판매 ÷ 시작 재고, 7일 환산. ' +
-        (mm.weeks ? '판매중 매물이 다 팔리는 데 약 <b>' + mm.weeks + '주</b>' + (sg.weeks ? '(차급 ' + sg.weeks + '주)' : '') + '. ' : '') +
-        (mm.dwell != null && sg.dwell ? '최근 90일 판매의 중위 체류 ' + mm.dwell + '일(차급 ' + sg.dwell + '일). ' : '') + '주간 수집이 쌓일수록 안정됩니다.</p>';
+        bar('이 세부모델', mm.rate_w, 'me', true) + bar(sname, sg.rate_w, 'base');
     } else if (d.vs) {
       h += '<div class="v2-ssub">차급 대비 <span class="v2-pill ' + vsCls(d.vs.word) + '">' + sname + '보다 ' + d.vs.word + '</span></div>' +
-        '<p class="v2-kv">최근 90일 판매의 중위 체류 <b>' + mm.dwell + '일</b>(차급 ' + sg.dwell + '일) — 주간 판매율은 판매중 매물이 적어 계산하지 않았습니다.</p>';
-    } else h += '<p class="v2-kv">이 세부모델은 매물이 적어 차급과 비교하지 않습니다.</p>';
+        '<p class="v2-kv">중위 체류 <b>' + mm.dwell + '일</b> · 차급 ' + sg.dwell + '일</p>';
+    } else h += '<p class="v2-note">매물이 적어 차급과 비교하지 않음</p>';
     // ② 가격 위치별 판매까지 일수 — 보정가(이 차 조건으로 맞춘 값)가 추정가보다 얼마나 쌌나·비쌌나
-    h += '<div class="v2-ssub">가격 위치별 판매까지 일수 <span class="hint">판매된 비교 매물 ' + d.pn + '대 · 추정가 대비 보정가</span></div>';
-    if (!d.bk) h += '<p class="v2-kv">판매된 비교 매물이 적어(구간마다 ' + POS_MIN + '대 이상 필요) 생략합니다.</p>';
+    h += '<div class="v2-ssub">가격 위치별 판매까지 일수</div>';
+    if (!d.bk) h += '<p class="v2-note">판매된 비교 매물이 적어 생략</p>';
     else {
       var top = Math.max.apply(null, d.bk.map(function (b) { return b.days; }));
       d.bk.forEach(function (b) {
         h += '<div class="v2-hrow' + (b.me ? ' me' : '') + '"><span class="k">' + posLabel(b.lo, b.hi) + (b.me ? ' · 추정가' : '') + '</span><span class="trk"><i class="' +
           (b.me ? 'me' : 'base') + '" style="width:' + (b.days / top * 100).toFixed(1) + '%"></i></span><span class="v">' + Math.round(b.days) + '일 <small>' + b.n + '대</small></span></div>';
       });
-      var a = d.bk[0], z = d.bk[d.bk.length - 1];
-      h += '<p class="v2-help">추정가보다 싸게 낸 매물(' + posLabel(a.lo, a.hi) + ')은 중위 ' + Math.round(a.days) + '일, 비싸게 낸 매물(' + posLabel(z.lo, z.hi) + ')은 ' +
-        Math.round(z.days) + '일 만에 팔렸습니다. 일수 = 온라인에 올라온 날부터 목록에서 사라진 날까지.</p>';
     }
     // ③ 인하 — 가끔 참고(Q48)
-    if (d.cut) h += '<p class="v2-kv v2-cutline">판매중 비교 매물의 <b>' + Math.round(d.cut.share * 100) + '%</b>가 첫 호가보다 내림' +
-      (d.cut.med != null ? '(중앙 −' + man(d.cut.med) + '만)' : '') + '</p>';
+    if (d.cut) h += '<p class="v2-kv v2-cutline">첫 호가보다 내린 판매중 <b>' + Math.round(d.cut.share * 100) + '%</b>' +
+      (d.cut.med != null ? ' · 중앙 −' + man(d.cut.med) + '만' : '') + '</p>';
     return h + '</div>';
   }
 
@@ -1100,11 +1210,14 @@
       base0: c['상태'] === '무사고' ? R.est : R0 ? R0.est : R.est0 != null ? R.est0 : null };
   }
 
-  function ladderCard(G, car, c) {
-    var d = ladderData(G, car, c), gs = d.gs, gme = d.gme, cl = d.cl, mine = d.mine, base0 = d.base0;
-    var h = '<div class="card"><div class="v2-tools"><div class="card-title">같은 모델 가격 사다리' + q(TIP.ladder) + ' <span class="hint">' + esc(S.model) + ' · 판매중 호가 중앙값(만원)</span></div>' +
-      (S.grade ? seg('mgrade', [['one', S.grade + '만'], ['all', '전체 등급']], VIEW.allGrades ? 'all' : 'one', '시세표 등급') : '') + '</div>' +
-      '<div class="v2-ladder"><div><div class="v2-ssub">연식 × 주행 <span class="hint">굵은 칸 = 이 차 · 칸을 누르면 그 조건으로 다시 산정</span></div>' + matrixTable(d.st, d.yi, d.kj) + '</div>';
+  function ladderNote(d) {                                   // 성능 상태별 설명(섹션 i) — 숫자가 들어가 매번 만든다
+    return '같은 모델 매물을 이 차의 차령·주행·등급·색상으로 맞춘 뒤 사고 단계별 가운데 값을 무사고와 비교했습니다(' + POS_MIN + '대 이상인 단계만). ' +
+      (d.base0 ? '만원은 이 차가 무사고일 때 ' + man(d.base0) + '만 기준. ' : '') + (d.mine ? '' : '이 차는 성능 상태를 넣지 않아 표시가 없습니다. ') +
+      (d.mine && R0 ? '추정 시세(무사고 대비 ' + pct((R.est / R0.est - 1) * 100) + ')는 이 차의 손상 부위·성능등급까지 본 값이라 단계 평균과 다를 수 있습니다.' : '');
+  }
+  function ladderCard(G, car, c, d0) {
+    var d = d0 || ladderData(G, car, c), gs = d.gs, gme = d.gme, cl = d.cl, mine = d.mine, base0 = d.base0;
+    var h = '<div class="card"><div class="v2-ladder"><div><div class="v2-ssub">연식 × 주행 · ' + esc(S.model) + '</div>' + matrixTable(d.st, d.yi, d.kj) + '</div>';
     var gmax = Math.max.apply(null, gs.map(function (g) { return g.med; }).concat([1]));
     h += '<div><div class="v2-ssub">등급별</div>' + (gs.length ? gs.map(function (g) {
       var me = g.name === S.grade;
@@ -1112,8 +1225,8 @@
         '</span><span class="trk"><i class="' + (me ? 'me' : 'base') + '" style="width:' + (g.med / gmax * 100).toFixed(1) + '%"></i></span><span class="v">' + man(g.med) +
         ' <small>' + (gme && !me ? signed(g.med - gme.med) + ' · ' : '') + g.n + '대</small></span></div>';
     }).join('') : '<p class="v2-kv">판매중 5대 이상인 등급이 없습니다.</p>');
-    h += '<div class="v2-ssub" style="margin-top:14px">성능 상태별 <span class="hint">무사고 대비 · 다른 조건은 이 차로 맞춤</span></div>';
-    if (!cl) h += '<p class="v2-kv">무사고 매물이 적어 비교하지 않습니다.</p>';
+    h += '<div class="v2-ssub" style="margin-top:14px">성능 상태별 · 무사고 대비</div>';
+    if (!cl) h += '<p class="v2-note">무사고 매물이 적어 비교하지 않음</p>';
     else {
       var lo = Math.min.apply(null, cl.map(function (x) { return x.rel; }).concat([-0.01]));
       cl.forEach(function (x) {
@@ -1122,9 +1235,6 @@
           '" style="width:' + (Math.abs(x.rel) / Math.abs(lo) * 100).toFixed(1) + '%"></i></span><span class="v">' + (x.k === '무사고' ? '기준' : pct(x.rel * 100)) +
           (base0 && x.k !== '무사고' ? ' <small>' + man(base0 * (1 + x.rel)) + '만</small>' : ' <small>' + x.n + '대</small>') + '</span></div>';
       });
-      h += '<p class="v2-help">같은 모델 매물을 이 차의 차령·주행·등급·색상으로 맞춘 뒤 사고 단계별 가운데 값을 무사고와 비교했습니다(' + POS_MIN + '대 이상인 단계만). ' +
-        (base0 ? '만원은 이 차가 무사고일 때 ' + man(base0) + '만 기준.' : '') + (mine ? '' : ' 이 차는 성능 상태를 넣지 않아 표시가 없습니다.') +
-        (mine && R0 ? ' 위 추정 시세(무사고 대비 ' + pct((R.est / R0.est - 1) * 100) + ')는 이 차의 손상 부위·성능등급까지 본 값이라 단계 평균과 다를 수 있습니다.' : '') + '</p>';
     }
     return h + '</div></div></div>';
   }
@@ -1241,26 +1351,21 @@
 
   function dirPill(D) { return D ? '<span class="v2-pill ' + (D.dir === '오름' ? 'up' : D.dir === '내림' ? 'dn' : '') + '">' + D.dir + ' ' + signedF(D.d) + '</span>' : '—'; }
 
-  function trendCard(G) { var M = G.models[S.model]; return trendCardOf(G.F.maker, S.model, M && M.seg, chartW(620, 360)); }
+  function trendCard(G) { var M = G.models[S.model]; return trendCardOf(G.F.maker, S.model, M && M.seg, chartW(1100, 9999)); }
   function trendCardOf(maker, model, seg, W) {               // 시세 추세 카드 — 한 대 산정과 모델 요약이 같이 쓴다
     var T = trendDataOf(maker, model, seg), mp = T.mp, sp = T.sp, D = mp.length >= 2 ? T.dm : T.ds, short = !D || D.short;
-    var h = '<div class="card"><div class="card-title">시세 추세' + q(TIP.trend) +
-      (short && (sp.length >= 2 || mp.length) ? ' <span class="v2-pill" title="매주 수집이 4주가 안 돼 방향을 짧은 기간으로 봅니다">짧음</span>' : '') +
-      ' <span class="hint">' + (mp.length ? '세부모델 vs ' : '') + esc(T.sname) + ' · 시세지수(7월 초 = 100)</span></div>';
-    if (sp.length < 2 && !mp.length) return h + '<p class="v2-kv">추세 데이터가 아직 부족합니다.</p></div>';
+    var h = '<div class="card"><div class="card-title">시세 추세 <span class="hint">시세지수 · 7월 초 = 100</span>' +
+      (short && (sp.length >= 2 || mp.length) ? ' <span class="v2-pill" title="매주 수집이 4주가 안 돼 방향을 짧은 기간으로 봅니다">짧음</span>' : '') + '</div>';
+    if (sp.length < 2 && !mp.length) return h + '<p class="v2-note">추세 데이터가 아직 부족합니다</p></div>';
     h += '<div class="v2-legend">' + (mp.length ? '<span><i class="v2-lkey" style="background:var(--accent)"></i>' + esc(model) + '</span>' : '') +
       (sp.length ? '<span><i class="v2-dash"></i>' + esc(T.sname) + '</span>' : '') + (mp.length ? '<span><i class="v2-band"></i>흔들림 2배 범위</span>' : '') + '</div>' + trendSvg(T, W);
-    var lm = mp[mp.length - 1], ls = sp[sp.length - 1], txt;
-    if (lm) txt = mmdd(lm.date) + ' 세부모델 <b>' + lm.v.toFixed(1) + '</b>' + (ls && ls.date === lm.date ? ' · ' + esc(T.sname) + ' <b>' + ls.v.toFixed(1) + '</b> — 7월 초 대비 차급보다 <b>' +
-      Math.abs(lm.v - ls.v).toFixed(1) + '</b> ' + (lm.v >= ls.v ? '높음' : '낮음') : '') + (T.latest && lm.date !== T.latest ? ' (' + mmdd(T.latest) + '은 신규 매물이 10대 미만이라 비움)' : '') + '.';
-    else txt = (T.loading ? '세부모델 시세를 불러오는 중… ' : T.mm && T.mm.pidx != null ? '이 세부모델만 보면 <b>' + Number(T.mm.pidx).toFixed(1) + '</b>(' + mmdd(X.mm.date) +
-      ' 신규 매물) — 회차별 점이 모자라 선은 그리지 않습니다. ' : '이 세부모델은 7월 초나 회차별 신규 매물이 10대 미만이라 선을 그리지 않습니다(차급 선만). ') +
-      (ls ? mmdd(ls.date) + ' ' + esc(T.sname) + ' <b>' + ls.v.toFixed(1) + '</b>.' : '');
-    var dl = !D ? '직전 수집과 간격이 길어 방향은 아직 내지 않습니다' + (T.from4 ? ' — 4주 방향은 ' + dayStr(T.from4) + '부터' : '') + '.'
-      : (D.short ? '방향(짧음) ' + mmdd(D.a.date) + '→' + mmdd(D.z.date) + ' ' + D.weeks + '주' : '최근 4주(' + mmdd(D.a.date) + '→' + mmdd(D.z.date) + ')') + ': ' +
-        (mp.length ? '세부모델 ' + dirPill(T.dm) + ' · ' : '') + esc(T.sname) + ' ' + dirPill(T.ds) + (D.short && T.from4 ? ' — 4주 방향은 ' + dayStr(T.from4) + '부터' : '');
-    return h + '<p class="v2-kv">' + txt + '</p><p class="v2-kv">' + dl + '</p>' +
-      '<p class="v2-help">' + (mp.length ? '옅은 띠 = 신규 매물 수로 생기는 흔들림의 2배 범위. ' : '') + '방향은 흔들림의 2배보다 크게 움직였을 때만 오름·내림으로 씁니다.</p></div>';
+    var lm = mp[mp.length - 1], ls = sp[sp.length - 1], txt;          // 숫자와 방향 표시만(기획 v2.26 Q133) — 읽는 법은 섹션 i
+    if (lm) txt = mmdd(lm.date) + ' 세부모델 <b>' + lm.v.toFixed(1) + '</b>' + (ls && ls.date === lm.date ? ' · ' + esc(T.sname) + ' <b>' + ls.v.toFixed(1) + '</b> <span class="v2-pill ' +
+      (lm.v - ls.v >= 0.05 ? 'up' : lm.v - ls.v <= -0.05 ? 'dn' : '') + '">차급 대비 ' + signedF(lm.v - ls.v) + '</span>' : '');
+    else txt = (T.loading ? '불러오는 중… ' : T.mm && T.mm.pidx != null ? '세부모델 <b>' + Number(T.mm.pidx).toFixed(1) + '</b>(선은 점이 모자라 생략) · ' : '세부모델은 신규 매물이 적어 차급 선만 · ') +
+      (ls ? mmdd(ls.date) + ' ' + esc(T.sname) + ' <b>' + ls.v.toFixed(1) + '</b>' : '');
+    var dl = !D ? '' : (D.short ? '방향(' + D.weeks + '주)' : '최근 4주') + ' · ' + (mp.length ? '세부모델 ' + dirPill(T.dm) + ' · ' : '') + esc(T.sname) + ' ' + dirPill(T.ds);
+    return h + '<p class="v2-kv">' + txt + '</p>' + (dl ? '<p class="v2-kv">' + dl + '</p>' : '') + '</div>';
   }
 
   // ───── 모델 요약 (5.1.5) ─────
@@ -1314,28 +1419,30 @@
       word: function (r) { return thin ? '' : ' · ' + w(r); } };   // 판매중 100대 미만은 빠름·느림을 붙이지 않는다(지표 줄과 같은 기준)
   }
 
-  function summary(G, miss) {
-    var st = modelStats(G), M = st.M, F = G.F, K = modelMarket(G), mm = K.mm, co = curveOf(G);
-    var h = (miss.length ? needCard(miss) : '') +
-      '<div class="card v2-headcard"><div class="v2-head">' + esc(F.maker + ' ' + S.model) + ' · 모델 요약' + (miss.length ? ' <span class="v2-ref">참고</span>' : '') +
-      '<br><span class="sub">판매중·판매율·체류일·인하·시세지수·잔존가치는 온라인 판매중 전체 · 최근 판매·시세표·등급별은 비교 가능 매물 · 기준 ' + dataDate() + '</span></div>' +
-      '<div class="v2-actions" style="margin:0"><button type="button" class="v2-btn" data-act="xlsxModel">엑셀 내려받기</button></div></div>';
-    h += '<div class="v2-cards">' +
-      tile('판매중', (mm ? mm.on : M.onsale_all != null ? M.onsale_all : st.on.length).toLocaleString(), '대', '비교 가능(성능점검 있음) ' + st.on.length.toLocaleString() + '대') +
-      tile('최근 3개월 판매', st.sold.length.toLocaleString(), '대', '비교 가능 매물 중 목록에서 사라진 매물(재등록 제외)') + '</div>';
-    h += cv().tiles(co) + cv().card(co, null, chartW(1200, 9999));   // 동급 대비 지표 6개 · 감가 곡선(기획 v2.24 — 모델 리포트에서 옮김)
-    h += matrixCard(st) + '<div class="v2-two-col">' + gradeCard(st) + trendCard(G) + '</div>';
+  function summary(G, miss) {                                // 모델 요약(기획 v2.26·v2.27 — 한 대 산정과 같은 틀): ① 판매 현황 ② 동급 대비 ③ 시세표 ④ 등급별 ⑤ 시세 추세
+    var st = modelStats(G), K = modelMarket(G), mm = K.mm, co = curveOf(G), seg0 = G.models[S.model] && G.models[S.model].seg, M = st.M;
+    var onN = mm ? mm.on : M.onsale_all != null ? M.onsale_all : st.on.length;
+    var h = miss.length ? needCard(miss) : '';
+    h += sec('model', 1, '판매 현황', [['숫자 기준', '판매중·판매율·체류일·인하·시세지수·잔존가치는 온라인 판매중 전체, 최근 판매·시세표·등급별은 비교 가능 매물(성능점검 있음) 기준입니다.'],
+      ['최근 3개월 판매', '비교 가능 매물 중 목록에서 사라진 매물(재등록 제외)입니다.']],
+      '<div class="v2-cards">' + tile('판매중', onN.toLocaleString(), '대', '비교 가능 ' + st.on.length.toLocaleString() + '대') +
+      tile('최근 3개월 판매', st.sold.length.toLocaleString(), '대', '') + '</div>',
+      { tools: (miss.length ? '<span class="v2-ref">참고</span>' : '') + '<button type="button" class="v2-btn" data-act="xlsxModel">엑셀 ↓</button>' });
+    h += sec('market', 2, '동급 대비', cv().info(), cv().tiles(co) + cv().card(co, null, chartW(1100, 9999)),
+      { peek: seg0 ? esc(segLabel(seg0)) + ' · ' + esc(S.model) + ' 전체(등급 무관)' : '' });
+    h += sec('matrix', 3, '시세표' + (st.gsel ? ' · ' + S.grade : ''), [['시세표', '판매중 호가 중앙값(만원)입니다. 칸을 누르면 그 조건으로 한 대 산정합니다. 판매중 5대 미만 칸은 비웁니다.']],
+      matrixCard(st), { tools: S.grade ? seg('mgrade', [['one', S.grade + '만'], ['all', '전체 등급']], VIEW.allGrades ? 'all' : 'one', '시세표 등급') : '' });
+    h += sec('grades', 4, '등급별', [['등급별', '판매중 기준입니다. 등급을 누르면 그 등급으로 바꿉니다. 판매중이 많은 20개 등급만 보여 줍니다(엑셀에는 전체).']], gradeCard(st));
+    h += sec('trend', 5, '시세 추세', [['시세 추세', TIP.trend], ['방향', '매주 수집이 4주 쌓이기 전에는 짧은 기간으로 보고 "짧음"을 붙입니다.']], trendCard(G));
     $('res').innerHTML = h;
+    $('res').classList.toggle('v2-rise', rise('model|' + S.mk + '|' + S.model));
+    condBar(null, null);
+    navSet([['판매중', onN.toLocaleString()], ['주간 판매율', mm && mm.rate_w != null ? (mm.rate_w * 100).toFixed(1) + '%' : '–'], ['시세지수', mm && mm.pidx != null ? Number(mm.pidx).toFixed(1) : '–']],
+      [['model', 1, '판매 현황'], ['market', 2, '동급 대비'], ['matrix', 3, '시세표'], ['grades', 4, '등급별', st.grades.length + '개'], ['trend', 5, '시세 추세']]);
     loadCurve(co);
   }
 
-  function matrixCard(st) {
-    var h = '<div class="card"><div class="v2-tools"><div class="card-title">시세표' + (st.gsel ? ' · ' + esc(S.grade) + ' 등급' : S.grade ? ' · 전체 등급' : '') +
-      ' <span class="hint">판매중 호가 중앙값(만원) · 칸을 누르면 그 조건으로 한 대 산정 · 5대 미만 칸은 비움</span></div>' +
-      (S.grade ? seg('mgrade', [['one', S.grade + '만'], ['all', '전체 등급']], VIEW.allGrades ? 'all' : 'one', '시세표 등급') : '') + '</div>';
-    return h + matrixTable(st, -1, -1) + '</div>';
-  }
-
+  function matrixCard(st) { return '<div class="card">' + matrixTable(st, -1, -1) + '</div>'; }   // 제목·등급 바꾸기는 섹션 머리(기획 v2.26)
   function matrixTable(st, yi, kj) {                         // yi·kj = 이 차의 연식 행·주행 열(강조, 없으면 -1)
     if (!st.years.length) return '<p class="v2-kv">판매중 매물이 없습니다.</p>';
     var h = '<div class="v2-tablewrap"><table class="t v2-mtx"><thead><tr><th>최초등록 \\ 주행</th>' +
@@ -1351,15 +1458,14 @@
   }
 
   function gradeCard(st) {
-    var h = '<div class="card"><div class="card-title">등급별 <span class="hint">판매중 기준 · 등급을 누르면 그 등급으로 바꿉니다</span></div>' +
-      '<div class="v2-tablewrap"><table class="t v2-tbl v2-gtbl"><thead><tr><th>등급</th><th class="num">판매중</th><th class="num">중앙 호가</th>' +
+    var h = '<div class="card"><div class="v2-tablewrap"><table class="t v2-tbl v2-gtbl"><thead><tr><th>등급</th><th class="num">판매중</th><th class="num">중앙 호가</th>' +
       '<th class="num">중위 연식</th><th class="num">중위 주행</th><th class="num">최근 판매</th></tr></thead><tbody>';
     st.grades.slice(0, 20).forEach(function (g) {
       h += '<tr><td><button type="button" class="v2-link" data-grade="' + esc(g.name) + '">' + esc(g.name) + '</button></td><td class="num">' + g.n +
         '</td><td class="num">' + man(g.med) + '</td><td class="num">' + g.year + '</td><td class="num">' + (g.km / 1e4).toFixed(1) + '만</td><td class="num">' + g.sold + '</td></tr>';
     });
     h += '</tbody></table></div>';
-    if (st.grades.length > 20) h += '<p class="v2-help">판매중이 많은 20개 등급만 보여 줍니다(엑셀에는 전체).</p>';
+    if (st.grades.length > 20) h += '<p class="v2-note">판매중 많은 20개 등급만 · 엑셀에는 전체</p>';
     return h + '</div>';
   }
 
@@ -1634,14 +1740,14 @@
     var pts = X.mi.series['전체|전체'] || [], last = null, crawls = X.mi.crawls || [];
     for (var i = pts.length - 1; i >= 0; i--) if (pts[i]['시세'] != null) { last = pts[i]; break; }
     var asOf = crawls.length ? crawls[crawls.length - 1].date : '';
-    $('asOf').textContent = asOf ? '데이터 기준 ' + dataDate(true) : '—';
+    $('asOf').textContent = asOf ? asOf.slice(5, 7) + '.' + asOf.slice(8, 10) + '(' + '일월화수목금토'.charAt(new Date(asOf + 'T00:00:00').getDay()) + ') 목록 기준' : '—';
     if (!last) return;
     var f1 = function (v) { return Number(v).toFixed(1); };
-    var h = '<span class="eyebrow">시장 · 7월 초 = 100</span><span>시세지수 <b>' + f1(last['시세']) + '</b></span>';
-    if (last['재고'] != null) h += '<span>재고지수 <b>' + f1(last['재고']) + '</b></span>';
-    h += last['시황'] != null ? '<span>시황지수 <b>' + f1(last['시황']) + '</b> ' + esc(last.label || '') + '</span>'
-      : '<span>시황지수 — <span style="color:var(--tx-3)">판매속도가 생기는 다음 수집부터</span></span>';
-    h += '<span style="color:var(--tx-3)">기준 ' + mmdd(last.date) + ' 목록</span><a class="v2-mlink" href="#/market">시장 시황 보기 →</a>';
+    var lab = last.label || '', tone = /강세/.test(lab) ? 'up' : /약세/.test(lab) ? 'dn' : '';
+    var h = '<span class="v2-tick" title="7월 초 = 100 · ' + mmdd(last.date) + ' 목록">시세지수<b>' + f1(last['시세']) + '</b></span>';
+    if (last['재고'] != null) h += '<span class="v2-tick">재고지수<b>' + f1(last['재고']) + '</b></span>';
+    if (last['시황'] != null) h += '<span class="v2-tick">시황지수<b>' + f1(last['시황']) + '</b>' + (lab ? '<i class="' + tone + '">' + esc(lab) + '</i>' : '') + '</span>';
+    h += '<a class="v2-mlink" href="#/market">시장 시황 →</a>';
     $('marketLine').innerHTML = '<div>' + h + '</div>';
   }
 
@@ -1667,6 +1773,7 @@
   }
   function applyMode() {                                     // 묶음 산정·환산 비율은 입력·결과 대신 각자의 화면
     var m = VIEW.mode;
+    pageHead();
     $('grid').hidden = m === 'batch' || m === 'rates';
     $('batch').hidden = m !== 'batch';
     $('ratesView').hidden = m !== 'rates';
@@ -1800,8 +1907,11 @@
   }
 
   function layout() {
-    $('app').innerHTML = '<div id="priceView"><div class="v2-mode">' + seg('mode', [['one', '한 대 산정'], ['model', '모델 요약'], ['batch', '묶음 산정'], ['rates', '⚙ 환산 비율']], VIEW.mode, '산정 방식') + '</div>' +
-      '<div class="v2-grid" id="grid"><aside class="card v2-input" id="inp" aria-label="대상 차 조건"></aside><section class="v2-result" id="res" aria-live="polite"></section></div>' +
+    $('app').innerHTML = '<div id="priceView"><div class="v2-phead"><div class="v2-ptl"><h1 class="v2-h1" id="pTitle">시세 산정</h1><div class="v2-psub" id="pSub"></div></div>' +
+      '<div class="v2-mode">' + seg('mode', [['one', '한 대 산정'], ['model', '모델 요약'], ['batch', '묶음 산정'], ['rates', '⚙ 환산 비율']], VIEW.mode, '산정 방식') + '</div></div>' +
+      '<div class="v2-grid" id="grid"><section class="v2-cond" id="inp" aria-label="대상 차 조건"></section>' +
+      '<div class="v2-rescol"><nav class="v2-snav" id="snav" aria-label="결과 목차" hidden></nav>' +
+      '<div class="v2-main"><div class="v2-condbar" id="condbar" hidden></div><section class="v2-result" id="res" aria-live="polite"></section></div></div></div>' +
       '<section class="v2-batch" id="batch" aria-label="묶음 산정" hidden></section>' +
       '<section class="v2-batch v2-rates" id="ratesView" aria-label="환산 비율 설정" hidden></section>' +
       '<div class="v2-mbar" id="mbar" hidden></div></div>' +
@@ -1813,9 +1923,15 @@
       var t = e.target, k = t.getAttribute('data-k');
       if (!k) return;
       if (k === 'rent' || k === 'sold') { S[k] = t.checked; changed(); return; }
-      if (k === 'km' || k === 'cost' || k === 'rate') { S[k] = t.value; changed(); return; }
+      if (k === 'km' || k === 'cost' || k === 'rate') {
+        S[k] = t.value;
+        if (k === 'km' && /^[\d,\s]+$/.test(t.value) && kmNum(t.value) != null) { S.km = String(kmNum(t.value)); t.value = kmNum(t.value).toLocaleString('ko-KR'); }   // 50000 → 50,000
+        changed();
+        return;
+      }
       if (k === 'pos') { setPos(+t.getAttribute('data-i'), t.value); renderInputs(); changed(); return; }
       S[k] = t.value;
+      if (k === 'grade' || k === 'trim') VIEW.carOpen = false;   // 다 고르면 한 줄 경로로 접는다(기획 v2.26 Q138)
       if (k === 'mk') { S.grp = ''; S.model = ''; S.grade = ''; S.trim = ''; S.ex = []; }
       if (k === 'grp') { S.model = ''; S.grade = ''; S.trim = ''; S.ex = []; }
       if (k === 'model') { S.grade = ''; S.trim = ''; S.ex = []; }
@@ -1828,6 +1944,9 @@
       var k = e.target.getAttribute('data-k');
       if (k === 'km' || k === 'cost' || k === 'rate') { S[k] = e.target.value; changed(); }
     });
+    inp.addEventListener('toggle', function (e) {            // 더 보기 펼침 상태 기억(다시 그려도 그대로) — toggle 은 거품이 없어 잡기 단계에서
+      if (e.target.classList && e.target.classList.contains('v2-more')) VIEW.moreOpen = e.target.open;
+    }, true);
     inp.addEventListener('keydown', function (e) {
       if (e.key !== 'Enter') return;
       if (e.target.id === 'condText') { e.preventDefault(); parseCond(); }
@@ -1839,6 +1958,8 @@
       var b = e.target.closest('button');
       if (!b) return;
       if (b.hasAttribute('data-need')) { focusNeed(b.getAttribute('data-need')); return; }
+      if (b.hasAttribute('data-info')) { infoSec(b.getAttribute('data-info'), b); return; }
+      if (b.hasAttribute('data-fold')) { foldSec(b.getAttribute('data-fold')); return; }
       var k = b.getAttribute('data-seg'), chipK = b.getAttribute('data-chip'), act = b.getAttribute('data-act'), v = b.getAttribute('data-v');
       if (k === 'sort') { VIEW.sort = v; compute(); return; }
       if (k === 'posx') { VIEW.posx = v; compute(); return; }
@@ -1867,7 +1988,9 @@
         return;
       }
       if (act === 'clearExtra') { S.items = S.items.filter(posIndex); renderInputs(); changed(); return; }
-      if (act === 'reset') { S = blank(); VIEW.all = false; VIEW.condWarn = []; VIEW.condOut = []; VIEW.nameText = ''; VIEW.nameMsg = ''; VIEW.nameCands = []; renderInputs(); changed(); return; }
+      if (act === 'reset') { S = blank(); VIEW.all = false; VIEW.condWarn = []; VIEW.condOut = []; VIEW.nameText = ''; VIEW.nameMsg = ''; VIEW.nameCands = []; VIEW.carOpen = false; VIEW.moreOpen = null; renderInputs(); changed(); return; }
+      if (act === 'carOpen') { VIEW.carOpen = true; renderInputs(); var f = $('inp').querySelector('[data-k="grade"]'); if (f) f.focus(); return; }
+      if (act === 'toCond') { goSec('top'); return; }
       if (act === 'example') { example(); return; }
       if (act === 'more') { VIEW.all = !VIEW.all; compute(); return; }
       if (act === 'share') {
@@ -1879,6 +2002,7 @@
     $('app').querySelector('.v2-mode').addEventListener('click', clicks);
     inp.addEventListener('click', clicks);
     res.addEventListener('click', clicks);
+    $('condbar').addEventListener('click', clicks);              // 붙는 조건 바(결과 밖)의 '조건 바꾸기'
     res.addEventListener('change', function (e) {
       var id = e.target.getAttribute('data-ex');
       if (!id) return;
@@ -1913,6 +2037,20 @@
       tip.style.top = (b.bottom + 6) + 'px';
     });
     res.addEventListener('focusout', function (e) { if (e.target.getAttribute && e.target.getAttribute('data-tip')) tip.hidden = true; });
+    document.addEventListener('click', function (e) {          // 카드 설명 i(묶음 산정 — batch.js 의 data-ib): 같은 카드 안 .v2-info 를 펼치고 접는다
+      var b = e.target.closest && e.target.closest('[data-ib]'), p = b && b.closest('.card') && b.closest('.card').querySelector('.v2-info');
+      if (!p) return;
+      p.hidden = !p.hidden;
+      b.setAttribute('aria-expanded', String(!p.hidden));
+    });
+    $('snav').addEventListener('click', function (e) {          // 오른쪽 목차 — 누르면 그 섹션으로(접힌 섹션은 펼치고)
+      var b = e.target.closest('[data-go]');
+      if (b) goSec(b.getAttribute('data-go'));
+    });
+    function hdr() { var hd = document.querySelector('header'); document.documentElement.style.setProperty('--hdr', (hd ? hd.offsetHeight : 54) + 'px'); }   // 좁은 화면 가로 목차가 붙을 높이
+    hdr();
+    window.addEventListener('scroll', function () { if (!spyRaf) spyRaf = requestAnimationFrame(spy); }, { passive: true });
+    window.addEventListener('resize', function () { hdr(); spy(); });
     $('mbar').addEventListener('click', function (e) {
       var b = e.target.closest('button');
       if (!b) return;
