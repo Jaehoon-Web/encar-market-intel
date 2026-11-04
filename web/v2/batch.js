@@ -298,7 +298,10 @@
         '수리비': r.cost || 0, '연료': fuelOf(G, r.best.model, r.grade) };
       r.R = ENG.estimateCar(G, r.car, { sold: true });
       if (!r.R) r.why.push('비교 매물 5대 미만');
-      else r.lp = ENG.logParts ? ENG.logParts(G, r.car) : null;   // 같은 모델끼리 값 차이를 항목별로 나눌 때(기획 v2.29)
+      else {
+        r.lp = ENG.logParts ? ENG.logParts(G, r.car) : null;    // 같은 모델끼리 값 차이를 항목별로 나눌 때(기획 v2.29)
+        r.fp = ENG.factoryPrice ? ENG.factoryPrice(G, r.car) : null;   // 출고가(사용자 요청 11-04)
+      }
     }
     function needsCheck(r) { return !!r.best && ((r.conf === 'mid' || r.conf === 'low') || r.gconf === 'low' || yearOut(r)); }
     function yearOut(r) {                                    // 등록연도가 매칭한 모델 기간(±1년) 밖 — 다른 세대·다른 모델일 수 있다. 직접 고르면 그대로 쓴다
@@ -866,7 +869,8 @@
         h += '<div class="bt-dt">기준 차(' + esc(carName(rf)) + ')보다 <b class="' + (R.price > rf.R.price ? 'up' : 'dn') + '">' + signMan(R.price - rf.R.price) + '만</b></div>' +
           '<p class="v2-note">다른 모델끼리는 조건 차이로 나누지 않습니다</p>';
       } else h += '<div class="bt-dt">같은 모델이 이 차 하나라 비교할 평균이 없습니다</div><p class="v2-note">같은 모델의 다른 차를 ★ 기준 차로 고르면 그 차 대비 차이가 나옵니다</p>';
-      h += '</div><div class="bt-dk">' + kv('추정 범위', man(R.range[0]) + ' ~ ' + man(R.range[1]) + '만') + kv('비교 매물', R.n + '대 · ' + esc(R.stepName || '')) +
+      h += '</div><div class="bt-dk">' + kv('추정 범위', man(R.range[0]) + ' ~ ' + man(R.range[1]) + '만') +
+        (r.fp ? kv('출고가', man(r.fp.op) + '만 · 잔존율 ' + Math.round(R.est / r.fp.op * 100) + '%' + (r.fp.exact ? '' : ' (등급 기준)')) : '') + kv('비교 매물', R.n + '대 · ' + esc(R.stepName || '')) +
         kv('환산', man(R.converted) + '만 · ' + R.rate + '% · ' + esc(R.rateSource || '')) + (r.cost ? kv('수리비', '−' + man(r.cost) + '만 반영') : '') +
         (v ? kv('판매 가격', man(r.ask) + '만 — <span class="bt-v ' + v.k + '">' + v.label + '</span> 시세 대비 ' + signMan(v.d) + '만(' + sgn(v.p) + ')') : '') +
         '<div class="bt-dfix"><span>매칭</span>' + modelCell(r, i) + gradeCell(r, i) + '</div></div></div>' +
@@ -883,6 +887,9 @@
       var add = function (sec, name, f) { out.push({ sec: sec, name: name, vals: cars.map(f) }); };
       add('가격', '추정 시세', function (r) { return [man(r.R.price) + '만', 'big' + (many && r.R.price === mn ? ' mn' : many && r.R.price === mx ? ' mx' : '')]; });
       add('가격', '범위(가운데 50%)', function (r) { return [man(r.R.range[0]) + ' ~ ' + man(r.R.range[1])]; });
+      if (cars.some(function (r) { return r.fp; })) add('가격', '출고가 · 잔존율', function (r) {
+        return r.fp ? [man(r.fp.op) + '만 · ' + Math.round(r.R.est / r.fp.op * 100) + '%' + (r.fp.exact ? '' : '(등급)')] : ['—', 'dim'];
+      });
       if (conv) {
         add('가격', '환산가', function (r) { return [man(r.R.converted) + '만', 'b']; });
         add('가격', '환산 비율', function (r) { return [r.R.rate + '%']; });
@@ -1088,6 +1095,7 @@
       var vs = verify(), hasAsk = rows.some(function (r) { return r.ask != null; });
       if (vs) calc = calc.concat(['실제 낙찰가(만원)', '환산가 오차(%)', '실제 환산 비율(%)']);
       if (hasAsk) calc = calc.concat(['판매 가격(만원)', '시세 대비(만원)', '시세 대비(%)', '판정']);
+      calc = calc.concat(['출고가(만원)', '잔존율(%)']);
       var CONF = { high: '확실', mid: '확인 권장', low: '확인 필요', fixed: '직접 고름', none: '못 찾음' };
       var base = location.href.split('#')[0], out = [head.concat(calc)];
       rows.forEach(function (r) {
@@ -1103,6 +1111,7 @@
         if (vs) line.push(r.actual != null ? r.actual : null, R && r.actual != null ? +((R.converted - r.actual) / r.actual * 100).toFixed(1) : null,
           R && r.actual != null ? +((1 - (r.actual + (r.cost || 0)) / R.est) * 100).toFixed(1) : null);
         if (hasAsk) { var vd = verdict(r); line.push(r.ask != null ? r.ask : null, vd ? Math.round(vd.d) : null, vd ? +vd.p.toFixed(1) : null, vd ? vd.label : null); }
+        line.push(R && r.fp ? Math.round(r.fp.op) : null, R && r.fp ? Math.round(R.est / r.fp.op * 1000) / 10 : null);
         out.push(line);
       });
       if (T.over) (T.header ? T.table.slice(1) : T.table).slice(LIMIT).forEach(function (cells) {
@@ -1152,7 +1161,7 @@
       if (vs) info.push(['실제 건 비교', vs.n + '대 · 오차 중위(절댓값) ' + vs.mdape.toFixed(1) + '% · 치우침 ' + sgn(vs.bias) + ' · ±10% 안 ' + Math.round(vs.within * 100) + '%'],
         ['실제로 구한 환산 비율', '중위 ' + vs.imp.toFixed(1) + '% (지금 쓰는 비율 중위 ' + vs.used.toFixed(1) + '%) — 실제 비율 = 1 − (낙찰가 + 수리비) ÷ 수리비 빼기 전 추정 시세']);
       var widths = head.map(function () { return 14; }).concat([10, 12, 20, 18, 14, 10, 12, 11, 30, 12, 8, 10, 10, 10, 10, 12, 12, 12, 10, 12, 16, 7, 9, 22, 24, 40], vs ? [14, 12, 14] : [],
-        hasAsk ? [14, 14, 12, 12] : []);
+        hasAsk ? [14, 14, 12, 12] : [], [12, 10]);
       var G = groupList(), gRows = [['제조사', '세부모델', '대수', '계산', '추정 시세 합계(만원)', '환산가 합계(만원)', '평균 시세(만원)', '가장 싼(만원)', '가장 비싼(만원)', '평균 최초등록', '평균 주행(km)']];
       G.forEach(function (g) {
         var n = g.done.length;

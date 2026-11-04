@@ -169,6 +169,9 @@ ok(R && R.price > 500 && R.price < 6000 && R.n >= 5 && ['A', 'B', 'C'].includes(
   const a = eng.logParts(G, base), b = eng.logParts(G, Object.assign({}, base, { '등록연월': 201903, '주행km': 120000 }));
   ok(a && b && b['차령'] < a['차령'] && b['주행'] < a['주행'] && a.colorKnown && !a.condKnown, '보정 위치(logParts): 1년 더 오래되고 6만km 더 탄 차는 차령·주행이 음수 쪽',
     JSON.stringify([a, b]));
+  const f1 = eng.factoryPrice(G, base), f2 = eng.factoryPrice(G, Object.assign({}, base, { '세부등급': '' })), f3 = eng.factoryPrice(G, Object.assign({}, base, { '모델': '없는 모델' }));
+  ok(f1 && f1.exact && f1.n >= 3 && f1.op >= f1.lo && f1.op <= f1.hi && f1.op > 2000 && f1.op < 5000 && f2 && !f2.exact && f3 === null,
+    `출고가(factoryPrice): 같은 세부등급·등록연도 ${f1 && f1.op}만(${f1 && f1.n}대) · 세부등급 없으면 등급 기준 ${f2 && f2.op}만 · 없는 모델은 없음`, JSON.stringify([f1, f2, f3]));
 }
 const before = eng.conversionRate(1500, 4, '현대', '더 뉴 그랜저 IG', '가솔린');
 RS.apply(rates, { rev: 1, cells: rates.rates.map(r => r.map(() => null)), models: [{ '제조사': '현대', '모델': '더 뉴 그랜저 IG', '연료': '', '비율': 33.3 }] });

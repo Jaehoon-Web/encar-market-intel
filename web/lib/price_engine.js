@@ -293,7 +293,30 @@
         '등급': feOf(G.cf, car['등급'], car['세부등급'] || ''), '성능': perf ? Math.log(1 - perf['감가율'] / 100) : 0, condKnown: !!perf };
     }
 
-    return { group: group, prepare: prepare, estimate: estimate, estimateCar: estimateCar, conversionRate: conversionRate, damage: damage, logParts: logParts };
+    // 출고가(신차 소비자가, 만원) — 같은 세부모델 · 등급 · 세부등급 · 등록연도 매물 출고가의 가운데 값(3대 이상).
+    // 모자라면 세부등급(연도 무관) → 등급 · 등록연도 → 등급 순으로 넓힌다. 같은 세부등급 안 출고가는 ±3% 안이고 연식마다 오른다(11-04 실측).
+    // 시세 계산에는 쓰지 않는다(시세 박스의 출고가 · 잔존율 표시용, 사용자 요청 11-04).
+    function factoryPrice(grp, car) {
+      var M = own(grp.models, car['모델']), F = grp.F, fi = grp.fi;
+      if (!M || fi.op == null || !car['등록연월']) return null;
+      var y = Math.floor(car['등록연월'] / 100), g = car['등급'], t = car['세부등급'] || '';
+      var rows = F.rows.filter(function (r) { return r[fi.m] === M.idx && r[fi.op] > 0 && F.grades[r[fi.g]] === g; });
+      var trimOf = function (r) { return F.trims[r[fi.t]] || ''; }, yearOf = function (r) { return Math.floor(r[fi.reg] / 100); };
+      var one = t || rows.every(function (r) { return trimOf(r) === ''; }), lv = t ? '같은 세부등급' : '같은 등급';   // 세부등급이 없는 등급이면 등급이 곧 같은 차
+      var tiers = [[one, lv + ' · ' + y + '년 등록', function (r) { return trimOf(r) === t && yearOf(r) === y; }],
+        [one, lv, function (r) { return trimOf(r) === t; }],
+        [true, '같은 등급 · ' + y + '년 등록(세부등급 무관)', function (r) { return yearOf(r) === y; }],
+        [true, '같은 등급(세부등급 무관)', function () { return true; }]];
+      for (var i = 0; i < tiers.length; i++) {
+        if (!tiers[i][0]) continue;
+        var v = rows.filter(tiers[i][2]).map(function (r) { return r[fi.op]; }).sort(function (a, b) { return a - b; });
+        if (v.length >= 3) return { op: median(v), n: v.length, basis: tiers[i][1], exact: i < 2, lo: v[Math.floor((v.length - 1) * 0.1)], hi: v[Math.ceil((v.length - 1) * 0.9)] };
+      }
+      return null;
+    }
+
+    return { group: group, prepare: prepare, estimate: estimate, estimateCar: estimateCar, conversionRate: conversionRate, damage: damage, logParts: logParts,
+      factoryPrice: factoryPrice };
   }
 
   var api = { create: create };

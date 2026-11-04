@@ -599,3 +599,15 @@ header .adm-link:hover, header .adm-link.on { color: var(--tx-1); background: #f
   .bt-crow .v b, .bt-crow.g .v b { font-size: 14px; }
   .bt-ghead { gap: 6px 16px; }
 }
+
+/* 시세 박스 출고가 · 잔존율(사용자 요청 11-04) */
+.v2-hchips .v2-hfp { cursor: help; }
+.v2-hchips .v2-hfp small { font-size: 11px; color: var(--tx-3); margin-left: 2px; }
+
+
+/* 휴대폰 폭: 화면 위 산정 방식 탭 · 묶음 목록 정렬 단추가 화면보다 넓어 옆으로 밀리던 것(11-04 점검) */
+@media (max-width: 639px) {
+  .v2-phead .v2-mode .segmented button { padding: 10px 11px !important; }
+  .v2-batch .v2-sectools { max-width: 100%; }
+  .v2-batch .v2-sectools .segmented { flex-wrap: wrap; max-width: 100%; }
+}
