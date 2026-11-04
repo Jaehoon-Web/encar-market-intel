@@ -7,6 +7,7 @@
  * 확신(conf): high · mid · low — 묶음 화면에서 low 는 노랗게 표시하고 후보 중에서 고르게 한다
  * 이름 체계(기획 v2.23): 사이트 이름은 경매장 4단계 표기다. 엑셀에는 매물 표기도 오므로(Q103) 세부모델마다 붙은 매물 원래 이름(index 의 en)을
  * 별칭 후보로 같이 맞추고 결과는 경매 이름으로 돌려준다. 등급도 그 조합의 비교 매물에 적힌 매물 등급 글(파일 머리말 enc)과 함께 맞춘다.
+ * 같은 원래 이름이 해에 따라 두 세부모델로 나뉘면(2020년 '더 뉴 QM6' = 더 뉴QM6 86% · 뉴 QM6 14%) 다시 고를 때 비교 매물의 그 해 나뉨을 더한다.
  *
  *   var nm = NameMatch.create(index);                               // comps/index.json
  *   nm.model('올뉴투싼 2.0 디젤', 2018)
@@ -68,7 +69,7 @@
   }
 
   function create(index) {
-    var makers = [], models = [], groupNames = {};
+    var makers = [], models = [], groupNames = {}, srcNames = {}, srcMemo = {}, encMemo = {};
     function nameOf(s, alt) { var c = compact(s); return { c: c, s: spaced(s), latin: !/[가-힣]/.test(c), alt: !!alt }; }
     index.makers.forEach(function (mk) {
       var al = [mk.name].concat((mk.name.match(/[^()]+/g) || []), MAKER_EXTRA[mk.name] || []).map(compact).filter(function (a) { return a.length >= 2; });
@@ -80,7 +81,8 @@
         g.models.forEach(function (m) {
           models.push(entry(mk.name, g, m, g.name, m.name, m.n, m.y0, m.y1));
           (m.en || []).forEach(function (e) {                          // 매물 원래 이름 [매물 모델그룹, 매물 모델, 대수, 가까운 이름 대수, 연도 2%, 98%]
-            if (!e[1] || (compact(e[1]) === compact(m.name) && compact(e[0] || '') === gc)) return;
+            if (e[1] && compact(e[1]).length >= 2) srcNames[compact(e[1])] = spaced(e[1]);
+            if (!e[1] ||(compact(e[1]) === compact(m.name) && compact(e[0] || '') === gc)) return;
             if (e[0] && !/^기타/.test(compact(e[0]))) groupNames[compact(e[0])] = true;
             models.push(entry(mk.name, g, m, e[0] || g.name, e[1], e[2], e[4], e[5]));
           });
@@ -96,9 +98,11 @@
         names.push(nameOf(cut, true));
       }
       var rest = up(mname).replace(cut, ' ');                       // 모델그룹 이름을 뺀 나머지 = 세부모델 표시
+      var gens = (rest.match(/\d+\s*세대/g) || []).map(compact);    // (3세대)는 '3세대' 한 낱말로 — 다른 숫자(i4 의 4 · 20d 의 2)에 걸리지 않게
+      rest = rest.replace(/\d+\s*세대/g, ' ');
       var rc = compact(rest), pf = prefixOf(rc);
       if (pf) rest = rest.replace(new RegExp(pf.split('').join('\\s*')), ' ');
-      var core = words(rest).filter(function (w) { return !/^(?:HEV|PHEV|EV)$/.test(w) && !fuelOf(w); });
+      var core = gens.concat(words(rest).filter(function (w) { return !/^(?:HEV|PHEV|EV)$/.test(w) && !fuelOf(w); }));
       return { maker: maker, group: g.name, model: m.name, file: g.file, n: n, y0: y0, y1: y1,
         names: names, prefix: pf, core: core, fuel: /하이브리드|HEV/.test(up(mname)) ? (/PHEV|플러그인/.test(up(mname)) ? 'PHEV' : 'HEV')
           : (/일렉트릭|(^|[^A-Z])EV([^A-Z]|$)|전기/.test(up(mname)) ? 'EV' : null),
@@ -168,7 +172,16 @@
       Object.keys(top).forEach(function (k) { list.push(top[k]); });
       list.sort(function (a, b) { return b.score - a.score; });
       if (!list.length) return { best: null, conf: 'none', cands: [] };
-      return finish(list, year);
+      var res = finish(list, year);
+      res.src = srcOf(inp);
+      return res;
+    }
+    function srcOf(inp) {                                    // 입력에 든 가장 긴 매물 원래 모델 이름(띄어쓰기 없앤 꼴) — 영문·숫자 이름은 낱말 그대로(GV70 · XE · i4)
+      var best = '';
+      Object.keys(srcNames).forEach(function (c) {
+        if (c.length > best.length && (/[가-힣]/.test(c) ? inp.c.indexOf(c) >= 0 : (' ' + inp.s + ' ').indexOf(' ' + srcNames[c] + ' ') >= 0)) best = c;
+      });
+      return best || null;
     }
     function finish(list, year) {
       var best = list[0], next = list[1], gap = next ? best.score - next.score : 9;
@@ -179,14 +192,35 @@
     }
 
     // 세부모델 후보가 비슷하면(2.5점 안) 등급명까지 맞춰 보고 다시 고른다 — 그 모델그룹 파일이 있어야 한다
+    // 입력에 원래 모델 이름이 그대로 있으면 같은 이름 · 같은 등록 연도 비교 매물이 후보끼리 어떻게 나뉘었는지도 더한다(연도 범위만으로는 못 가르는 바뀐 해)
     function refine(res, text, year, grpOf) {
       if (!res.best || res.cands.length < 2) return res;
-      var top = res.best.score, list = res.cands.map(function (c) {
-        var x = Object.assign({}, c), g = c.score >= top - 2.5 ? grpOf(c.file) : null;
+      var top = res.best.score, gs = [], list = res.cands.map(function (c, i) {
+        var x = Object.assign({}, c), g = gs[i] = c.score >= top - 2.5 ? grpOf(c.file) : null;
         if (g) { var gr = grade(g, c.model, text); if (gr && gr.score > 0) { x.score += 0.5 * gr.score; x.why = c.why.concat(['등급']); } }
         return x;
-      }).sort(function (a, b) { return b.score - a.score; });
+      });
+      var src = res.src, cut = src && PREFIX.some(function (p) { return srcNames[p + src]; });   // 'QM6' 는 '더 뉴 QM6' 를 줄여 쓴 것일 수도 — 그때는 안 쓴다
+      if (src && year && !cut) {
+        var cnt = function (y) { return list.map(function (x, i) { return gs[i] ? srcCount(gs[i], x.file, x.model, src, y) : 0; }); };
+        var sum = function (a) { return a.reduce(function (s, v) { return s + v; }, 0); }, c = cnt(year);
+        if (!sum(c)) { var a = cnt(year - 1), b = cnt(year + 1); c = a.map(function (v, i) { return v + b[i]; }); }   // 그 해가 없으면 앞뒤 해
+        var n = sum(c);
+        if (n) list.forEach(function (x, i) { if (c[i]) { x.score += 1.5 * c[i] / n; x.why = x.why.concat(['원래 이름 ' + Math.round(c[i] / n * 100) + '%']); } });
+      }
+      list.sort(function (a, b) { return b.score - a.score; });
       return finish(list, year);
+    }
+    function srcCount(grp, file, modelName, src, year) {     // 그 세부모델 비교 매물 중 원래 모델 이름이 src 이고 등록 연도가 year 인 대수
+      var M = grp.models[modelName], F = grp.F, fi = grp.fi;
+      if (!M || fi.en == null || !F.enc) return 0;
+      var key = file + '|' + M.idx + '|' + src, by = srcMemo[key];
+      if (!by) {
+        var ec = encMemo[file] || (encMemo[file] = F.enc.map(function (e) { return compact(String(e).split('|')[0]); }));
+        by = srcMemo[key] = {};
+        F.rows.forEach(function (r) { if (r[fi.m] === M.idx && ec[r[fi.en]] === src) { var y = Math.floor(r[fi.reg] / 100); by[y] = (by[y] || 0) + 1; } });
+      }
+      return by[year] || 0;
     }
 
     // 등급·세부등급: 그 세부모델에 실제로 있는 조합 중에서 고른다
