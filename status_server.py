@@ -12,7 +12,7 @@ status_server.py — 크롤링 파이프라인 진행 상황을 브라우저로 
   - 운영 사이트 데이터 날짜(meta.json collectedDate)
 /api/status 는 같은 내용을 JSON으로 준다.
 """
-import argparse, datetime as dt, glob, html, json, os, re, time, urllib.request
+import argparse, datetime as dt, glob, html, json, os, re, subprocess, time, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 try:
@@ -125,6 +125,15 @@ def site_date():
     return _site_cache["v"]
 
 
+def unpushed():
+    """아직 GitHub에 안 올라간 커밋 수(모르면 None) — push가 실패한 회차라도 감시 작업이 나중에 올렸는지 본다"""
+    try:
+        r = subprocess.run(["git", "rev-list", "--count", "@{u}..HEAD"], cwd=ROOT, capture_output=True, text=True, timeout=5)
+        return int(r.stdout.strip()) if r.returncode == 0 else None
+    except Exception:
+        return None
+
+
 def status():
     logs = sorted(glob.glob(os.path.join(LOGDIR, "auto_*.log")), key=os.path.getmtime)
     if not logs:
@@ -153,7 +162,8 @@ def status():
         "index": has(r"✔ 시황 지수"),
         "comps": has(r"✔ 비교 매물 파일"),
         "build": has(r"✔ 사이트 빌드"),
-        "deploy": has(r"✔ git push") or has(r"커밋할 변경 없음"),
+        "deploy": has(r"git push 완료|올릴 커밋 없음") or (has(r"▶ git add") and (not has(r"git push (실패|시간 초과|중 오류)") and has(r"커밋할 변경 없음")
+                                                                              or unpushed() == 0 and finished)),   # git_push.py 문구는 ✔ 없이 남는다 · 실패해도 감시 작업이 나중에 올렸으면 완료
     }
     started_flags = {
         "s1": has(r"stage=1"), "s2": has(r"stage=2"), "s3": has(r"stage=3"),
