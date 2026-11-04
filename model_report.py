@@ -335,7 +335,8 @@ def low_flags():
         for r in tg.itertuples():
             t = {"등급": r.등급, "세부": r.세부, "age": r.age, "km": r.km, "rent": r.rent,
                  "color": r.색상계열 if r.색상계열 in PE.COLORS or r.색상계열 == "흰색·진주" else None,
-                 "dep": r.dep, "perf": float(r.성능등급), "exclude_id": r.Index, "carkey": r.차키 if isinstance(r.차키, str) else None}
+                 "items": PE.Cond.from_names(PE.damage_names(r.손상부위)), "dv": r.dv, "se": r.se, "us": r.us,   # 기록부 부위(기획 v2.32) · 구동·인승·용도
+                 "exclude_id": r.Index, "carkey": r.차키 if isinstance(r.차키, str) else None}
             res = PE.estimate_one(G, t)
             if res is None:
                 continue
