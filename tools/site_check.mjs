@@ -202,8 +202,14 @@ ok(R && R.price > 500 && R.price < 6000 && R.n >= 5 && ['A', 'B', 'C'].includes(
   ok(RF && RF.repairAuto === 55 && Math.abs(RF.price - (C.price - 55)) < 1e-6 && Math.abs(P.D - CT.hist([{ part: '프론트 패널', status: '판금' }], P.base).D) < 1e-12 && P.D > 0.02 && P.D < 0.12,
     `수리필요 수리비(후드 30 + 앞범퍼 25 = ${RF && RF.repairAuto}만) · 프론트 패널 판금 감가 ${(P.D * 100).toFixed(2)}%(표와 같음)`, JSON.stringify([RF && RF.repairAuto, P && P.D]));
   // 환산가(v2.33): 기록부를 넣으면 무사고 시세 × (1 − 경매 기준 감가) × (1 − 환산 비율) − 수리비, 미상은 소매 감가 그대로
-  ok(P.convD > 0 && Math.abs(P.converted - (P.base * (1 - P.convD) * (1 - P.rate / 100) - P.repair)) < 1e-6 && U.convD === U.D && C.convD === 0,
+  ok(P.convD > 0 && Math.abs(P.converted - (P.base * (1 - P.convD) * (1 - P.rate / 100) - P.repairConv)) < 1e-6 && U.convD === U.D && C.convD === 0,
     `환산가 사고 감가 — 프론트 패널 판금 경매 기준 ${(P.convD * 100).toFixed(1)}%(소매 ${(P.D * 100).toFixed(1)}%) · 미상은 소매와 같음`, JSON.stringify([P.convD, P.D, U.convD, U.D]));
+  // 환산가 수리비(Q261): 소매 시세는 수리필요 수리비를 다 빼고, 환산가는 반영 몫만 · 직접 입력 수리비는 둘 다 다 뺀다
+  const sh = CT.repairShare(), RM = at({ items: [{ part: '후드', status: '수리필요' }] }), RM2 = eng.estimateCar(G, Object.assign({}, car, { '상태': { items: [{ part: '후드', status: '수리필요' }] }, '수리비': 40 }), { sold: true });
+  ok(sh > 0 && sh < 100 && RF.repairShare === sh && Math.abs(RF.repairConv - 55 * sh / 100) < 1e-9 && Math.abs(RF.price - (C.price - 55)) < 1e-6 &&
+     Math.abs(RF.converted - (RF.base * (1 - RF.convD) * (1 - RF.rate / 100) - RF.repairConv)) < 1e-6 && RF.converted > C.converted - 55 &&
+     RM && RM2 && Math.abs((RM.converted - RM2.converted) - 40) < 1e-6 && Math.abs((RM.price - RM2.price) - 40) < 1e-6,
+    `환산가 수리비 — 수리필요 55만 중 ${sh}%(${RF && RF.repairConv}만)만 빼고, 직접 입력 40만은 다 뺌 · 소매 시세는 55만 다 뺌`, JSON.stringify([sh, RF && RF.repairConv, RM && RM.converted, RM2 && RM2.converted]));
 }
 {                                                            // 감가 표 구조(v2.33): 차값이 높으면 사고 차 값도 높다 · 손상을 더하거나 판금→교환이면 값이 오르지 않는다
   const heavy = [{ part: '프론트 패널', status: '교환' }, { part: '크로스 멤버', status: '교환' }, { part: '인사이드 패널', side: '좌', status: '판금' },

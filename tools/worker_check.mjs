@@ -147,6 +147,12 @@ r = await ccall(env, 'PUT', { password: '팀비번-2026', rev: 1, by: '김팀원
   auction: { band: { '외판': [0.5, 1, 1.2, 1.4] } } });
 ok(r.status === 200 && r.body.team.rev === 2 && r.body.team.band['골격'][2] === 0.8 && r.body.team.order[3] === 0.9 && r.body.team.auction.band['외판'][0] === 0.5 &&
    r.body.team.log[0].what.some(w => /곳 배수/.test(w)) && r.body.team.log[0].what.some(w => /경매 차값 배수/.test(w)), '차값 · 곳 배수 · 경매 감가 저장 → 2판(v2.33)', r.body);
+r = await ccall(env, 'PUT', { password: '팀비번-2026', rev: 2, by: '김팀원', repair: { '환산반영': 150 } });
+ok(r.status === 400 && /0~100/.test(r.body.error), '환산가에 빼는 수리비 몫 범위 밖 → 400(Q261)', r.body);
+r = await ccall(env, 'PUT', { password: '팀비번-2026', rev: 2, by: '김팀원', band: { '골격': [0.9, 1, 0.8, 0.8] }, order: [1, 1, 1, 0.9, 0.8, 0.6],
+  auction: { band: { '외판': [0.5, 1, 1.2, 1.4] } }, repair: { '환산반영': 30.4 } });
+ok(r.status === 200 && r.body.team.rev === 3 && r.body.team.repair['환산반영'] === 30 && r.body.team.log[0].what.join() === '환산가 반영 비율 → 30%',
+   '환산가에 빼는 수리비 몫 저장 → 3판(정수 · 변경 기록 한 줄, Q261)', r.body);
 
 console.log('[이용 통계 기록 /api/ev (기획 v2.28)]');
 const U = 'abcdefgh12345678', SI = 'session000000001';

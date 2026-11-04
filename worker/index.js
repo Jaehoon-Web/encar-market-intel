@@ -203,6 +203,10 @@ function buildCond(cur, body, base, now) {
       const n = Number(k in r ? r[k] : base.repair[k]);
       if (!Number.isFinite(n) || n < 1 || n > 5) throw new Error('수입 배수는 1~5 사이로 넣어 주세요');
       repair[k] = Math.round(n * 10) / 10;
+    } else if (k === '환산반영') {                                                  // 환산가에 빼는 수리필요 수리비 몫(%, Q261)
+      const n = Number(k in r ? r[k] : base.repair[k]);
+      if (r[k] === '' || r[k] === null || !Number.isFinite(n) || n < 0 || n > 100) throw new Error('환산가 반영 비율은 0~100(%) 사이로 넣어 주세요');
+      repair[k] = Math.round(n);
     } else repair[k] = wonIn(k in r ? r[k] : base.repair[k], '수리비 ' + k);
   });
   const prev = cur || { rows: base.rows, once: base.once, repair: base.repair, band: base.band, order: base.order, auction: base.auction && { count: base.auction.count, band: base.auction.band, age: base.auction.age } }, what = [];
@@ -221,7 +225,8 @@ function buildCond(cur, body, base, now) {
   }
   Object.keys(repair).forEach(k => {
     if (k === 'outside') Object.keys(repair.outside).forEach(c => { if (((prev.repair || {}).outside || {})[c] !== repair.outside[c]) what.push('수리비 ' + c + ' → ' + repair.outside[c] + '만'); });
-    else if ((prev.repair || {})[k] !== repair[k]) what.push('수리비 ' + k + ' → ' + repair[k] + (k === '수입배수' ? '배' : '만'));
+    else if (((prev.repair || {})[k] === undefined ? base.repair[k] : prev.repair[k]) !== repair[k])
+      what.push(k === '환산반영' ? '환산가 반영 비율 → ' + repair[k] + '%' : '수리비 ' + k + ' → ' + repair[k] + (k === '수입배수' ? '배' : '만'));
   });
   if (!what.length) throw new Error('바뀐 것이 없습니다');
   const rev = (cur ? cur.rev : 0) + 1, note = str(body.note, 200);

@@ -284,9 +284,11 @@
       var rp = CT && st ? CT.repair(st.items, !!car['수입']) : { sum: 0, lines: [] }, man0 = +(car['수리비'] || 0), fix = man0 + rp.sum;
       r.repairAuto = rp.sum; r.repairLines = rp.lines; r.repairManual = man0;   // 수리필요 자동 + 직접 입력(Q230)
       r.repair = fix; r.price = r.est - fix; r.range = [r.lo - fix, r.hi - fix];
+      r.repairShare = CT ? CT.repairShare() : 100;
+      r.repairConv = man0 + rp.sum * r.repairShare / 100;                  // 환산가: 직접 입력은 다, 수리필요 표준 수리비는 반영 몫만(Q261)
       var da = CT && st ? CT.auctionD(st.items || [], r.base, yrs) : null;
       r.convD = da == null ? r.D : da;                                       // 환산가의 사고 감가: 경매 기준(기록부를 넣었을 때), 미상은 소매와 같게(v2.33)
-      r.rate = cv.rate; r.rateSource = cv.source; r.converted = r.base * (1 - r.convD) * (1 - cv.rate / 100) - fix;
+      r.rate = cv.rate; r.rateSource = cv.source; r.converted = r.base * (1 - r.convD) * (1 - cv.rate / 100) - r.repairConv;
       return r;
     }
 

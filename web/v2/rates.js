@@ -152,7 +152,7 @@
         '" aria-label="' + esc(name) + '"><small>' + (team ? '초기 ' + esc(b) : '') + '</small></td>';
       return '<td class="' + (team ? 'is-team' : '') + '"><b>' + (val == null ? '단계 기본' : esc(f1u(val, unit))) + '</b><small>' + (team ? '초기 ' + esc(b) : '') + '</small></td>';
     }
-    function f1u(v, unit) { return unit === '%' ? (Math.round(v * 10) / 10).toFixed(1) + '%' : unit === '배' ? v + '배' : unit === '×' ? '×' + (+v).toFixed(2) : Math.round(v) + '만'; }
+    function f1u(v, unit) { return unit === '%' ? (Math.round(v * 10) / 10).toFixed(1) + '%' : unit === '배' ? v + '배' : unit === '×' ? '×' + (+v).toFixed(2) : unit === 'p' ? Math.round(v) + '%' : Math.round(v) + '만'; }
     function condCard() {
       var C = CD.edit || condCur(), base = ctx.cond.base, t = CD.team;
       var h = '<div class="card" id="condCard"><div class="card-title">기록부 감가 · 수리비 표 — 팀 공용 <span class="hint">교환 · 판금은 1곳당 % · 수리필요는 수리비(만원) · 초기값은 팔린 차 중심의 매물 호가 차이(' +
@@ -180,7 +180,9 @@
         h += '<tr><td><b>기록부 밖 · ' + esc(c) + '</b></td>' + cdCell(c, C.repair.outside[c], base.repair.outside[c], '만', 'data-cdq="' + c + '"') + '</tr>';
       });
       h += '<tr><td><b>수입차 배수</b></td>' + cdCell('수입차 배수', C.repair['수입배수'], base.repair['수입배수'], '배', 'data-cdp="수입배수"') + '</tr>';
-      h += '</tbody></table></div><p class="v2-help">기계 결함(누유 등)은 한 대 산정의 \'예상 수리비\' 칸에 직접 넣습니다(자동 수리비에 더함).</p></div></div>';
+      if (base.repair['환산반영'] != null) h += '<tr><td><b>환산가에 빼는 몫</b></td>' + cdCell('환산가에 빼는 몫', C.repair['환산반영'], base.repair['환산반영'], 'p', 'data-cdp="환산반영"') + '</tr>';
+      h += '</tbody></table></div><p class="v2-help">기계 결함(누유 등)은 한 대 산정의 \'예상 수리비\' 칸에 직접 넣습니다(자동 수리비에 더함). ' +
+        '소매 시세에서는 수리필요 수리비를 다 빼고, 환산가에서는 \'환산가에 빼는 몫\'만큼만 뺍니다(경매는 고칠 곳을 소매보다 덜 깎음 · 직접 넣은 수리비는 다 뺌).</p></div></div>';
       // 차값 배수 · k번째 곳 배수(소매 감가, 기획 v2.33 Q241 Q243)
       var BL = base.band.labels || ['1천 미만', '1~2천', '2~4천', '4천+'];
       h += '<div class="v2-two-col"><div><div class="v2-sub">차값 배수 — 소매 감가에 곱함</div><div class="v2-tablewrap"><table class="t v2-rtbl v2-ctbl"><thead><tr><th>무사고 시세</th>' +
@@ -208,7 +210,7 @@
           h += '<tr><td><b>' + g + '</b></td>' + A.band[g].map(function (v, j) { return cdCell('경매 차값 ' + g + ' ' + BL[j], v, BA.band[g][j], '×', 'data-cdab="' + g + '|' + j + '"'); }).join('') +
             A.age[g].map(function (v, j) { return cdCell('경매 연식 ' + g + ' ' + AL[j], v, BA.age[g][j], '×', 'data-cdag="' + g + '|' + j + '"'); }).join('') + '</tr>';
         });
-        h += '</tbody></table></div><p class="v2-help">환산가 = 무사고 시세 × (1 − 경매 기준 감가) × (1 − 환산 비율) − 수리비. 초기값은 경매 낙찰 자료로 맞춘 요약(원자료는 비공개). 소매 시세에는 쓰지 않습니다.</p></div>';
+        h += '</tbody></table></div><p class="v2-help">환산가 = 무사고 시세 × (1 − 경매 기준 감가) × (1 − 환산 비율) − 수리비(수리필요 표준 수리비는 위 \'환산가에 빼는 몫\'만큼). 초기값은 경매 낙찰 자료로 맞춘 요약(원자료는 비공개). 소매 시세에는 쓰지 않습니다.</p></div>';
       }
       h += '</div>';
       var log = (t && t.log) || [];
@@ -278,7 +280,7 @@
       el.innerHTML = head() + tableCard() + teamCard() + '<div class="v2-two-col">' + tryCard() + exCard() + '</div>' + logCard() + (ctx.cond ? condCard() : '') +
         '<p class="v2-help">적용 순서: 한 대 산정에서 직접 넣은 비율 → 팀 수정(모델별) → 모델 예외(기준표 값 ± 가감) → 호가대×차령 기준표(팀이 고친 칸 우선). ' +
           '기준표는 칸 가운데(호가대 가운데 만원 · 차령 가운데 해) 사이를 이어서 읽습니다 — 예: 추정 1,900만·6년이면 1~2천·2~3천, 5~6년·7~9년 네 칸을 거리만큼 섞어 씁니다. ' +
-        '환산가 = 추정 시세 × (1 − 환산 비율) − 수리비.</p>';
+        '환산가 = 추정 시세 × (1 − 환산 비율) − 수리비(수리필요 표준 수리비는 위 감가 표의 \'환산가에 빼는 몫\'만큼).</p>';
       if (S.edit && $('rPw')) $('rPw').value = S.edit.password;   // 비밀번호는 화면 글(속성)에 남기지 않는다
       if (CD.edit && $('cdPw')) $('cdPw').value = CD.edit.password;
       tryCalc();

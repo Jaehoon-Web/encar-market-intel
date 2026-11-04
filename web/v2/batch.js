@@ -586,11 +586,14 @@
     function med(a) { var s = a.slice().sort(function (x, y) { return x - y; }), n = s.length; return n ? (n % 2 ? s[n >> 1] : (s[n / 2 - 1] + s[n / 2]) / 2) : null; }
 
     // 실제 건 검증(기획안 WP3): '실제 낙찰가' 열이 있으면 환산가와 비교하고, 실제 값으로 거꾸로 구한 환산 비율을 지금 비율과 견준다
+    function impRate(R, actual) {                            // 실제 낙찰가로 거꾸로 구한 환산 비율 — 환산가 식(환산 전 값 × (1 − 비율) − 환산가 수리비)을 거꾸로
+      return (1 - (actual + (R.repairConv || 0)) / (R.base * (1 - (R.convD || 0)))) * 100;
+    }
     function verify() {
       var v = rows.filter(function (r) { return r.R && r.actual != null; });
       if (!v.length) return null;
       var err = v.map(function (r) { return (r.R.converted - r.actual) / r.actual * 100; });
-      var imp = v.map(function (r) { return (1 - (r.actual + (r.cost || 0)) / r.R.est) * 100; }), used = v.map(function (r) { return r.R.rate; });
+      var imp = v.map(function (r) { return impRate(r.R, r.actual); }), used = v.map(function (r) { return r.R.rate; });
       return { rows: v, n: v.length, mdape: med(err.map(Math.abs)), bias: med(err), within: err.filter(function (e) { return Math.abs(e) <= 10; }).length / v.length,
         imp: med(imp), used: med(used), err: err, impl: imp };
     }
@@ -599,7 +602,7 @@
         '지금 비율보다 <b>' + Math.abs(gap).toFixed(1) + '%p ' + (gap > 0 ? '높습니다' : '낮습니다') + '</b> — ' + (s.n < 5 ? '건수가 적어 참고만 하세요' :
           '⚙ 환산 비율에서 해당 호가대·차령 칸이나 모델별 비율을 ' + (gap > 0 ? '올리는' : '내리는') + ' 것을 검토하세요');
       var h = '<div class="card"><div class="card-title">실제 건 비교' + IB + '</div>' + info('붙여넣은 실제 낙찰가 대비 환산가입니다. + 는 환산가가 실제보다 높다는 뜻입니다. ' +
-        '실제 비율 = 1 − (실제 낙찰가 + 수리비) ÷ 수리비 빼기 전 추정 시세. 같은 호가대·차령에서 실제 비율이 꾸준히 다르면 ⚙ 환산 비율에서 그 칸을 고칩니다.') +
+        '실제 비율 = 1 − (실제 낙찰가 + 환산가 수리비) ÷ 환산 전 값(무사고 시세에서 환산가 사고 감가만 뺀 값). 같은 호가대·차령에서 실제 비율이 꾸준히 다르면 ⚙ 환산 비율에서 그 칸을 고칩니다.') +
         '<div class="v2-kv">비교 <b>' + s.n + '대</b> · 오차 중위(절댓값) <b>' + s.mdape.toFixed(1) + '%</b> · 치우침 <b>' + sgn(s.bias) + '</b> · ±10% 안 <b>' +
         Math.round(s.within * 100) + '%</b><br>실제 낙찰가로 거꾸로 구한 환산 비율 중위 <b>' + s.imp.toFixed(1) + '%</b> · 지금 쓰는 비율 중위 <b>' + s.used.toFixed(1) +
         '%</b> → ' + adv + '</div><div class="v2-tablewrap"><table class="t v2-tbl"><thead><tr><th class="num">행</th><th>세부모델 · 등급</th><th class="num">추정 시세</th>' +
@@ -918,7 +921,8 @@
       } else h += '<div class="bt-dt">같은 모델이 이 차 하나라 비교할 평균이 없습니다</div><p class="v2-note">같은 모델의 다른 차를 ★ 기준 차로 고르면 그 차 대비 차이가 나옵니다</p>';
       h += '</div><div class="bt-dk">' + kv('추정 범위', man(R.range[0]) + ' ~ ' + man(R.range[1]) + '만') +
         (r.fp ? kv('출고가', man(r.fp.op) + '만 · 잔존율 ' + Math.round(R.est / r.fp.op * 100) + '%' + (r.fp.exact ? '' : ' (등급 기준)')) : '') + kv('비교 매물', R.n + '대 · ' + esc(R.stepName || '')) +
-        kv('환산', man(R.converted) + '만 · ' + R.rate + '% · ' + esc(R.rateSource || '')) +
+        kv('환산', man(R.converted) + '만 · ' + R.rate + '% · ' + esc(R.rateSource || '') + (R.repairConv ? ' · 수리비 −' + man(R.repairConv) + '만' +
+          (R.repairAuto && R.repairShare < 100 ? '(수리필요는 ' + R.repairShare + '%만)' : '') : '')) +
         (R.D && r.car && r.car['상태'] ? kv('기록부', esc(r.c && r.c['사고라벨'] || '무사고') + ' · 이력 감가 −' + (R.D * 100).toFixed(1) + '% · 무사고였다면 ' + man(R.base) + '만') : '') +
         (R.repair ? kv('수리비', '−' + man(R.repair) + '만 반영' + repairNote(r)) : '') +
         (v ? kv('판매 가격', man(r.ask) + '만 — <span class="bt-v ' + v.k + '">' + v.label + '</span> 시세 대비 ' + signMan(v.d) + '만(' + sgn(v.p) + ')') : '') +
@@ -1140,7 +1144,7 @@
       var nc = T.roles.length, head = T.header ? T.table[0].slice() : T.roles.map(function (_, c) { return colName(c) + '열'; });
       var calc = ['산정_제조사', '산정_모델', '산정_세부모델', '산정_등급', '산정_세부등급', '차명 확신', '산정_최초등록', '산정_주행(km)', '성능 상태(읽은 결과)',
         '사고 단계', '이력 감가(%)', '무사고 시세(만원)', '수리필요 수리비(만원)', '직접 입력 수리비(만원)', '추정 시세(만원)', '범위 하한(만원)', '범위 상한(만원)',
-        '환산 비율(%)', '환산가 사고 감가(%)', '환산가(만원)', '환산 비율 출처', '신뢰도', '비교 매물(대)', '매칭 단계', '계산 안 된 이유', '한 대 산정 주소'];
+        '환산 비율(%)', '환산가 사고 감가(%)', '환산가 수리비(만원)', '환산가(만원)', '환산 비율 출처', '신뢰도', '비교 매물(대)', '매칭 단계', '계산 안 된 이유', '한 대 산정 주소'];
       var vs = verify(), hasAsk = rows.some(function (r) { return r.ask != null; });
       if (vs) calc = calc.concat(['실제 낙찰가(만원)', '환산가 오차(%)', '실제 환산 비율(%)']);
       if (hasAsk) calc = calc.concat(['판매 가격(만원)', '시세 대비(만원)', '시세 대비(%)', '판정']);
@@ -1156,10 +1160,10 @@
           c && c['상태'] !== '미상' ? c['사고라벨'] : null, R ? Math.round(R.D * 1000) / 10 : null, R ? Math.round(R.base) : null,
           R ? R.repairAuto || null : null, r.cost || null,
           R ? Math.round(R.price) : null, R ? Math.round(R.range[0]) : null, R ? Math.round(R.range[1]) : null, R ? R.rate : null,
-          R ? Math.round((R.convD || 0) * 1000) / 10 : null, R ? Math.round(R.converted) : null,
+          R ? Math.round((R.convD || 0) * 1000) / 10 : null, R && R.repairConv ? Math.round(R.repairConv) : null, R ? Math.round(R.converted) : null,
           R ? R.rateSource : null, R ? R.grade : null, R ? R.n : null, R ? R.stepName : null, why.join(' · ') || null, R ? base + link(r) : null]);
         if (vs) line.push(r.actual != null ? r.actual : null, R && r.actual != null ? +((R.converted - r.actual) / r.actual * 100).toFixed(1) : null,
-          R && r.actual != null ? +((1 - (r.actual + (r.cost || 0)) / R.est) * 100).toFixed(1) : null);
+          R && r.actual != null ? +impRate(R, r.actual).toFixed(1) : null);
         if (hasAsk) { var vd = verdict(r); line.push(r.ask != null ? r.ask : null, vd ? Math.round(vd.d) : null, vd ? +vd.p.toFixed(1) : null, vd ? vd.label : null); }
         line.push(R && r.fp ? Math.round(r.fp.op) : null, R && r.fp ? Math.round(R.est / r.fp.op * 1000) / 10 : null);
         out.push(line);
@@ -1209,7 +1213,7 @@
         ['수리비', '단위 없이 1만 이상이면 원으로 보고 만원으로 바꿈. 추정 시세·환산가에서 그대로 뺌'],
         ['참고', '추정 시세는 온라인 소매 호가 기준. 환산가는 팀 환산 비율(도·소매 갭 요약치)을 적용한 값']];
       if (vs) info.push(['실제 건 비교', vs.n + '대 · 오차 중위(절댓값) ' + vs.mdape.toFixed(1) + '% · 치우침 ' + sgn(vs.bias) + ' · ±10% 안 ' + Math.round(vs.within * 100) + '%'],
-        ['실제로 구한 환산 비율', '중위 ' + vs.imp.toFixed(1) + '% (지금 쓰는 비율 중위 ' + vs.used.toFixed(1) + '%) — 실제 비율 = 1 − (낙찰가 + 수리비) ÷ 수리비 빼기 전 추정 시세']);
+        ['실제로 구한 환산 비율', '중위 ' + vs.imp.toFixed(1) + '% (지금 쓰는 비율 중위 ' + vs.used.toFixed(1) + '%) — 실제 비율 = 1 − (낙찰가 + 환산가 수리비) ÷ 환산 전 값(무사고 시세에서 환산가 사고 감가만 뺀 값)']);
       var widths = head.map(function () { return 14; }).concat([10, 12, 20, 18, 14, 10, 12, 11, 30, 12, 8, 10, 10, 10, 10, 12, 12, 12, 10, 12, 16, 7, 9, 22, 24, 40], vs ? [14, 12, 14] : [],
         hasAsk ? [14, 14, 12, 12] : [], [12, 10]);
       var G = groupList(), gRows = [['제조사', '세부모델', '대수', '계산', '추정 시세 합계(만원)', '환산가 합계(만원)', '평균 시세(만원)', '가장 싼(만원)', '가장 비싼(만원)', '평균 최초등록', '평균 주행(km)']];

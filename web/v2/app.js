@@ -787,7 +787,8 @@
   function condBreak(st, base, manual) {                     // 감가 내역: 부위 → 한 번 감가 → 합계, 수리필요 수리비, 직접 입력 수리비
     var c = condResult(), h = CTB.hist(st.items, base), rp = CTB.repair(st.items, isImport()), cap = CTB.table.cap;
     var out = '<b>' + esc(c['사고라벨'] || '무사고') + '</b> · 이력 감가 <b>' + (h.D ? '−' + (h.D * 100).toFixed(1) + '%' : '없음') + '</b>' +
-      (base && h.D ? ' (−' + man(base * h.D) + '만)' : '') + (rp.sum ? ' · 수리필요 수리비 <b>−' + rp.sum + '만</b>' : '') + (manual ? ' · 직접 입력 수리비 <b>−' + man(manual) + '만</b>' : '');
+      (base && h.D ? ' (−' + man(base * h.D) + '만)' : '') + (rp.sum ? ' · 수리필요 수리비 <b>−' + rp.sum + '만</b>' +
+        (CTB.repairShare() < 100 ? '(환산가에는 ' + man(rp.sum * CTB.repairShare() / 100) + '만)' : '') : '') + (manual ? ' · 직접 입력 수리비 <b>−' + man(manual) + '만</b>' : '');
     var ml = h.D ? condMarketLine(c['사고라벨'], CTB.classOf(st.items).n, base) : '';
     if (ml) out += '<div class="v2-mkt">' + ml + '</div>';
     if (h.D && h.mult) {                                     // 차값 배수(v2.33 Q241) — 1에서 멀 때만 밝힌다
@@ -1011,7 +1012,7 @@
       (r.repair ? '<span>수리비 <b>−' + man(r.repair) + '만</b> 반영</span>' : '') +
       '<span>비교 매물 <b>' + r.n + '대</b>' + (r.out ? ' · 이상치 제외 ' + r.out + '대' : '') + '</span></div></div>' +
       '<div class="v2-hside"><div class="v2-conv"><div class="lab">환산가 · 경매 예상가</div><div class="num"><b>' + man(r.converted) + '</b><small>만원</small></div>' +
-      '<div class="foot"><span class="rt">−' + r.rate + '%</span>환산 비율 · ' + esc(shortSrc(r.rateSource)) + (r.repair ? ' · 수리비 반영' : '') + '</div>' +
+      '<div class="foot"><span class="rt">−' + r.rate + '%</span>환산 비율 · ' + esc(shortSrc(r.rateSource)) + convFix(r) + '</div>' +
       (convLine(r) ? '<div class="foot v2-convd">' + convLine(r) + '</div>' : '') + '</div>' +
       '<div class="v2-conf"><div class="ring g-' + r.grade + '" style="--p:' + ({ A: 88, B: 62, C: 34 }[r.grade] || 50) + '"><span>' + r.grade + '</span></div><div>' +
       '<div class="lab">신뢰도</div><div class="big">' + stepNo + '단계 · ' + esc(stepName) + '</div><div class="sm">비교 매물 ' + r.n + '대 기준' +
@@ -1302,6 +1303,9 @@
     if (!condState() || !(r.D > 0) || r.convD == null) return '';
     return '경매 기준 사고 감가 −' + (r.convD * 100).toFixed(1) + '% (소매 −' + (r.D * 100).toFixed(1) + '%)';
   }
+  function convFix(r) {                                      // 환산가에서 뺀 수리비 — 수리필요 표준 수리비는 반영 몫만(Q261)
+    return r.repairConv ? ' · 수리비 −' + man(r.repairConv) + '만' + (r.repairAuto && r.repairShare < 100 ? '(수리필요는 ' + r.repairShare + '%만)' : '') : '';
+  }
   function cWhy(r) {                                         // 신뢰도 C 가 왜 약한지 · 점검 숫자(audit.json)
     var why = [], g = X.audit && X.audit.grade && X.audit.grade.C;
     if (r.n < 10) why.push('비교 매물이 ' + r.n + '대뿐');
@@ -1313,8 +1317,8 @@
     var f = flowData(G, car, c), rows = f.rows, split = f.split;
     var h = '<div class="card"><div class="card-title">보정 흐름 <span class="hint">만원 · 보정은 비교 매물 평균</span></div>' + flowBlock(rows.slice(0, split)) +
       (convLine(R) ? '<div class="v2-convbar"><span>무사고 ' + man(R.base) + '</span><em>→ 경매 기준 사고 −' + (R.convD * 100).toFixed(1) + '% → 환산 −' + R.rate + '%' +
-        (R.repair ? ' → 수리비 −' + man(R.repair) : '') + ' →</em><b>환산가 ' + man(R.converted) + '</b></div>'
-        : '<div class="v2-convbar"><span>' + man(R.est) + (R.repair ? ' − 수리비 ' + man(R.repair) : '') + '</span><em>→ −' + R.rate + '% · −' + man(R.est * R.rate / 100) + ' →</em><b>환산가 ' + man(R.converted) + '</b></div>');
+        (R.repairConv ? ' → 수리비 −' + man(R.repairConv) : '') + ' →</em><b>환산가 ' + man(R.converted) + '</b></div>'
+        : '<div class="v2-convbar"><span>' + man(R.est) + (R.repairConv ? ' − 수리비 ' + man(R.repairConv) : '') + '</span><em>→ −' + R.rate + '% · −' + man(R.est * R.rate / 100) + ' →</em><b>환산가 ' + man(R.converted) + '</b></div>');
     return h + '<div class="v2-fsub">보정 후 비교 매물 분포 · 가운데 50% 범위</div>' + distHist() + '</div>';
   }
 
@@ -1751,7 +1755,7 @@
     if (fpx) rows.push(['출고가(만원, 신차 소비자가)', mw(fpx.op)], ['출고가 근거', fpx.basis + ' 매물 ' + fpx.n + '대의 가운데 값(' + man(fpx.lo) + '~' + man(fpx.hi) + '만)'],
       ['잔존율(%, 추정 시세 ÷ 출고가)', Math.round(R.est / fpx.op * 1000) / 10]);
     rows.push(['환산 비율(%)', R.rate], ['환산 비율 출처', R.rateSource], ['환산가 사고 감가(%, 기록부를 넣으면 경매 기준)', Math.round((R.convD || 0) * 1000) / 10],
-      ['환산가(만원)', mw(R.converted)], ['신뢰도', R.grade],
+      ['환산가 수리비(만원, 수리필요는 ' + R.repairShare + '%만)', mw(R.repairConv)], ['환산가(만원)', mw(R.converted)], ['신뢰도', R.grade],
       ['비교 매물(대)', R.n], ['매칭 단계', R.stepName], ['이상치 제외(대)', R.out], ['직접 제외(대)', S.ex.length], sec('보정 근거(만원, 비교 매물 평균)'));
     ['차령', '주행', '성능', '색상', '렌트', '등급', '시점'].forEach(function (k) { rows.push([k, R.basis[k]]); });
     rows.push(['보정 계수 수준', R.coefLevel], sec('산정 기준'),
@@ -1960,13 +1964,14 @@
       (S.cond === '입력' && S.items.length ? ' · 무사고였다면 ' + man(r.base - r.repairManual) + '만' : r.est0 != null ? ' · 무사고라면 ' + man(r.est0 - r.repair) + '만' : '') +
       (function () { var fp = ENG.factoryPrice ? ENG.factoryPrice(G, car) : null; return fp ? '<br>출고가 ' + man(fp.op) + '만 · 잔존율 ' + Math.round(r.est / fp.op * 100) + '%' + (fp.exact ? '' : '(등급 기준)') : ''; })() +
       '</em></div>' +
-      (o.conv ? '<div class="sh-num"><span>환산가 · 경매 예상가</span><b>' + man(r.converted) + '<small>만원</small></b><em>환산 비율 ' + r.rate + '% · ' + esc(r.rateSource) +
+      (o.conv ? '<div class="sh-num"><span>환산가 · 경매 예상가</span><b>' + man(r.converted) + '<small>만원</small></b><em>환산 비율 ' + r.rate + '% · ' + esc(r.rateSource) + convFix(r) +
         (convLine(r) ? '<br>' + convLine(r) : '') + '</em></div>' : '') +
       '<div class="sh-num"><span>신뢰도</span><b>' + r.grade + '</b><em>비교 매물 ' + r.n + '대 · ' + stepNo + '단계(' + esc(stepName) + ')' + (r.out ? ' · 이상치 제외 ' + r.out + '대' : '') + '</em></div></div>';
     var f = flowData(G, car, c), after = [];                // 한 장에 들어가게 수리비·환산은 막대 대신 한 줄로
     if (r.repair) after.push('수리비 −' + man(r.repair) + '만 → 수리비 반영 <b>' + man(r.price) + '만</b>');
-    if (o.conv) after.push(convLine(r) ? '무사고 ' + man(r.base) + '만 → 경매 기준 사고 −' + (r.convD * 100).toFixed(1) + '% · 환산 −' + r.rate + '% → 환산가 <b>' + man(r.converted) + '만</b>'
-      : '환산 −' + r.rate + '%(' + signed(-r.est * r.rate / 100) + '만 · ' + esc(r.rateSource) + ') → 환산가 <b>' + man(r.converted) + '만</b>');
+    var cfx = r.repairConv ? ' · 수리비 −' + man(r.repairConv) + '만' : '';
+    if (o.conv) after.push(convLine(r) ? '무사고 ' + man(r.base) + '만 → 경매 기준 사고 −' + (r.convD * 100).toFixed(1) + '% · 환산 −' + r.rate + '%' + cfx + ' → 환산가 <b>' + man(r.converted) + '만</b>'
+      : '환산 −' + r.rate + '%(' + signed(-r.est * r.rate / 100) + '만 · ' + esc(r.rateSource) + ')' + cfx + ' → 환산가 <b>' + man(r.converted) + '만</b>');
     h += '<div class="sh-two"><div><div class="sh-h">내 차 위치 <span>' + (km ? '주행' : '차령') + ' × 실제 호가 · 비교 매물 ' + r.comps.length + '대</span></div>' + posLegend() + posSvg(G, car, 350, 262, 'S') + '</div>' +
       '<div><div class="sh-h">보정 흐름 <span>만원 · 보정은 비교 매물 평균</span></div>' + flowBlock(f.rows.slice(0, f.split), '', 'sh') +
       (after.length ? '<div class="sh-after">' + after.join('<br>') + '</div>' : '') + '</div></div>';

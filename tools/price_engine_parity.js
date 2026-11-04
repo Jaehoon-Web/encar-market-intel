@@ -71,8 +71,8 @@ console.log(`  모델그룹 파일 ${Object.keys(groups).length}개 읽음 · �
 // 2) 사이트 입력 형태 — 등록연월·기준연월로 차령 계산, 환산가·수리비 차감까지
 compare('사이트 입력(estimateCar)', cars.map(c => Object.assign({ id: c.car.excludeId }, c)), c => {
   const r = eng.estimateCar(grp(c.f), c.car);
-  return r && Object.assign(r, { 시세: r.price, 환산가: r.converted, 환산비율: r.rate, 환산출처: r.rateSource, 환산감가: r.convD });
-}, ['est', 'lo', 'hi', 'est0', 'base', 'D', '시세', '환산가', '환산비율', '환산감가', 'repairAuto'], ['n', 'step', 'grade', '환산출처']);
+  return r && Object.assign(r, { 시세: r.price, 환산가: r.converted, 환산비율: r.rate, 환산출처: r.rateSource, 환산감가: r.convD, 환산수리비: r.repairConv });
+}, ['est', 'lo', 'hi', 'est0', 'base', 'D', '시세', '환산가', '환산비율', '환산감가', '환산수리비', 'repairAuto'], ['n', 'step', 'grade', '환산출처']);
 
 // 3) 예시 한 건 — 화면에 나갈 값
 const ex = cars.find(c => c.exp && c.car['상태'] && c.car['상태'].items.length);

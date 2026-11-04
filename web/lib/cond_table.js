@@ -14,7 +14,7 @@
  *   var CT = CondTable.create(model);  CT.apply(team);
  *   CT.hist(items, base) → { D, lines: [{ label, pct }], any, frame }   items: [{ part, side, pillar, status }]
  *   CT.compsD(names, price) → D        names: 비교 매물 손상 목록 ['후드(교환)', '쿼터 패널(경미)', …]
- *   CT.repair(items, imported) → { sum, lines: [{ label, won }] }
+ *   CT.repair(items, imported) → { sum, lines: [{ label, won }] } · CT.repairShare() → 환산가에 빼는 수리필요 수리비 몫(%, Q261)
  *   CT.lightAt(price) → 그 차값에서 가장 가벼운 사고 하나의 감가(0~1) · CT.mult(외판|골격, price) → 차값 배수
  */
 (function (root) {
@@ -204,8 +204,12 @@
       });
       return { sum: sum, lines: lines };
     }
+    function repairShare() {                                  // 환산가에 빼는 수리필요 수리비 몫(%) — 경매는 수리할 곳을 소매보다 덜 깎는다(Q261)
+      var v = T.repair['환산반영'];
+      return v == null || !isFinite(+v) ? 100 : Math.min(100, Math.max(0, +v));
+    }
 
-    var api = { create: create, apply: apply, hist: hist, compsD: compsD, fromNames: fromNames, repair: repair, outsideCat: outsideCat,
+    var api = { create: create, apply: apply, hist: hist, compsD: compsD, fromNames: fromNames, repair: repair, repairShare: repairShare, outsideCat: outsideCat,
       status3: function (s) { return STATUS3[s] || null; }, mult: mult, lightAt: lightAt, classOf: classOf, auctionD: auctionD, info: info, label: label };
     apply(null);
     return api;

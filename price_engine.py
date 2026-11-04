@@ -251,6 +251,11 @@ class Cond:
             total += math.floor(won * x + 0.5)                                       # 사이트 Math.round 와 같게
         return total
 
+    def repair_share(self):
+        """환산가에 빼는 수리필요 수리비 몫(%) — 경매는 수리할 곳을 소매보다 덜 깎는다(Q261). 표에 없으면 100(다 뺌)"""
+        v = self.T["repair"].get("환산반영")
+        return 100.0 if v is None else min(100.0, max(0.0, float(v)))
+
 
 COND = Cond()
 
@@ -531,10 +536,12 @@ def estimate_car(groups, R, car, opts=None):
     rate, src = conversion_rate(R, r["base"], yrs, car["제조사"], car["모델"], car.get("연료"), car.get("팀환산"))   # 환산 비율은 무사고 시세로 찾는다(무사고 차끼리 맞춘 비율)
     auto = COND.repair(st.get("items") or [], bool(car.get("수입"))) if st is not None else 0
     fix = float(car.get("수리비") or 0) + auto
+    conv_fix = float(car.get("수리비") or 0) + auto * COND.repair_share() / 100           # 환산가: 직접 입력은 다, 수리필요 표준 수리비는 반영 몫만(Q261)
     da = COND.auction_d(st.get("items") or [], r["base"], yrs) if st is not None else None
     conv_d = r["D"] if da is None else da                                            # 환산가의 사고 감가: 경매 기준(기록부를 넣었을 때), 미상은 소매와 같게
     r.update({"repairAuto": auto, "수리비": fix, "시세": r["est"] - fix, "범위": (r["lo"] - fix, r["hi"] - fix),
-              "환산비율": rate, "환산출처": src, "환산감가": conv_d, "환산가": r["base"] * (1 - conv_d) * (1 - rate / 100) - fix})
+              "환산비율": rate, "환산출처": src, "환산감가": conv_d, "환산수리비": conv_fix,
+              "환산가": r["base"] * (1 - conv_d) * (1 - rate / 100) - conv_fix})
     return r
 
 
@@ -799,6 +806,8 @@ def parity(pool):
                           "dmg": None if unknown else dmg,
                           "yrs": yrs, "maker": r.제조사, "fuel": r.연료 if isinstance(r.연료, str) else None, "exp": exp})
     cars = []                                                                        # 사이트 입력 형태(환산가·수리비 포함)
+    fix_items = [{"part": "후드", "side": None, "pillar": None, "status": "수리필요"},      # 수리필요 표준 수리비 · 환산가에 빼는 몫(Q261)까지 맞춰 본다
+                 {"part": "앞범퍼", "side": None, "pillar": None, "status": "수리필요"}]
     cur = pool[~pool["sold"]]
     for r in [cur[cur["엔카_모델"] == "그랜저 IG"].iloc[100], cur[cur["엔카_모델"] == "5시리즈 (G30)"].iloc[50]] + \
              [x for _, x in cur.sample(6, random_state=11).iterrows()]:
@@ -806,11 +815,11 @@ def parity(pool):
             car = {"제조사": r["제조사"], "모델": r["모델"], "등급": r["등급"], "세부등급": r["세부"], "등록연월": int(r["등록연월"]),
                    "주행km": _num(r["주행km"]), "색상계열": r["색상계열"], "렌트": bool(r["rent"] > 0),
                    "연료": r["연료"] if isinstance(r["연료"], str) else None, "연식": _num(r["연식"]),
-                   "상태": None if unknown else {"items": Cond.from_names(damage_names(r["손상부위"]))},
+                   "상태": None if unknown else {"items": Cond.from_names(damage_names(r["손상부위"])) + fix_items},
                    "수리비": 30, "기준연월": 202610, "exclude_id": r.name}
             x = estimate_car(groups, R, car)
             exp = None if x is None else {k: x[k] for k in ["est", "lo", "hi", "base", "D", "n", "step", "grade", "시세", "환산가", "환산비율", "환산출처",
-                                                            "환산감가", "repairAuto"] + (["est0"] if unknown else [])}
+                                                            "환산감가", "환산수리비", "repairAuto"] + (["est0"] if unknown else [])}
             cars.append({"f": file_of[(r["제조사"], r["모델"])], "car": dict(car, exclude_id=None, excludeId=int(r.name)), "exp": exp})
     with open(PARITY, "w", encoding="utf-8") as f:
         json.dump({"cases": cases, "cars": cars}, f, ensure_ascii=False, separators=(",", ":"))
