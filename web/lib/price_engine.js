@@ -1,22 +1,25 @@
 /*
  * price_engine.js — 시세 산정 엔진 (사이트용, 기획안 5.1.2 · WP1)
  *
- * 파이썬 price_engine.py 와 같은 계산을 한다: 단계별 매칭 → 성능·D3 보정(+판매 매물 시점 보정) → 이상치 → 유사도 가중
- * 중앙값·범위 → 신뢰도 → 환산가·수리비. 같은 값인지는 python price_engine.py --parity 로 판매중 매물 전체를 검증한다.
+ * 파이썬 price_engine.py 와 같은 계산을 한다: 단계별 매칭 → D3 보정(+판매 매물 시점 보정) + 비교 매물의 사고 이력을 되돌려 무사고로
+ * → 이상치 → 유사도 가중 중앙값·범위(= 무사고 시세) → × (1 − 내 차 이력 감가) → 신뢰도 → 환산가·수리비.
+ * 기록부(기획 v2.32 5.15): 비교 매물은 상태와 무관하게 고르고(성능등급 조건 없음) 상태는 곱하기 감가로만 넣는다 → 무사고 ≥ 판금 ≥ 교환이 늘 지켜진다.
+ * 같은 값인지는 python price_engine.py --parity 로 판매중 매물 전체를 검증한다.
  * 규칙·설정은 직접 고치지 말고 price_engine.py 에서 바꾼 뒤 다시 내보낸다(엔진 설정은 비교 매물 index.json 의 engine).
  *
  * 입력 파일
  *   비교 매물: index.json(선택 목록·engine) + 모델그룹 파일 g????????.json   ← python price_engine.py --export
  *   보정 계수: /data/adj_coef.json (D3) · 환산 비율: /data/conversion_rates.json
  *
- *   var eng = PriceEngine.create({ config: index.engine, coef: adjCoef, rates: conversionRates });
+ *   var eng = PriceEngine.create({ config: index.engine, coef: adjCoef, rates: conversionRates, cond: CondTable.create(inspectionModel) });
  *   var grp = eng.group(모델그룹 파일 JSON);
  *   eng.estimate(grp, '그랜저 IG', { grade: '2.4 프리미엄', trim: '', age: 103, km: 137763, rent: 0, color: '검정',
- *                                    dep: 2.5, perf: 8 });                 // dep·perf 가 null 이면 상태 미상
+ *                                    items: [{ part: '후드', status: '교환' }] });   // items 가 null 이면 상태 미상, [] 이면 무사고
  *   eng.estimateCar(grp, { 모델: '그랜저 IG', 등급: '2.4 프리미엄', 등록연월: 201703, 주행km: 137763, 색상계열: '검정',
- *                          성능: { 감가율: 2.5, 등급: 8 } | null, 수리비: 30, 연료: '가솔린', 연식: 2017 });
+ *                          상태: { items: [...] } | null, 수리비: 30, 수입: false, 연료: '가솔린', 연식: 2017 });
  *
- * 결과: est·lo·hi(만원, 범위 25~75%) · n(비교 매물) · out(이상치) · step·stepName · grade(A·B·C) · est0(상태 미상일 때 무사고 기준)
+ * 결과: est·lo·hi(만원, 범위 25~75%) · base(무사고 시세) · D(이력 감가 0~1) · condLines(감가 내역) · n(비교 매물) · out(이상치)
+ *       · step·stepName · grade(A·B·C) · est0(상태 미상일 때 = base) · Dbar(상태 미상: 비교 매물 평균 감가)
  *       · comps(비교 매물: row·adj(보정가)·sim(유사도 0~100)·outlier·sold·age·dwell) · basis(보정 근거, 만원) · coefLevel(모델·차급·시장)
  * 파일 행은 매물이 바뀌지 않으면 그대로다. 매주 바뀌는 값(now_ym·now_date·시점 보정 배수 tf)은 파일 머리말에 있다.
  */
@@ -57,7 +60,7 @@
     var STEPS = E.steps, COLORS = E.colors, SIM = E.sim, KM_CAP = E.km_cap;
     var MIN = E.min_comps, GOOD = E.good_comps, OUT_MAD = E.out_mad, OUT_FLOOR = E.out_floor, A_WIDTH = E.a_width;
     var A_STEP = E.a_step || 2, B_STEP = E.b_step || 4, ATTR = SIM.attr || 0;          // 신뢰도 A·B 단계 상한 · 구동·인승·용도 거리
-    var DRIVES = E.drives || [''], USES = E.uses || [''];
+    var DRIVES = E.drives || [''], USES = E.uses || [''], CT = opt.cond || null;   // CT: 기록부 감가 표(cond_table.js) — 없으면 상태 보정 안 함
 
     function vec(e) {
       return [e.age, e.km, e.rent].concat(COLORS.map(function (c) { return num(own(e.color, c)); }));
@@ -88,7 +91,7 @@
       var F = grp.F, fi = grp.fi, cf = coefFor(F.maker + '|' + name, M.seg);
       var rows = F.rows.filter(function (r) { return r[fi.m] === M.idx; }), n = rows.length;
       var G = { n: n, rows: rows, cf: cf, ids: new Array(n), age: new Float64Array(n), km: new Float64Array(n), x: new Array(n),
-        grades: new Array(n), trims: new Array(n), perf: new Float64Array(n), dep: new Float64Array(n), price: new Float64Array(n),
+        grades: new Array(n), trims: new Array(n), perf: new Float64Array(n), D: new Float64Array(n), price: new Float64Array(n),
         sold: new Uint8Array(n), tf: new Float64Array(n), fe: new Float64Array(n),
         q: new Uint8Array(n), dv: new Int32Array(n), se: new Int32Array(n), us: new Int32Array(n) };   // 근거 약한 이름 · 구동 · 인승 · 용도
       for (var i = 0; i < n; i++) {
@@ -97,8 +100,9 @@
         var age = Math.floor(om / 100) * 12 + om % 100 - (Math.floor(reg / 100) * 12 + reg % 100);   // 그 가격을 본 때의 차령
         G.ids[i] = r[fi.id]; G.age[i] = age; G.km[i] = km;
         G.x[i] = [age, km, r[fi.rent]].concat(COLORS.map(function (c) { return col === c ? 1 : 0; }));
-        G.grades[i] = g; G.trims[i] = t; G.perf[i] = r[fi.perf]; G.dep[i] = r[fi.dep] / 100;
+        G.grades[i] = g; G.trims[i] = t; G.perf[i] = r[fi.perf];
         G.price[i] = r[fi.price]; G.sold[i] = r[fi.sold]; G.tf[i] = r[fi.tk] == null ? 1 : F.tf[r[fi.tk]];
+        G.D[i] = CT && fi.dm != null && r[fi.dm] ? CT.compsD(r[fi.dm].map(function (k) { return F.damage[k]; }), r[fi.price]) : 0;   // 비교 매물의 이력 감가(같은 표)
         G.fe[i] = feOf(cf, g, t);
         if (fi.q != null) { G.q[i] = r[fi.q] || 0; G.dv[i] = r[fi.dv] || 0; G.se[i] = r[fi.se] || 0; G.us[i] = r[fi.us] || 0; }
       }
@@ -107,7 +111,7 @@
     }
 
     /* 대상 차 한 대. t: grade, trim, age(개월), km(km), rent(0/1), color(계열 | null=모름),
-       dep(성능감가율 % | null=상태 미상), perf(성능등급 | null), excludeId(비교에서 뺄 매물 ID),
+       items(기록부 부위 [{ part, side, pillar, status }] — [] 이면 무사고, null 이면 상태 미상), excludeId(비교에서 뺄 매물 ID),
        dv·se·us(구동·인승·용도 번호, 모르면 0 — 차명 글에서 읽은 값),
        excludeIds(화면에서 사용자가 뺀 매물 ID 목록 — 사이트 전용, 후보에서 빼는 것 말고는 계산이 같다)
        o: { sold, time, weight, outlier, adjust } — 기본 모두 true. 비교 매물이 5대 미만이면 null */
@@ -115,18 +119,17 @@
       var G = prepare(grp, name);
       if (!G) return null;
       o = Object.assign({ sold: true, time: true, weight: true, outlier: true, adjust: true }, o || {});
-      var known = t.dep != null, tdep = known ? t.dep / 100 : 0, tperf = known ? t.perf : 0;
+      var known = t.items != null;
       var tage = t.age, tkm = Math.min(t.km, KM_CAP) / 1e4, tg = t.grade, tt = t.trim || '';
       var n0 = G.n, i, j, k, excl = t.excludeIds && t.excludeIds.length ? new Set(t.excludeIds) : null;
       var base = new Uint8Array(n0), dage = new Float64Array(n0), dkm = new Float64Array(n0), same = new Uint8Array(n0),
-        dperf = new Float64Array(n0), sameT = new Uint8Array(n0), tdv = t.dv || 0, tse = t.se || 0, tus = t.us || 0;
+        sameT = new Uint8Array(n0), tdv = t.dv || 0, tse = t.se || 0, tus = t.us || 0;
       for (i = 0; i < n0; i++) {
         base[i] = (t.excludeId == null || G.ids[i] !== t.excludeId) && (o.sold || !G.sold[i]) && !(excl && excl.has(G.ids[i])) ? 1 : 0;
         dage[i] = Math.abs(G.age[i] - tage);
         dkm[i] = Math.abs(G.km[i] - tkm);
         same[i] = G.grades[i] === tg ? 1 : 0;
         sameT[i] = G.trims[i] === tt && !G.q[i] ? 1 : 0;                       // 같은 트림 단계는 이름이 '정확'인 매물만
-        dperf[i] = known ? Math.abs(G.perf[i] - tperf) : 0;
       }
       var step = 0, sel = [];
       for (var s = 0; s < STEPS.length && !step; s++) {
@@ -134,8 +137,7 @@
         if (st[5] && tt === '') continue;                                       // 세부등급을 고르지 않았으면 같은 트림 단계는 건너뜀
         sel = [];
         for (i = 0; i < n0; i++) {
-          if (base[i] && dage[i] <= st[2] && dkm[i] <= st[3] && (!st[1] || same[i]) && (!st[5] || sameT[i]) &&
-            (!known || dperf[i] <= st[4])) sel.push(i);
+          if (base[i] && dage[i] <= st[2] && dkm[i] <= st[3] && (!st[1] || same[i]) && (!st[5] || sameT[i])) sel.push(i);   // 상태와 무관하게(v2.32)
         }
         if (sel.length >= MIN) step = s + 1;
       }
@@ -145,7 +147,7 @@
       if (t.color == null) for (j = 3; j < nb; j++) b[j] = 0;                 // 색상을 모르면 색상 보정 안 함
       var tx = [tage, tkm, t.rent ? 1 : 0].concat(COLORS.map(function (c) { return t.color === c ? 1 : 0; }));
       var tfe = feOf(G.cf, tg, tt);
-      var p = new Float64Array(m), adj = new Float64Array(m), la = new Float64Array(m), w = new Float64Array(m);
+      var p = new Float64Array(m), cl = new Float64Array(m), adj = new Float64Array(m), la = new Float64Array(m), w = new Float64Array(m);
       var parts = new Array(m), feD = new Float64Array(m), condL = new Float64Array(m), tfL = new Float64Array(m);
       for (k = 0; k < m; k++) {
         i = sel[k];
@@ -157,16 +159,15 @@
         var tf = o.time ? G.tf[i] : 1;
         if (!o.adjust) { lin = 0; tf = 1; }
         p[k] = G.price[i] * Math.exp(lin) * tf;
-        var cond = known && o.adjust ? (1 - tdep) / (1 - G.dep[i]) : 1;
-        adj[k] = p[k] * cond;
+        cl[k] = o.adjust ? p[k] / (1 - G.D[i]) : p[k];                      // 그 매물의 사고 이력을 되돌린 무사고 값
         var attr = (tdv && G.dv[i] && G.dv[i] !== tdv ? 1 : 0) + (tse && G.se[i] && G.se[i] !== tse ? 1 : 0) +
           (tus && G.us[i] && G.us[i] !== tus ? 1 : 0);                          // 구동·인승·용도가 둘 다 알려져 있고 다르면
         var dist = dage[i] / SIM.age + dkm[i] / SIM.km + SIM.grade * (1 - same[i])
           + SIM.trim * (tt !== '' && G.trims[i] !== '' && G.trims[i] !== tt ? 1 : 0)
-          + SIM.perf * dperf[i] + SIM.sold * G.sold[i] + ATTR * attr;
+          + SIM.sold * G.sold[i] + ATTR * attr;                                 // 상태 차이는 가중치에 넣지 않는다(값이 상태에 따라 뒤집히지 않게)
         w[k] = o.weight ? Math.exp(-dist) : 1;
-        la[k] = Math.log(adj[k]);
-        parts[k] = pr; feD[k] = tfe - G.fe[i]; condL[k] = Math.log(cond); tfL[k] = Math.log(tf);
+        la[k] = Math.log(cl[k]);
+        parts[k] = pr; feD[k] = tfe - G.fe[i]; tfL[k] = Math.log(tf);
       }
 
       // 이상치: 로그 보정가가 가중 중앙값에서 3×MAD(최소 15%)보다 멀면 뺀다. 남는 매물이 5대 미만이면 빼지 않는다
@@ -177,17 +178,27 @@
         for (k = 0; k < m; k++) { keep[k] = dev[k] <= thr ? 1 : 0; cnt += keep[k]; }
         if (cnt < MIN) keep.fill(1);
       }
-      var lk = [], wk = [], l0 = [];
+      var lk = [], wk = [], sw = 0, sd = 0;
       for (k = 0; k < m; k++) {
         if (!keep[k]) continue;
         lk.push(la[k]); wk.push(w[k]);
-        if (!known) l0.push(Math.log(p[k] / (1 - G.dep[sel[k]])));
+        sw += w[k]; sd += w[k] * G.D[sel[k]];
       }
-      var est = Math.exp(wq(lk, wk, 0.5)), lo = Math.exp(wq(lk, wk, 0.25)), hi = Math.exp(wq(lk, wk, 0.75));
+      var b0 = Math.exp(wq(lk, wk, 0.5)), lo0 = Math.exp(wq(lk, wk, 0.25)), hi0 = Math.exp(wq(lk, wk, 0.75));   // 무사고 시세 · 범위
+      var Dt = 0, lines = [], Dbar = sd / sw;
+      if (CT && o.adjust) {
+        if (known) { var h = CT.hist(t.items, b0); Dt = h.D; lines = h.lines; }
+        else Dt = Math.min(Dbar, CT.light);                                   // 미상 = 비교 매물 평균 상태, 단 가장 가벼운 사고보다는 높게(Q215)
+      }
+      var est = b0 * (1 - Dt), lo = lo0 * (1 - Dt), hi = hi0 * (1 - Dt);
       var n = lk.length, tight = hi / est - 1 <= A_WIDTH && 1 - lo / est <= A_WIDTH;
-      var r = { est: est, lo: lo, hi: hi, n: n, out: m - n, step: step, stepName: STEPS[step - 1][0],
+      var r = { est: est, lo: lo, hi: hi, base: b0, D: Dt, condLines: lines, n: n, out: m - n, step: step, stepName: STEPS[step - 1][0],
         grade: n >= GOOD && step <= A_STEP && tight ? 'A' : (step <= B_STEP ? 'B' : 'C'), coefLevel: G.cf.level };
-      if (!known) r.est0 = Math.exp(wq(l0, wk, 0.5));                     // 무사고 기준 값(대상 감가율 0)
+      if (!known) { r.est0 = b0; r.Dbar = Dbar; }                          // 무사고 기준 값 · 비교 매물 평균 감가
+      for (k = 0; k < m; k++) {                                              // 보정가 = 무사고 값 × (1 − 내 차 감가) · 상태 보정 근거
+        adj[k] = cl[k] * (1 - Dt);
+        condL[k] = o.adjust ? Math.log((1 - Dt) / (1 - G.D[sel[k]])) : 0;
+      }
 
       // 보정 근거(만원): 항목별 로그 보정의 가중 평균을 추정 시세 기준 금액으로 — 표시용
       var names = ['차령', '주행', '렌트', '색상', '등급', '성능', '시점'], sums = [0, 0, 0, 0, 0, 0, 0], ws = 0, wmax = 0;
@@ -205,7 +216,7 @@
       var fi = grp.fi, F = grp.F;
       r.comps = sel.map(function (i2, q) {
         var row = G.rows[i2];
-        return { row: row, adj: adj[q], sim: rint(w[q] / wmax * 100), outlier: !keep[q], sold: !!G.sold[i2], age: G.age[i2],
+        return { row: row, adj: adj[q], sim: rint(w[q] / wmax * 100), outlier: !keep[q], sold: !!G.sold[i2], age: G.age[i2], D: G.D[i2],
           dwell: row[fi.ds] == null ? null : days(row[fi.ds], G.sold[i2] ? row[fi.sd] : F.now_date) };
       }).sort(function (a, c) { return c.sim - a.sim; });
       return r;
@@ -246,23 +257,24 @@
       return { rate: base, source: teamUsed ? '기준표(팀 수정)' : '호가대×차령 기준표' };
     }
 
-    /* 사이트 입력 형태: 모델, 등급, 세부등급, 등록연월(yyyymm), 주행km, 색상계열, 렌트, 성능({감가율, 등급} | null=상태 미상),
-       수리비(만원), 연료·연식(환산 비율 모델 예외용), 기준연월(기본: 데이터 기준 달 now_ym — 판매중 비교 매물과 같은 시점),
-       팀환산(%), excludeId, excludeIds */
+    /* 사이트 입력 형태: 모델, 등급, 세부등급, 등록연월(yyyymm), 주행km, 색상계열, 렌트, 상태({ items } | null=상태 미상 — 무사고는 items []),
+       수리비(직접 입력 만원 — 수리필요 부위 수리비는 자동으로 더함), 수입(수리비 배수), 연료·연식(환산 비율 모델 예외용),
+       기준연월(기본: 데이터 기준 달 now_ym — 판매중 비교 매물과 같은 시점), 팀환산(%), excludeId, excludeIds */
     function estimateCar(grp, car, o) {
       var ym = car['기준연월'] || grp.F.now_ym;
-      var reg = car['등록연월'], perf = car['성능'] || null;
+      var reg = car['등록연월'], st = car['상태'] || null;
       var age = Math.floor(ym / 100) * 12 + ym % 100 - (Math.floor(reg / 100) * 12 + reg % 100);
       var r = estimate(grp, car['모델'], {
         grade: car['등급'], trim: car['세부등급'] || '', age: age, km: car['주행km'], rent: car['렌트'] ? 1 : 0,
-        color: car['색상계열'] || null, dep: perf ? perf['감가율'] : null, perf: perf ? perf['등급'] : null, excludeId: car.excludeId,
+        color: car['색상계열'] || null, items: st ? st.items || [] : null, excludeId: car.excludeId,
         excludeIds: car.excludeIds, dv: Math.max(0, DRIVES.indexOf(car['구동'])), se: +(car['인승'] || 0),
         us: Math.max(0, USES.indexOf(car['용도']))
       }, o);
       if (!r) return null;
       var yrs = Math.floor(ym / 100) - (car['연식'] || Math.floor(reg / 100));
       var cv = conversionRate(r.est, yrs, grp.F.maker, car['모델'], car['연료'], car['팀환산']);
-      var fix = +(car['수리비'] || 0);
+      var rp = CT && st ? CT.repair(st.items, !!car['수입']) : { sum: 0, lines: [] }, man0 = +(car['수리비'] || 0), fix = man0 + rp.sum;
+      r.repairAuto = rp.sum; r.repairLines = rp.lines; r.repairManual = man0;   // 수리필요 자동 + 직접 입력(Q230)
       r.repair = fix; r.price = r.est - fix; r.range = [r.lo - fix, r.hi - fix];
       r.rate = cv.rate; r.rateSource = cv.source; r.converted = r.est * (1 - cv.rate / 100) - fix;
       return r;
@@ -283,14 +295,14 @@
     // 차 한 대의 보정 위치(로그) — 같은 세부모델 두 차의 값 차이를 항목별로 나눌 때 쓴다(묶음 산정 비교, 기획 v2.29 Q180).
     // estimate 와 같은 계수(차령·주행·렌트·색상 · 등급/세부등급 고정효과 · 성능 감가율)만 읽고, 시세 계산에는 쓰지 않는다.
     // 색상·성능을 모르면 그 항목은 비교하지 않는다(estimate 도 그 보정을 하지 않으므로).
-    function logParts(grp, car) {
+    function logParts(grp, car, base) {                      // base: 그 차의 무사고 시세(골격 한 번 감가가 시세에 따라 달라서)
       var G = prepare(grp, car['모델']);
       if (!G) return null;
-      var ym = car['기준연월'] || grp.F.now_ym, reg = car['등록연월'], perf = car['성능'] || null, b = G.cf.b, col = car['색상계열'] || null, colL = 0;
+      var ym = car['기준연월'] || grp.F.now_ym, reg = car['등록연월'], st = car['상태'] || null, b = G.cf.b, col = car['색상계열'] || null, colL = 0;
       var age = Math.floor(ym / 100) * 12 + ym % 100 - (Math.floor(reg / 100) * 12 + reg % 100);
       if (col != null) COLORS.forEach(function (c, j) { if (col === c) colL += b[3 + j]; });
       return { '차령': age * b[0], '주행': Math.min(car['주행km'], KM_CAP) / 1e4 * b[1], '렌트': (car['렌트'] ? 1 : 0) * b[2], '색상': colL, colorKnown: col != null,
-        '등급': feOf(G.cf, car['등급'], car['세부등급'] || ''), '성능': perf ? Math.log(1 - perf['감가율'] / 100) : 0, condKnown: !!perf };
+        '등급': feOf(G.cf, car['등급'], car['세부등급'] || ''), '성능': st && CT ? Math.log(1 - CT.hist(st.items || [], base).D) : 0, condKnown: !!st };
     }
 
     // 출고가(신차 소비자가, 만원) — 같은 세부모델 · 등급 · 세부등급 · 등록연도 매물 출고가의 가운데 값(3대 이상).

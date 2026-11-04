@@ -241,7 +241,7 @@
       if (s.normalize) s = s.normalize('NFKC');
       s = s.replace(/:/g, ' ');
       Object.keys(FIX.cond).forEach(function (tok) { if (s.indexOf(tok) >= 0) s = s.split(tok).join(FIX.cond[tok]); });
-      r.cond = ISC.parseText(s, { terms: ctx.terms ? ctx.terms.list() : [] });   // 소리 맞추기 · 짐작 · 팀 사전(기획 v2.31)
+      r.cond = ISC.parseText(s, { terms: ctx.terms ? ctx.terms.list() : [], status3: true });   // 소리 맞추기 · 짐작 · 팀 사전(v2.31) · 상태 3가지(v2.32)
       r.c = null;
       if (!r.cond.unknown.length) {
         var st = r.cond.state, input = st === '미상' ? { state: '미상' } : { state: st === '무사고' ? '무사고' : '입력', items: r.cond.items, mechLevel: 0 };
@@ -295,14 +295,23 @@
       if (r.why.length) return;
       var G = GROUPS[r.best.file], c = r.c;
       r.car = { '모델': r.best.model, '등급': r.grade, '세부등급': r.trim, '등록연월': r.reg.y * 100 + r.reg.m, '주행km': r.km,
-        '색상계열': r.color || null, '렌트': r.rent, '성능': c['상태'] === '미상' ? null : { '감가율': c['성능감가율'], '등급': c['성능등급'] },
-        '수리비': r.cost || 0, '연료': fuelOf(G, r.best.model, r.grade) };
+        '색상계열': r.color || null, '렌트': r.rent, '상태': c['상태'] === '미상' ? null : { items: c['상태'] === '무사고' ? [] : r.cond.items },
+        '수리비': r.cost || 0, '수입': origin(r.best.maker) === '수입', '연료': fuelOf(G, r.best.model, r.grade) };   // 기록부 상태 3가지 · 수리필요 수리비는 엔진이 더함(v2.32)
       r.R = ENG.estimateCar(G, r.car, { sold: true });
       if (!r.R) r.why.push('비교 매물 5대 미만');
       else {
-        r.lp = ENG.logParts ? ENG.logParts(G, r.car) : null;    // 같은 모델끼리 값 차이를 항목별로 나눌 때(기획 v2.29)
+        r.lp = ENG.logParts ? ENG.logParts(G, r.car, r.R.base) : null;    // 같은 모델끼리 값 차이를 항목별로 나눌 때(기획 v2.29)
         r.fp = ENG.factoryPrice ? ENG.factoryPrice(G, r.car) : null;   // 출고가(사용자 요청 11-04)
       }
+    }
+    function origin(maker) { var m = (X.idx.makers || []).filter(function (x) { return x.name === maker; })[0]; return m ? m.origin : ''; }
+    function condShort(r) {                                  // 사고 단계 · 이력 감가 · 수리비(수리필요 자동 + 직접 입력, v2.32)
+      var R = r.R, lab = r.c && r.c['사고라벨'] || '무사고';
+      return lab + (R && R.D && r.car && r.car['상태'] ? ' · −' + (R.D * 100).toFixed(1) + '%' : '') + (R && R.repair ? ' · 수리 −' + man(R.repair) + '만' : '');
+    }
+    function repairNote(r) {                                 // 수리비 나눔 — 수리필요 자동 · 직접 입력
+      var R = r.R;
+      return R.repairAuto && r.cost ? ' (수리필요 ' + man(R.repairAuto) + ' + 직접 ' + man(r.cost) + ')' : R.repairAuto ? ' (수리필요 표준 수리비)' : '';
     }
     function needsCheck(r) { return !!r.best && ((r.conf === 'mid' || r.conf === 'low') || r.gconf === 'low' || yearOut(r)); }
     function yearOut(r) {                                    // 등록연도가 매칭한 모델 기간(±1년) 밖 — 다른 세대·다른 모델일 수 있다. 직접 고르면 그대로 쓴다
@@ -564,7 +573,7 @@
         esc(c.outside.join(', ')) + '</span>' : '';
       if (c.state === '무사고' && !c.items.length) return '무사고' + out;
       var gs = (c.tokens || []).filter(function (t) { return t.kind === 'guess'; });
-      return '<span title="' + esc(ISC.summary(c.items)) + '">' + esc(r.c['사고라벨']) + ' · ' + r.c['성능등급'] + '등급</span>' +
+      return '<span title="' + esc(ISC.summary(c.items)) + '">' + esc(condShort(r)) + '</span>' +
         (gs.length ? ' <i class="bt-guess" title="' + esc(gs.map(function (t) { return t.text + ' → ' + t.label; }).join('\n')) + '">짐작</i>' : '') + out;
     }
     function link(r) {
@@ -909,7 +918,9 @@
       } else h += '<div class="bt-dt">같은 모델이 이 차 하나라 비교할 평균이 없습니다</div><p class="v2-note">같은 모델의 다른 차를 ★ 기준 차로 고르면 그 차 대비 차이가 나옵니다</p>';
       h += '</div><div class="bt-dk">' + kv('추정 범위', man(R.range[0]) + ' ~ ' + man(R.range[1]) + '만') +
         (r.fp ? kv('출고가', man(r.fp.op) + '만 · 잔존율 ' + Math.round(R.est / r.fp.op * 100) + '%' + (r.fp.exact ? '' : ' (등급 기준)')) : '') + kv('비교 매물', R.n + '대 · ' + esc(R.stepName || '')) +
-        kv('환산', man(R.converted) + '만 · ' + R.rate + '% · ' + esc(R.rateSource || '')) + (r.cost ? kv('수리비', '−' + man(r.cost) + '만 반영') : '') +
+        kv('환산', man(R.converted) + '만 · ' + R.rate + '% · ' + esc(R.rateSource || '')) +
+        (R.D && r.car && r.car['상태'] ? kv('기록부', esc(r.c && r.c['사고라벨'] || '무사고') + ' · 이력 감가 −' + (R.D * 100).toFixed(1) + '% · 무사고였다면 ' + man(R.base) + '만') : '') +
+        (R.repair ? kv('수리비', '−' + man(R.repair) + '만 반영' + repairNote(r)) : '') +
         (v ? kv('판매 가격', man(r.ask) + '만 — <span class="bt-v ' + v.k + '">' + v.label + '</span> 시세 대비 ' + signMan(v.d) + '만(' + sgn(v.p) + ')') : '') +
         '<div class="bt-dfix"><span>매칭</span>' + modelCell(r, i) + gradeCell(r, i) + '</div></div></div>' +
         '<div class="v2-actions"><a class="v2-btn" href="' + esc(link(r)) + '" target="_blank" rel="noopener">한 대 산정 열기 ↗</a>' +
@@ -943,9 +954,9 @@
       add('조건', '최초등록', function (r) { return [r.reg.y + '-' + pad(r.reg.m) + (r.reg.guess ? '(월 미상)' : '')]; });
       add('조건', '주행', function (r) { return [r.km.toLocaleString('ko-KR') + 'km']; });
       add('조건', '색상', function (r) { return [r.color || '—', r.color ? '' : 'dim']; });
-      add('조건', '성능 상태', function (r) { return [r.cond.state === '미상' ? '상태 미상' : r.cond.items.length ? r.c['사고라벨'] + ' · ' + r.c['성능등급'] + '등급' : '무사고']; });
+      add('조건', '성능 상태', function (r) { return [r.cond.state === '미상' ? '상태 미상(평균)' : r.cond.items.length ? condShort(r) : '무사고']; });
       if (cars.some(function (r) { return r.rent; })) add('조건', '렌트', function (r) { return [r.rent ? '렌트' : '—', r.rent ? '' : 'dim']; });   // 모두 비면 줄을 뺀다
-      if (cars.some(function (r) { return r.cost; })) add('조건', '수리비', function (r) { return [r.cost ? man(r.cost) + '만' : '—', r.cost ? '' : 'dim']; });
+      if (cars.some(function (r) { return r.R.repair; })) add('조건', '수리비', function (r) { return [r.R.repair ? man(r.R.repair) + '만' : '—', r.R.repair ? '' : 'dim']; });
       var dcs = cars.map(function (r) { var ref = refFor(r, G); return ref ? decomp(r, ref) : null; });
       var bs = '보정 — ' + (rf ? '같은 모델이면 기준 차 대비, 아니면 같은 등급 · 모델 평균 대비' : '같은 등급(없으면 같은 모델) 평균 대비') + ' · 다른 모델끼리는 나누지 않음';
       ITEMS.forEach(function (k) {
@@ -1128,7 +1139,7 @@
     function exportAll() {
       var nc = T.roles.length, head = T.header ? T.table[0].slice() : T.roles.map(function (_, c) { return colName(c) + '열'; });
       var calc = ['산정_제조사', '산정_모델', '산정_세부모델', '산정_등급', '산정_세부등급', '차명 확신', '산정_최초등록', '산정_주행(km)', '성능 상태(읽은 결과)',
-        '사고 라벨', '성능등급', '성능감가율(%)', '글로비스 종합', '글로비스 사고평가', '수리비(만원)', '추정 시세(만원)', '범위 하한(만원)', '범위 상한(만원)',
+        '사고 단계', '이력 감가(%)', '무사고 시세(만원)', '수리필요 수리비(만원)', '직접 입력 수리비(만원)', '추정 시세(만원)', '범위 하한(만원)', '범위 상한(만원)',
         '환산 비율(%)', '환산가(만원)', '환산 비율 출처', '신뢰도', '비교 매물(대)', '매칭 단계', '계산 안 된 이유', '한 대 산정 주소'];
       var vs = verify(), hasAsk = rows.some(function (r) { return r.ask != null; });
       if (vs) calc = calc.concat(['실제 낙찰가(만원)', '환산가 오차(%)', '실제 환산 비율(%)']);
@@ -1142,8 +1153,8 @@
         var why = r.why.concat(yearOut(r) ? ['합계 제외 — 등록 ' + r.reg.y + '이 모델 기간 ' + r.best.y0 + '~' + r.best.y1 + ' 밖(차명 확인)'] : []);
         var line = r.cells.slice(0, nc).concat([r.best ? r.best.maker : null, r.best ? r.best.group : null, r.best ? r.best.model : null, r.grade || null, r.trim || null,
           CONF[r.conf] || r.conf, r.reg ? r.reg.y + '-' + pad(r.reg.m) + (r.reg.guess ? '(월 미상)' : '') : null, r.km, cond,
-          c && c['상태'] !== '미상' ? c['사고라벨'] : null, c && c['상태'] !== '미상' ? c['성능등급'] : null, c && c['상태'] !== '미상' ? c['성능감가율'] : null,
-          c && c['상태'] !== '미상' ? c['글로비스_종합평가점'] : null, c && c['상태'] !== '미상' ? c['글로비스_사고평가점'] : null, r.cost || null,
+          c && c['상태'] !== '미상' ? c['사고라벨'] : null, R ? Math.round(R.D * 1000) / 10 : null, R ? Math.round(R.base) : null,
+          R ? R.repairAuto || null : null, r.cost || null,
           R ? Math.round(R.price) : null, R ? Math.round(R.range[0]) : null, R ? Math.round(R.range[1]) : null, R ? R.rate : null, R ? Math.round(R.converted) : null,
           R ? R.rateSource : null, R ? R.grade : null, R ? R.n : null, R ? R.stepName : null, why.join(' · ') || null, R ? base + link(r) : null]);
         if (vs) line.push(r.actual != null ? r.actual : null, R && r.actual != null ? +((R.converted - r.actual) / r.actual * 100).toFixed(1) : null,
@@ -1160,7 +1171,7 @@
       });
       var money = ['산정_주행(km)', '추정 시세(만원)', '범위 하한(만원)', '범위 상한(만원)', '환산가(만원)', '실제 낙찰가(만원)']
         .filter(function (k) { return calc.indexOf(k) >= 0; }).map(function (k) { return nc + calc.indexOf(k); });
-      var cmp = [['행', '차량', '유사도', '매물ID', '상태', '판매 확인일', '최초등록', '주행(km)', '색상', '등급', '세부등급', '성능등급', '사고 라벨',
+      var cmp = [['행', '차량', '유사도', '매물ID', '상태', '판매 확인일', '최초등록', '주행(km)', '색상', '등급', '세부등급', '이력 감가(%)', '사고 라벨',
         '손상 부위', '호가(만원)', '보정 후(만원)', '이상치', '매물 링크']];
       rows.forEach(function (r) {
         if (!r.R) return;
@@ -1168,7 +1179,7 @@
         r.R.comps.forEach(function (x) {
           var row = x.row, reg = String(row[fi.reg]), sold = row[fi.sold] === 1;
           cmp.push([r.no, who, x.sim, row[fi.id], sold ? '판매' : '판매중', sold ? row[fi.sd] : null, reg.slice(0, 4) + '-' + reg.slice(4, 6), row[fi.km],
-            F.colors[row[fi.col]], F.grades[row[fi.g]], F.trims[row[fi.t]] || null, row[fi.perf], F.labels[row[fi.acc]],
+            F.colors[row[fi.col]], F.grades[row[fi.g]], F.trims[row[fi.t]] || null, x.D != null ? Math.round(x.D * 1000) / 10 : null, F.labels[row[fi.acc]],
             ENG.damage(G, row).join(' · ') || null, row[fi.price], Math.round(x.adj),
             x.outlier ? '예' : null, 'https://fem.encar.com/cars/detail/' + row[fi.id]]);
         });

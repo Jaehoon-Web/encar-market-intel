@@ -115,6 +115,28 @@ ok(r.status === 200 && r.body.team.rev === 1 && r.body.team.items.length === 2 &
 r = await tcall(env, 'PUT', { password: '팀비번-2026', by: '김팀원', add: [{ t: '수 리', kind: 'status', status: '손상' }], del: ['보조석 휀다'] });
 ok(r.status === 200 && r.body.team.items.length === 1 && r.body.team.items[0].status === '손상' && r.body.team.items[0].by === '김팀원', '같은 표기(띄어쓰기 무시)는 바꾸고 지우기', r.body);
 
+console.log('[기록부 감가 · 수리비 표 /api/cond (기획 v2.32)]');
+const ccall = (env2, method, body) => worker.fetch(new Request('https://x.test/api/cond', {
+  method, headers: { 'content-type': 'application/json' }, body: body == null ? undefined : JSON.stringify(body)
+}), env2).then(async x => ({ status: x.status, body: await x.json().catch(() => null) }));
+r = await ccall(env, 'GET');
+ok(r.status === 200 && r.body.writable && r.body.team === null, '처음 → 팀 수정 없음', r.body);
+r = await ccall(env, 'PUT', { password: '틀림', rev: 0, by: '권재훈', rows: [] });
+ok(r.status === 401, '틀린 비밀번호 → 401', r.status);
+r = await ccall(env, 'PUT', { password: '팀비번-2026', rev: 0, by: '권재훈', rows: [{ key: '후드', '교환': -1, '판금': -2 }] });
+ok(r.status === 400 && /교환은 판금보다/.test(r.body.error), '교환이 판금보다 덜 깎임 → 400', r.body);
+r = await ccall(env, 'PUT', { password: '팀비번-2026', rev: 0, by: '권재훈', rows: [{ key: '후드', '교환': 3 }] });
+ok(r.status === 400 && /~0/.test(r.body.error), '감가가 양수 → 400', r.body);
+r = await ccall(env, 'PUT', { password: '팀비번-2026', rev: 0, by: '권재훈', repair: { '외판': 5000 } });
+ok(r.status === 400 && /2,000/.test(r.body.error), '수리비 범위 밖 → 400', r.body);
+r = await ccall(env, 'PUT', { password: '팀비번-2026', rev: 0, by: '권재훈', note: '후드 교환 더', rows: [{ key: '후드', '교환': -4.04, '판금': -1.6 }], repair: { '외판': 35, outside: { '범퍼': 30 } } });
+ok(r.status === 200 && r.body.team.rev === 1 && r.body.team.rows.find(x => x.key === '후드')['교환'] === -4 && r.body.team.repair['외판'] === 35 &&
+   r.body.team.repair.outside['범퍼'] === 30 && r.body.team.log[0].what.some(w => /후드 교환/.test(w)), '저장 → 1판(값 정리 · 변경 기록)', r.body);
+r = await ccall(env, 'PUT', { password: '팀비번-2026', rev: 0, by: '김팀원', rows: [] });
+ok(r.status === 409 && r.body.team.rev === 1, '예전 판으로 저장 → 409', r.status);
+r = await ccall(env, 'PUT', { password: '팀비번-2026', rev: 1, by: '김팀원', rows: [{ key: '후드', '교환': -4, '판금': -1.6 }], repair: { '외판': 35, outside: { '범퍼': 30 } } });
+ok(r.status === 400 && /바뀐 것/.test(r.body.error), '바뀐 것 없음 → 400', r.body);
+
 console.log('[이용 통계 기록 /api/ev (기획 v2.28)]');
 const U = 'abcdefgh12345678', SI = 'session000000001';
 const ev = (env2, body, headers = {}) => worker.fetch(new Request('https://x.test/api/ev', {

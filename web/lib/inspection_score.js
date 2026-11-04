@@ -516,9 +516,14 @@
       return out.slice(0, 4);
     }
 
-    // opt: { terms: 팀 표기 사전, picks: { 조각 원문: 부위 목록 } — 사용자가 후보에서 고른 것 }
+    // 상태 3가지(기획 v2.32): 교환(교환·용접절단) · 판금 · 수리필요(요철·손상·부식·흠집)
+    var KIND3 = { 교환: '교환', 용접절단: '교환', 판금: '판금', 요철: '수리필요', 손상: '수리필요', 부식: '수리필요', 흠집: '수리필요', 수리필요: '수리필요' };
+    function to3(items) { return (items || []).map(function (it) { return Object.assign({}, it, { status: KIND3[it.status] || it.status }); }); }
+
+    // opt: { terms: 팀 표기 사전, picks: { 조각 원문: 부위 목록 } — 사용자가 후보에서 고른 것,
+    //        status3: 상태를 교환 · 판금 · 수리필요로(사이트 · 묶음) — 기록부 밖 부위의 수리필요도 부위로 돌려준다 }
     function parseText(text, opt) {
-      var lex = lexFor(opt && opt.terms), picks = (opt && opt.picks) || {};
+      var lex = lexFor(opt && opt.terms), picks = (opt && opt.picks) || {}, three = !!(opt && opt.status3);
       var res = { state: '입력', items: [], unknown: [], notes: [], outside: [], paint: [], tokens: [] }, ignored = [];
       var s = text == null ? '' : String(text);
       if (s.normalize) s = s.normalize('NFKC');   // 전각 문자 → 반각
@@ -547,7 +552,7 @@
         if (t.header) { carry = t.header; return; }
         t.groups.forEach(function (g, gi) {
           g.status = topStatus(g);
-          if (g.part && !g.status) {
+          if ((g.part || g.out) && !g.status) {
             var nx = t.groups.slice(gi + 1).filter(function (x) { return x.sts.length; })[0];
             if (nx) { g.status = topStatus(nx); g.inh = 'next'; }
             else if (carry) { g.status = carry; g.inh = 'carry'; }
@@ -575,7 +580,14 @@
         var bad = t.skipped.length ? '못 읽은 글자' : t.amb ? '비슷한 낱말이 여럿' : '', outs = [], paint = false;
         t.groups.forEach(function (g) {
           g.seq.forEach(function (s) { if (s.e.w === '경미') res.notes.push("'" + t.text + "' — '경미'는 손상으로 계산"); });
-          if (g.out) { outs.push(g.out.e.w); return; }
+          if (g.out) {                                           // 기록부 밖 부위: 수리필요면 수리비(3가지 상태로 읽을 때, Q224) · 교환·판금 이력은 계산 제외
+            if (three && g.status && KIND3[g.status] === '수리필요') {
+              var sd = null;
+              g.mods.forEach(function (m) { if (m.e.side) sd = m.e.side; });
+              row.items.push({ part: g.out.e.w, side: sd, pillar: null, status: g.status, outside: true });
+            } else outs.push(g.out.e.w);
+            return;
+          }
           if (!g.part) {
             if (g.mods.length) bad = bad || '부위 없음';
             else if (g.paint) paint = true;
@@ -623,6 +635,14 @@
         kept[at[key]] = worse;
       });
       res.items = kept;
+      if (three) {                                                // 3가지 상태로(겹친 자리 고르기는 원래 상태의 심한 순서로 마친 뒤)
+        res.items = to3(res.items);
+        res.tokens.forEach(function (r) {
+          if (r.items.length) { r.items = to3(r.items); r.label = summary(r.items); }
+          r.cands.forEach(function (c) { c.items = to3(c.items); c.label = summary(c.items); });
+        });
+        res.notes = res.notes.map(function (n) { return n.replace("'경미'는 손상으로 계산", "'경미'는 수리필요로 계산"); });
+      }
       if (!res.items.length && !res.unknown.length) {             // 무사고 = 이상 없음 · 범퍼 같은 기록부 밖 · 도색만을 적은 경우. 상태 머리만 쓴 글은 아직 미상
         res.state = res.tokens.some(function (r) { return r.kind === 'clean' || r.kind === 'outside' || r.kind === 'paint'; }) ? '무사고' : '미상';
       } else ignored.forEach(function (t) { res.notes.push("'" + t + "' — 다른 부위가 함께 적혀 있어 무시"); });

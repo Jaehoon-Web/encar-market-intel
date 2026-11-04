@@ -4,6 +4,8 @@
  *   GET /api/rates          → { ok, store, writable, team }   팀이 고친 것(아직 없으면 team = null)
  *   GET /api/rates?rev=N    → { ok, team }                    N판(되돌리기용, 180일 보관)
  *   PUT /api/rates          본문 { password, rev, by, note, cells, models } → { ok, team }   새 판 저장
+ *   GET /api/cond           → { ok, store, writable, team }   기록부 감가 · 수리비 표 팀 수정(기획 v2.32 Q220 · Q222 — 환산 비율과 같은 비밀번호)
+ *   PUT /api/cond           본문 { password, rev, by, note, rows: [{ key, 교환, 판금 }], once: { 사고, 골격, 골격_저가 }, repair: { …, outside: { … }, 수입배수 } }
  *   GET /api/terms          → { ok, store, writable, team }   팀 표기 사전(기록부 글 읽기, 기획 v2.31 Q201·Q209 — 환산 비율과 같은 비밀번호)
  *   PUT /api/terms          본문 { password, by, add: [{ t, kind, part, side, pillar, status }], del: [t…] } → { ok, team }   더하기·지우기
  *   POST /api/ev            본문 { u, s, d, e: [[시각, 종류, 화면, 이름, 값], …] } → 204   이용 통계(web/v2/track.js)
@@ -144,6 +146,83 @@ async function put(request, env) {
   }
   if (cur) await env.RATES.put(KEY + ':' + cur.rev, JSON.stringify(cur), { expirationTtl: KEEP_DAYS * 86400 });
   await env.RATES.put(KEY, JSON.stringify(next));
+  return json({ ok: true, team: next });
+}
+
+// ───── 기록부 감가 · 수리비 표(기획 v2.32 5.15) — 초기값은 정적 /data/inspection_model.json 의 cond, 여기에는 팀이 고친 판 전체 ─────
+const COND = 'cond';
+async function condBase(env, origin) {
+  const m = await (await env.ASSETS.fetch(new Request(origin + '/data/inspection_model.json'))).json();
+  return m.cond;
+}
+function pctIn(v, lo, name) {                                  // 감가(%) — lo~0, 소수 첫째 자리
+  const n = Number(v);
+  if (v === null || v === undefined || v === '' || !Number.isFinite(n) || n > 0 || n < lo) throw new Error(name + ': ' + lo + '~0(%) 사이 숫자로 넣어 주세요');
+  return Math.round(n * 10) / 10;
+}
+function wonIn(v, name) {                                      // 수리비(만원) — 0~2,000
+  const n = Number(v);
+  if (v === null || v === undefined || v === '' || !Number.isFinite(n) || n < 0 || n > 2000) throw new Error(name + ': 0~2,000(만원) 사이 숫자로 넣어 주세요');
+  return Math.round(n);
+}
+function buildCond(cur, body, base, now) {
+  const by = str(body.by, 30);
+  if (!by) throw new Error('수정하는 사람 이름을 넣어 주세요');
+  const rows = base.rows.map(b => {
+    const t = (Array.isArray(body.rows) ? body.rows : []).find(x => x && x.key === b.key) || {};
+    const ex = pctIn('교환' in t ? t['교환'] : b['교환'], -30, b.label + ' 교환');
+    const pg = ('판금' in t ? t['판금'] : b['판금']) === null ? null : pctIn('판금' in t ? t['판금'] : b['판금'], -30, b.label + ' 판금');
+    if (pg !== null && ex > pg) throw new Error(b.label + ': 교환은 판금보다 같거나 더 깎여야 합니다');
+    return { key: b.key, '교환': ex, '판금': pg };
+  });
+  const o = body.once || {}, once = {};
+  ['사고', '골격', '골격_저가'].forEach(k => { once[k] = pctIn(k in o ? o[k] : base.once[k], -20, '한 번 감가 ' + k); });
+  const r = body.repair || {}, repair = { outside: {} };
+  Object.keys(base.repair).forEach(k => {
+    if (k === 'outside') Object.keys(base.repair.outside).forEach(c => { repair.outside[c] = wonIn(r.outside && c in r.outside ? r.outside[c] : base.repair.outside[c], '수리비 ' + c); });
+    else if (k === '수입배수') {
+      const n = Number(k in r ? r[k] : base.repair[k]);
+      if (!Number.isFinite(n) || n < 1 || n > 5) throw new Error('수입 배수는 1~5 사이로 넣어 주세요');
+      repair[k] = Math.round(n * 10) / 10;
+    } else repair[k] = wonIn(k in r ? r[k] : base.repair[k], '수리비 ' + k);
+  });
+  const prev = cur || { rows: base.rows, once: base.once, repair: base.repair }, what = [];
+  rows.forEach(x => {
+    const p = (prev.rows || []).find(y => y.key === x.key) || {};
+    ['교환', '판금'].forEach(s => { if (p[s] !== x[s]) what.push(x.key + ' ' + s + ' ' + p[s] + ' → ' + x[s] + '%'); });
+  });
+  Object.keys(once).forEach(k => { if ((prev.once || {})[k] !== once[k]) what.push('한 번 ' + k + ' ' + (prev.once || {})[k] + ' → ' + once[k] + '%'); });
+  Object.keys(repair).forEach(k => {
+    if (k === 'outside') Object.keys(repair.outside).forEach(c => { if (((prev.repair || {}).outside || {})[c] !== repair.outside[c]) what.push('수리비 ' + c + ' → ' + repair.outside[c] + '만'); });
+    else if ((prev.repair || {})[k] !== repair[k]) what.push('수리비 ' + k + ' → ' + repair[k] + (k === '수입배수' ? '배' : '만'));
+  });
+  if (!what.length) throw new Error('바뀐 것이 없습니다');
+  const rev = (cur ? cur.rev : 0) + 1, note = str(body.note, 200);
+  const log = [{ rev, at: now, by, note, what: what.slice(0, 40) }].concat((cur && cur.log) || []).slice(0, MAX_LOG);
+  return { rev, updated_at: now, updated_by: by, rows, once, repair, log };
+}
+async function condPut(request, env) {
+  if (!env.RATES) return json({ ok: false, error: '저장소(KV)가 아직 연결되지 않았습니다' }, 503);
+  if (!env.RATES_PASSWORD) return json({ ok: false, error: '수정 비밀번호가 아직 설정되지 않았습니다' }, 503);
+  const text = await request.text();
+  if (text.length > MAX_BODY) return json({ ok: false, error: '보낸 내용이 너무 큽니다' }, 413);
+  let body;
+  try { body = JSON.parse(text); } catch (e) { return json({ ok: false, error: '내용을 읽을 수 없습니다' }, 400); }
+  if (!body || typeof body !== 'object') return json({ ok: false, error: '내용을 읽을 수 없습니다' }, 400);
+  if (!(await samePassword(body.password == null ? '' : body.password, env.RATES_PASSWORD))) {
+    await sleep(1000);
+    return json({ ok: false, error: '비밀번호가 맞지 않습니다' }, 401);
+  }
+  const cur = await env.RATES.get(COND, 'json');
+  if (Number(body.rev) !== (cur ? cur.rev : 0)) return json({ ok: false, error: '그사이 다른 사람이 저장했습니다. 다시 불러온 뒤 고쳐 주세요', team: cur }, 409);
+  let next;
+  try {
+    next = buildCond(cur, body, await condBase(env, new URL(request.url).origin), new Date().toISOString());
+  } catch (e) {
+    return json({ ok: false, error: e.message }, 400);
+  }
+  if (cur) await env.RATES.put(COND + ':' + cur.rev, JSON.stringify(cur), { expirationTtl: KEEP_DAYS * 86400 });
+  await env.RATES.put(COND, JSON.stringify(next));
   return json({ ok: true, team: next });
 }
 
@@ -332,6 +411,14 @@ export default {
     if (url.pathname === '/api/rates') {
       if (request.method === 'GET') return get(url, env);
       if (request.method === 'PUT') return put(request, env);
+      return json({ ok: false, error: 'GET 또는 PUT만 됩니다' }, 405);
+    }
+    if (url.pathname === '/api/cond') {
+      if (request.method === 'GET') {
+        if (!env.RATES) return json({ ok: true, store: false, writable: false, team: null });
+        return json({ ok: true, store: true, writable: !!env.RATES_PASSWORD, team: await env.RATES.get(COND, 'json') });
+      }
+      if (request.method === 'PUT') return condPut(request, env);
       return json({ ok: false, error: 'GET 또는 PUT만 됩니다' }, 405);
     }
     if (url.pathname === '/api/terms') {

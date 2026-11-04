@@ -12,12 +12,12 @@ price_engine.py — 시세 산정 엔진 (기획안 WP1, 5.1.2): "가장 비슷�
   1 후보: 같은 모델(엔카 '모델' = 기획안의 세부모델)의 비교 가능 매물 중 성능점검이 있는 것.
           판매중(현재가) + 최근 3개월 판매(마지막 호가). 같은 차(차키)는 뺀다
   2 단계별 매칭: 비교 매물이 5대 이상 모이는 첫 단계를 쓴다
-          1 같은 트림(등급·세부등급 일치, 차령 ±6개월·주행 ±2만km·성능등급 ±1, 이름이 '정확'인 매물만) → 2 트림 무관(등급 일치)
+          1 같은 트림(등급·세부등급 일치, 차령 ±6개월·주행 ±2만km, 이름이 '정확'인 매물만) → 2 트림 무관(등급 일치)
           → 3 차령 ±12개월 → 4 주행 ±4만km → 5 등급 무관 → 6 모델 전체. 세부등급을 고르지 않았으면 1단계는 건너뛴다(기획 v2.23 Q104·Q111)
-          상태 미상이면 성능등급 조건을 쓰지 않는다. 구동·인승·용도(엔카 등급 글에서 뽑음)가 다르면 유사도를 낮춘다(Q108)
-  3 조건 보정: 가격 × (1−대상 감가율)/(1−비교 감가율) × exp(D3 계수: 차령·주행·렌트·색상 차이 + 등급·세부등급 차이)
-               × 시점(판매 매물의 마지막 호가 → 지금, D4 시세지수 국산·수입별).
-               상태 미상이면 성능 보정 없이 계산하고, 무사고 기준 값(대상 감가율 0)을 따로 낸다
+          비교 매물은 상태와 무관하게 고른다(기획 v2.32 Q216). 구동·인승·용도(등급 글에서 뽑음)가 다르면 유사도를 낮춘다(Q108)
+  3 조건 보정: 가격 × exp(D3 계수: 차령·주행·렌트·색상 차이 + 등급·세부등급 차이) × 시점(판매 매물의 마지막 호가 → 지금, D4 시세지수)
+               ÷ (1 − 그 매물의 이력 감가) → 무사고 값. 대표값(무사고 시세) × (1 − 대상 이력 감가) = 추정 시세(기록부 감가 표 Cond).
+               상태 미상이면 대상 감가 = min(비교 매물 평균 감가, 가장 가벼운 사고 감가)(Q215)
   4 이상치: 로그 보정가가 가중 중앙값에서 3×MAD(최소 15%)보다 멀면 뺀다. 남는 매물이 5대 미만이면 빼지 않는다
   5 대표값: 유사도 가중 중앙값. 범위는 가중 25~75%
   6 신뢰도: A 10대 이상·3단계 이내·범위가 대표값 ±8% 안 / B 5단계 이내 / C 6단계(참고용)
@@ -27,7 +27,9 @@ import os, re, sys, json, zlib, glob, argparse, datetime, subprocess
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
+import math
 import adjust_coef as AC
+import inspection_score as IS
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PREP = os.path.join(ROOT, "encar_output", "prep")
@@ -65,6 +67,109 @@ ROW_FIELDS = ["id", "m", "g", "t", "reg", "om", "km", "rent", "col", "perf", "de
 #   en: 엔카 원래 이름(머리말 enc 목록 번호 — '모델|등급|세부등급') · op: 출고가(만원, 감가 곡선의 내 차 잔존율 — 비교 매물 출고가의 가운데 값)
 
 
+# ───────── 기록부 감가 표(기획 v2.32 5.15) — web/lib/cond_table.js 와 같은 계산 · 같은 순서 ─────────
+STATUS3 = {"교환": "교환", "용접절단": "교환", "판금": "판금", "요철": "수리필요", "손상": "수리필요", "부식": "수리필요", "흠집": "수리필요",
+           "경미": "수리필요", "수리필요": "수리필요"}
+
+
+class Cond:
+    """이력 감가(교환·판금) · 수리비(수리필요) · 미상의 '가장 가벼운 사고'. 표는 inspection_score.COND_TABLE"""
+
+    def __init__(self, table=None):
+        T = json.loads(json.dumps(table or IS.COND_TABLE))
+        self.T = T
+        self.parts = {p: {"rank": r, "group": IS.SCORE_GROUP.get(p)} for p, r in IS.PART_RANK.items()}
+        self.generic = IS.GENERIC_PARTS
+        rank_of_group = {v["group"]: v["rank"] for v in self.parts.values() if v["group"]}
+        neg = lambda v: None if v is None else min(0.0, float(v))
+        self.rows = {}
+        for r in T["rows"]:
+            r["판금"], r["교환"] = neg(r["판금"]), neg(r["교환"])
+            self.rows[r["key"]] = r
+        for r in T["rows"]:                                                          # 교환은 그 줄 판금(없으면 단계 판금)보다 덜 깎이지 않게
+            rk = self.rows.get(rank_of_group.get(r["key"]))
+            pg = r["판금"] if r["판금"] is not None else (rk["판금"] if rk else None)
+            if pg is not None and r["교환"] is not None and r["교환"] > pg:
+                r["교환"] = pg
+        for k in ("사고", "골격", "골격_저가"):
+            T["once"][k] = neg(T["once"][k]) or 0.0
+        most = max(v for r in T["rows"] for v in (r["교환"], r["판금"]) if v is not None)
+        self.light = 1 - (1 + T["once"]["사고"] / 100) * (1 + most / 100)
+        self.cat = {w.replace(" ", ""): c for c, ws in T["outside_cat"].items() for w in ws}
+
+    def info(self, part):
+        return self.parts.get(part) or (self.parts.get(self.generic[part]) if part in self.generic else None)
+
+    def row_value(self, inf, s):
+        r = self.rows.get(inf["group"])
+        if r and r.get(s) is not None and inf["rank"] != "골격":
+            return r[s]
+        rk = self.rows.get(inf["rank"])
+        return rk[s] if rk and rk.get(s) is not None else 0
+
+    def frame_once(self, price):
+        lo, hi = self.T["once"]["저가"]
+        a, b = self.T["once"]["골격_저가"], self.T["once"]["골격"]
+        if price is None or price >= hi:
+            return b
+        if price <= lo:
+            return a
+        return a + (b - a) * (price - lo) / (hi - lo)
+
+    def hist(self, items, price):
+        """이력 감가 D(0~1) — 부위(적힌 순) → 사고 이력 한 번 → 골격 한 번"""
+        L, cnt, any_, frame = 0.0, {}, False, False
+        for it in items:
+            s, inf = STATUS3.get(it["status"]), self.info(it["part"])
+            if s not in ("교환", "판금") or not inf:
+                continue
+            any_ = True
+            frame = frame or inf["rank"] == "골격"
+            key = ("골격" if inf["rank"] == "골격" else inf["group"]) + "|" + s
+            cnt[key] = cnt.get(key, 0) + 1
+            if cnt[key] > self.T["cap"]:
+                continue
+            L += math.log(1 + self.row_value(inf, s) / 100)
+        if any_:
+            L += math.log(1 + self.T["once"]["사고"] / 100)
+        if frame:
+            L += math.log(1 + self.frame_once(price) / 100)
+        return 1 - math.exp(L)
+
+    @staticmethod
+    def from_names(names):
+        return [{"part": x[:x.rfind("(")], "side": None, "pillar": None, "status": x[x.rfind("(") + 1:-1]} for x in names if "(" in x]
+
+    def comps_d(self, names, price):
+        return self.hist(self.from_names(names), price) if names else 0.0
+
+    def repair(self, items, imported=False):
+        R = self.T["repair"]
+        x = (R.get("수입배수") or 1) if imported else 1
+        total = 0
+        for it in items:
+            if STATUS3.get(it["status"]) != "수리필요":
+                continue
+            inf = self.info(it["part"])
+            if not inf:
+                c = self.cat.get(str(it["part"]).replace(" ", ""), "기타")
+                won = R["outside"].get(c, R["outside"]["기타"])
+            elif R.get(it["part"]) is not None:
+                won = R[it["part"]]
+            else:
+                won = R["골격"] if inf["rank"] == "골격" else R["외판"]
+            total += math.floor(won * x + 0.5)                                       # 사이트 Math.round 와 같게
+        return total
+
+
+COND = Cond()
+
+
+def damage_names(s):
+    """listings 손상부위 ('후드(교환) / 쿼터 패널(판금)') → 이름 목록 — 사이트 비교 매물 파일 dm 과 같은 순서"""
+    return [x.strip() for x in s.split("/") if x.strip()] if isinstance(s, str) and s.strip() else []
+
+
 # ───────── 데이터 ─────────
 def load_pool():
     """비교 후보: 비교사용(판매중 + 최근 3개월 판매, 품질 플래그·중복 제외) 중 성능점검이 있는 매물"""
@@ -99,6 +204,7 @@ def load_pool():
     d["seg"] = d["차급"].fillna("기타") + "·" + d["origin"]
     d["key"] = d["제조사"] + "|" + d["모델"]
     d["dep"] = d["성능감가율"] / 100
+    d["D"] = [COND.comps_d(damage_names(a), p) for a, p in zip(d["손상부위"], d["price"])]   # 이력 감가(기록부 감가 표)
     d["tf"] = time_factor(d)
     return d
 
@@ -150,7 +256,7 @@ class Group:
         self.ids = g.index.values
         self.age, self.km, self.x = g["age"].values, g["km"].values, g[FEATS].values
         self.grades, self.trims = g["등급"].values, g["세부"].values
-        self.perf, self.dep = g["성능등급"].values.astype(float), g["dep"].values
+        self.perf, self.D = g["성능등급"].values.astype(float), g["D"].values
         self.price, self.sold, self.tf = g["price"].values, g["sold"].values.astype(bool), g["tf"].values
         self.carkey = g["차키"].values
         self.q, self.dv, self.se, self.us = g["q"].values.astype(bool), g["dv"].values, g["se"].values, g["us"].values
@@ -168,9 +274,9 @@ def wquantile(v, w, q):
 def estimate_one(G, t, opts=None, detail=False):
     """대상 차 t → 결과 dict. 비교 매물이 5대 미만이면 None
     t: 등급, 세부, age(개월), km(만km, 25 상한), rent(0/1), color(계열 | None=모름),
-       dep(성능감가율 0~1 | None=상태 미상), perf(성능등급 | None), exclude_id, carkey"""
+       items(기록부 [{part, status}] — [] 무사고 · None 상태 미상), exclude_id, carkey"""
     o = dict(OPTS, **(opts or {}))
-    known = t.get("dep") is not None
+    known = t.get("items") is not None
     n0 = len(G.ids)
     base = np.ones(n0, bool)
     if t.get("exclude_id") is not None:
@@ -182,7 +288,6 @@ def estimate_one(G, t, opts=None, detail=False):
     dage, dkm = np.abs(G.age - t["age"]), np.abs(G.km - t["km"])
     same_g = G.grades == t["등급"]
     same_t = (G.trims == t["세부"]) & ~G.q
-    dperf = np.abs(G.perf - t["perf"]) if known else np.zeros(n0)
     for step, (name, need_g, da, dk, ds, need_t) in enumerate(STEPS, 1):
         if need_t and not t["세부"]:
             continue                                                                 # 세부등급을 고르지 않았으면 같은 트림 단계는 건너뜀
@@ -191,9 +296,7 @@ def estimate_one(G, t, opts=None, detail=False):
             sel &= same_g
         if need_t:
             sel &= same_t
-        if known:
-            sel &= dperf <= ds
-        if sel.sum() >= MIN_COMPS:
+        if sel.sum() >= MIN_COMPS:                                                   # 상태와 무관하게(v2.32)
             break
     else:
         return None
@@ -212,8 +315,7 @@ def estimate_one(G, t, opts=None, detail=False):
     if not o["adjust"]:
         lin, tf = np.zeros(len(idx)), np.ones(len(idx))
     p = G.price[idx] * np.exp(lin) * tf
-    cond = (1 - t["dep"]) / (1 - G.dep[idx]) if known and o["adjust"] else np.ones(len(idx))
-    adj = p * cond
+    cl = p / (1 - G.D[idx]) if o["adjust"] else p                                   # 그 매물의 사고 이력을 되돌린 무사고 값
     attr = np.zeros(len(idx))                                                        # 구동·인승·용도 — 둘 다 알 때 다르면
     for key, arr in (("dv", G.dv), ("se", G.se), ("us", G.us)):
         tv = t.get(key) or 0
@@ -221,9 +323,9 @@ def estimate_one(G, t, opts=None, detail=False):
             attr += (arr[idx] != 0) & (arr[idx] != tv)
     dist = (dage[idx] / SIM["age"] + dkm[idx] / SIM["km"] + SIM["grade"] * ~same_g[idx]
             + SIM["trim"] * ((t["세부"] != "") & (G.trims[idx] != "") & (G.trims[idx] != t["세부"]))
-            + SIM["perf"] * dperf[idx] + SIM["sold"] * G.sold[idx] + SIM["attr"] * attr)
+            + SIM["sold"] * G.sold[idx] + SIM["attr"] * attr)                       # 상태 차이는 가중치에 넣지 않는다
     w = np.exp(-dist) if o["weight"] else np.ones(len(idx))
-    la = np.log(adj)
+    la = np.log(cl)
     dev = np.abs(la - wquantile(la, w, 0.5))
     keep = np.ones(len(idx), bool)
     if o["outlier"]:
@@ -231,16 +333,26 @@ def estimate_one(G, t, opts=None, detail=False):
         if keep.sum() < MIN_COMPS:
             keep[:] = True
     lk, wk = la[keep], w[keep]
-    est, lo, hi = (float(np.exp(wquantile(lk, wk, q))) for q in (0.5, 0.25, 0.75))
+    b0, lo0, hi0 = (float(np.exp(wquantile(lk, wk, q))) for q in (0.5, 0.25, 0.75))   # 무사고 시세 · 범위
+    sw, sd = 0.0, 0.0
+    for j in np.flatnonzero(keep):                                                   # 사이트와 같은 순서로 더함
+        sw += w[j]
+        sd += w[j] * G.D[idx[j]]
+    Dbar, Dt = sd / sw, 0.0
+    if o["adjust"]:
+        Dt = COND.hist(t["items"], b0) if known else min(Dbar, COND.light)          # 미상 = 평균 상태, 단 가장 가벼운 사고보다 높게
+    est, lo, hi = b0 * (1 - Dt), lo0 * (1 - Dt), hi0 * (1 - Dt)
     n = int(keep.sum())
     tight = hi / est - 1 <= A_WIDTH and 1 - lo / est <= A_WIDTH
     grade = "A" if n >= GOOD_COMPS and step <= A_STEP and tight else ("B" if step <= B_STEP else "C")
-    r = {"est": est, "lo": lo, "hi": hi, "n": n, "out": int((~keep).sum()), "step": step, "step_name": STEPS[step - 1][0], "grade": grade}
-    if not known:                                                                    # 무사고 기준 값(대상 감가율 0)
-        r["est0"] = float(np.exp(wquantile(np.log(p / (1 - G.dep[idx]))[keep], wk, 0.5)))
+    r = {"est": est, "lo": lo, "hi": hi, "base": b0, "D": Dt, "n": n, "out": int((~keep).sum()), "step": step, "step_name": STEPS[step - 1][0],
+         "grade": grade}
+    if not known:
+        r["est0"], r["Dbar"] = b0, Dbar
     if detail:
+        adj = cl * (1 - Dt)
         logs = {"차령": parts[:, 0], "주행": parts[:, 1], "렌트": parts[:, 2], "색상": parts[:, 3:].sum(axis=1),
-                "등급": tfe - G.fe[idx], "성능": np.log(cond), "시점": np.log(tf)}
+                "등급": tfe - G.fe[idx], "성능": np.log((1 - Dt) / (1 - G.D[idx])) if o["adjust"] else np.zeros(len(idx)), "시점": np.log(tf)}
         r["보정근거"] = {k: round(est * (np.exp(np.average(v[keep], weights=wk)) - 1)) for k, v in logs.items()}
         r["coef_level"] = G.coef_level
         c = G.g.iloc[idx].assign(보정가=adj.round(0), 유사도=(w / w.max() * 100).round(0), 이상치=~keep)
@@ -299,17 +411,18 @@ def conversion_rate(R, est, age_years, maker=None, model=None, fuel=None, team=N
 def estimate_car(groups, R, car, opts=None):
     """사이트 입력과 같은 형태 → 결과(비교 매물 표·보정 근거·환산가 포함)
     car: 제조사, 모델, 등급, 세부등급(선택), 등록연월(yyyymm), 주행km, 색상계열(선택), 렌트(bool),
-         성능(None=상태 미상 | {"감가율": %, "등급": 1~9}), 수리비(만원, 선택), 연료·연식(환산 비율 모델 예외용, 선택),
+         상태(None=상태 미상 | {"items": [{part, status}]} — 무사고는 items []), 수리비(직접 입력 만원, 선택 — 수리필요는 자동으로 더함),
+         수입(수리비 배수), 연료·연식(환산 비율 모델 예외용, 선택),
          기준연월(yyyymm, 기본 이번 달), exclude_id(검증용)"""
     G = groups.get(f"{car['제조사']}|{car['모델']}")
     if G is None:
         return None
     ym = car.get("기준연월") or int(datetime.date.today().strftime("%Y%m"))
     age = (ym // 100) * 12 + ym % 100 - ((car["등록연월"] // 100) * 12 + car["등록연월"] % 100)
-    perf = car.get("성능")
+    st = car.get("상태")
     t = {"등급": car["등급"], "세부": car.get("세부등급") or "", "age": float(age), "km": min(car["주행km"], KM_CAP) / 1e4,
          "rent": float(bool(car.get("렌트"))), "color": car.get("색상계열"), "exclude_id": car.get("exclude_id"),
-         "dep": None if perf is None else perf["감가율"] / 100, "perf": None if perf is None else perf["등급"],
+         "items": None if st is None else (st.get("items") or []),
          "dv": DRIVES.index(car["구동"]) if car.get("구동") in DRIVES else 0, "se": int(car.get("인승") or 0),
          "us": USES.index(car["용도"]) if car.get("용도") in USES else 0}                 # 차명 글에서 읽은 구동·인승·용도(없으면 0)
     r = estimate_one(G, t, opts, detail=True)
@@ -317,8 +430,9 @@ def estimate_car(groups, R, car, opts=None):
         return None
     yrs = ym // 100 - (car.get("연식") or car["등록연월"] // 100)
     rate, src = conversion_rate(R, r["est"], yrs, car["제조사"], car["모델"], car.get("연료"), car.get("팀환산"))
-    fix = float(car.get("수리비") or 0)
-    r.update({"수리비": fix, "시세": r["est"] - fix, "범위": (r["lo"] - fix, r["hi"] - fix),
+    auto = COND.repair(st.get("items") or [], bool(car.get("수입"))) if st is not None else 0
+    fix = float(car.get("수리비") or 0) + auto
+    r.update({"repairAuto": auto, "수리비": fix, "시세": r["est"] - fix, "범위": (r["lo"] - fix, r["hi"] - fix),
               "환산비율": rate, "환산출처": src, "환산가": r["est"] * (1 - rate / 100) - fix})
     return r
 
@@ -345,7 +459,7 @@ def validate(pool, folds=5):
                     unknown = v.get("unknown", False)
                     t = {"등급": r.등급, "세부": r.세부, "age": r.age, "km": r.km, "rent": r.rent,
                          "color": r.색상계열 if r.색상계열 in COLORS or r.색상계열 == "흰색·진주" else None,
-                         "dep": None if unknown else r.dep, "perf": None if unknown else float(r.성능등급),
+                         "items": None if unknown else Cond.from_names(damage_names(r.손상부위)),
                          "dv": r.dv, "se": r.se, "us": r.us,
                          "exclude_id": r.Index, "carkey": r.차키 if isinstance(r.차키, str) else None}
                     res = estimate_one(G, t, {kk: vv for kk, vv in v.items() if kk != "unknown"})
@@ -405,7 +519,7 @@ def demo(pool, n=3):
         for unknown in (False, True):
             car = {"제조사": r["제조사"], "모델": r["모델"], "등급": r["등급"], "세부등급": r["세부"], "등록연월": int(r["등록연월"]),
                    "주행km": float(r["주행km"]), "색상계열": r["색상계열"], "렌트": r["rent"] > 0, "연료": r["연료"], "연식": r["연식"],
-                   "성능": None if unknown else {"감가율": r["성능감가율"], "등급": int(r["성능등급"])},
+                   "상태": None if unknown else {"items": Cond.from_names(damage_names(r["손상부위"]))},
                    "수리비": 30, "기준연월": 202610, "exclude_id": r.name}
             x = estimate_car(groups, R, car)
             head = (f"{r['제조사']} {r['모델']} · {r['등급']} {r['세부']} · {int(r['등록연월'])} · {r['주행km']:,.0f}km · {r['색상계열']} · "
@@ -414,13 +528,13 @@ def demo(pool, n=3):
             if x is None:
                 print("  산정 불가(비교 매물 5대 미만)\n"); continue
             print(f"  추정 시세 {x['est']:,.0f}만 (범위 {x['lo']:,.0f}~{x['hi']:,.0f}) · 신뢰도 {x['grade']} · 비교 {x['n']}대 · {x['step_name']}"
-                  + (f" · 무사고라면 {x['est0']:,.0f}만" if 'est0' in x else "")
+                  + f" · 무사고 시세 {x['base']:,.0f}만 · 이력 감가 {x['D'] * 100:.1f}%"
                   + f"\n  수리비 −{x['수리비']:.0f}만 → 시세 {x['시세']:,.0f}만 · 환산가 {x['환산가']:,.0f}만 (비율 {x['환산비율']}%, {x['환산출처']})"
                   + f"\n  보정 근거(만원, 계수 {x['coef_level']}): " + " · ".join(f"{k} {v:+,}" for k, v in x["보정근거"].items() if v))
             c = x["comps"].head(5)
             for _, q in c.iterrows():
                 print(f"    유사도 {q['유사도']:>3.0f} · {int(q['등록연월'])} · {q['주행km'] / 1e4:4.1f}만 · {q['색상계열']} · {q['등급']} {q['세부']} · "
-                      f"성능 {int(q['성능등급'])}등급(글로비스 {q['글로비스_종합평가점']}) · 호가 {q['price']:,.0f} → 보정 {q['보정가']:,.0f}"
+                      f"{q['사고라벨']} · 호가 {q['price']:,.0f} → 보정 {q['보정가']:,.0f}"
                       + (" · 판매" if q["sold"] else "") + (" · 이상치" if q["이상치"] else ""))
             print()
 
@@ -569,18 +683,19 @@ def parity(pool):
         color = r.색상계열 if r.색상계열 in COLORS or r.색상계열 == "흰색·진주" else None
         yrs = year - int(r.연식 if r.연식 == r.연식 and r.연식 else r.등록연월 // 100)
         for unknown in (False, True):
+            dmg = damage_names(r.손상부위)
             t = {"등급": r.등급, "세부": r.세부, "age": r.age, "km": r.km, "rent": r.rent, "color": color,
-                 "dep": None if unknown else r.dep, "perf": None if unknown else float(r.성능등급), "exclude_id": r.Index,
+                 "items": None if unknown else Cond.from_names(dmg), "exclude_id": r.Index,
                  "dv": r.dv if unknown else 0, "se": r.se if unknown else 0, "us": r.us if unknown else 0}   # 절반은 구동·인승·용도를 알 때
             res = estimate_one(groups[r.key], t)
             exp = None
             if res is not None:
-                exp = {k: res[k] for k in ["est", "lo", "hi", "n", "out", "step", "grade"] + (["est0"] if unknown else [])}
+                exp = {k: res[k] for k in ["est", "lo", "hi", "base", "D", "n", "out", "step", "grade"] + (["est0"] if unknown else [])}
                 exp["rate"], exp["src"] = conversion_rate(R, res["est"], yrs, r.제조사, r.모델, r.연료)
             cases.append({"f": file_of[(r.제조사, r.모델)], "m": r.모델, "id": int(r.Index), "grade": r.등급, "trim": r.세부,
                           "dv": int(t["dv"]), "se": int(t["se"]), "us": int(t["us"]),
                           "age": _num(r.age), "km": _num(r.주행km), "rent": int(r.rent), "color": color,
-                          "dep": None if unknown else _num(r.성능감가율), "perf": None if unknown else int(r.성능등급),
+                          "dmg": None if unknown else dmg,
                           "yrs": yrs, "maker": r.제조사, "fuel": r.연료 if isinstance(r.연료, str) else None, "exp": exp})
     cars = []                                                                        # 사이트 입력 형태(환산가·수리비 포함)
     cur = pool[~pool["sold"]]
@@ -590,11 +705,11 @@ def parity(pool):
             car = {"제조사": r["제조사"], "모델": r["모델"], "등급": r["등급"], "세부등급": r["세부"], "등록연월": int(r["등록연월"]),
                    "주행km": _num(r["주행km"]), "색상계열": r["색상계열"], "렌트": bool(r["rent"] > 0),
                    "연료": r["연료"] if isinstance(r["연료"], str) else None, "연식": _num(r["연식"]),
-                   "성능": None if unknown else {"감가율": _num(r["성능감가율"]), "등급": int(r["성능등급"])},
+                   "상태": None if unknown else {"items": Cond.from_names(damage_names(r["손상부위"]))},
                    "수리비": 30, "기준연월": 202610, "exclude_id": r.name}
             x = estimate_car(groups, R, car)
-            exp = None if x is None else {k: x[k] for k in ["est", "lo", "hi", "n", "step", "grade", "시세", "환산가", "환산비율", "환산출처"]
-                                          + (["est0"] if unknown else [])}
+            exp = None if x is None else {k: x[k] for k in ["est", "lo", "hi", "base", "D", "n", "step", "grade", "시세", "환산가", "환산비율", "환산출처",
+                                                            "repairAuto"] + (["est0"] if unknown else [])}
             cars.append({"f": file_of[(r["제조사"], r["모델"])], "car": dict(car, exclude_id=None, excludeId=int(r.name)), "exp": exp})
     with open(PARITY, "w", encoding="utf-8") as f:
         json.dump({"cases": cases, "cars": cars}, f, ensure_ascii=False, separators=(",", ":"))

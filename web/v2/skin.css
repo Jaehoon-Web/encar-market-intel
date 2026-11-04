@@ -669,3 +669,30 @@ header .adm-link:hover, header .adm-link.on { color: var(--tx-1); background: #f
 .rd-tl .rd-save { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px; border-radius: 10px; background: #fff; }
 .rd-tl .rd-save .v2-in { width: 120px; padding: 6px 10px; font-size: 13px; }
 .rd-tl .rd-save em { font-style: normal; color: var(--down); font-size: 12px; }
+
+/* 기록부 상태 3가지 단추 · 기록부 밖 수리필요 · 감가 내역(기획 v2.32 5.15) */
+.v2-p .v2-ps { display: inline-flex; flex: 0 0 auto; gap: 2px; padding: 2px; border-radius: 9px; background: var(--bg-3); }
+.v2-p .v2-ps button { border: 0; background: transparent; border-radius: 7px; padding: 4px 8px; font-size: 12px; font-weight: 600; color: var(--tx-3); cursor: pointer; line-height: 1.2; }
+.v2-p .v2-ps button:hover { color: var(--tx-1); }
+.v2-p .v2-ps button.on { background: #fff; color: var(--tx-1); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
+.v2-p .v2-ps button.on.s-교환 { background: var(--down); color: #fff; }
+.v2-p .v2-ps button.on.s-판금 { background: #f59e0b; color: #fff; }
+.v2-p .v2-ps button.on.s-수리 { background: var(--info); color: #fff; }
+.v2-outs { display: flex; flex-wrap: wrap; gap: 6px; }
+.v2-outs .v2-cpill small { font-size: 11px; color: var(--tx-3); margin-left: 2px; }
+.v2-outs .v2-cpill.on small { color: inherit; opacity: .8; }
+.v2-board-t small { font-weight: 500; color: var(--tx-3); margin-left: 6px; }
+#condOut .v2-cl { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 6px; }
+#condOut .v2-cl li { font-size: 12px; padding: 3px 8px; border-radius: 8px; background: var(--bg-2); color: var(--tx-2); }
+#condOut .v2-cl li b { color: var(--down); font-weight: 650; margin-left: 2px; }
+#condOut .v2-cl li.once { background: var(--down-wash); }
+/* ⚙ 기록부 감가 표: 열이 둘·셋뿐이라 환산 비율 표의 최소 폭(600px)을 풀고 부위 이름은 줄바꿈 */
+.v2-rtbl.v2-ctbl { min-width: 0; }
+.v2-ctbl td:first-child { white-space: normal; }
+.v2-ctbl td:first-child b { font-size: 14px; }
+
+@media (max-width: 639px) {
+  .v2-pos { grid-template-columns: minmax(0, 1fr); }        /* 휴대폰: 한 줄에 부위 이름 + 단추 넷 */
+  .v2-p > span:first-child { flex: 1 1 auto; min-width: 0; }
+  .v2-p .v2-ps button { padding: 5px 8px; }
+}

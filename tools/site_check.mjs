@@ -140,7 +140,7 @@ ok(ADM._actName('price.one|nav:basis') === '목차 → 산정 근거' && ADM._ac
   '관리자 화면: 기능 이름을 읽기 쉬운 말로');
 
 section('라이브러리 동작(실제 데이터)');
-const IS = require(path.join(WEB, 'lib', 'inspection_score.js')), PE = require(path.join(WEB, 'lib', 'price_engine.js'));
+const IS = require(path.join(WEB, 'lib', 'inspection_score.js')), PE = require(path.join(WEB, 'lib', 'price_engine.js')), CTB = require(path.join(WEB, 'lib', 'cond_table.js'));
 const NM = require(path.join(WEB, 'lib', 'name_match.js')), RS = require(path.join(WEB, 'lib', 'rates_store.js'));
 const XW = require(path.join(WEB, 'lib', 'xlsx_writer.js'));
 for (const f of ['batch.js', 'rates.js', 'market.js', 'pulse.js', 'curve.js', 'data.js']) {
@@ -167,12 +167,13 @@ ok(ev['성능등급'] >= 1 && ev['성능등급'] <= 9 && ev['사고라벨'], `�
 const nm = NM.create(idx);
 const res = nm.model('더 뉴 그랜저 IG 2.5 프리미엄', 2020);
 ok(res.best && res.best.model === '더 뉴그랜저IG' && res.conf === 'high', `차명 매칭 → ${res.best && res.best.model} (${res.conf})`);
-const eng = PE.create({ config: idx.engine, coef, rates });
+const CT = CTB.create(read(path.join(DATA, 'inspection_model.json')));
+const eng = PE.create({ config: idx.engine, coef, rates, cond: CT });
 const G = eng.group(read(path.join(DATA, 'comps', res.best.file)));
 const gr = nm.grade(G, res.best.model, '더 뉴 그랜저 IG 2.5 프리미엄');
 ok(gr && gr.grade === '가솔린 2.5' && gr.trim === '프리미엄', `등급 매칭 → ${gr && gr.grade} ${gr && gr.trim}`);
 const R = eng.estimateCar(G, { '모델': res.best.model, '등급': gr.grade, '세부등급': gr.trim, '등록연월': 202003, '주행km': 60000, '색상계열': '흰색·진주',
-  '렌트': false, '성능': { '감가율': ev['성능감가율'], '등급': ev['성능등급'] }, '수리비': 30, '연료': '가솔린' }, { sold: true });
+  '렌트': false, '상태': { items: cond.items }, '수리비': 30, '연료': '가솔린' }, { sold: true });
 ok(R && R.price > 500 && R.price < 6000 && R.n >= 5 && ['A', 'B', 'C'].includes(R.grade),
   `시세 산정 → ${R && Math.round(R.price)}만(${R && R.grade}, 비교 ${R && R.n}대), 환산 ${R && R.rate}% ${R && R.rateSource}`);
 {                                                            // 묶음 비교의 보정 차이(기획 v2.29): 같은 계수로 — 오래되고 많이 탄 차는 차령·주행이 음수
@@ -183,6 +184,17 @@ ok(R && R.price > 500 && R.price < 6000 && R.n >= 5 && ['A', 'B', 'C'].includes(
   const f1 = eng.factoryPrice(G, base), f2 = eng.factoryPrice(G, Object.assign({}, base, { '세부등급': '' })), f3 = eng.factoryPrice(G, Object.assign({}, base, { '모델': '없는 모델' }));
   ok(f1 && f1.exact && f1.n >= 3 && f1.op >= f1.lo && f1.op <= f1.hi && f1.op > 2000 && f1.op < 5000 && f2 && !f2.exact && f3 === null,
     `출고가(factoryPrice): 같은 세부등급·등록연도 ${f1 && f1.op}만(${f1 && f1.n}대) · 세부등급 없으면 등급 기준 ${f2 && f2.op}만 · 없는 모델은 없음`, JSON.stringify([f1, f2, f3]));
+}
+{                                                            // 기록부 가격 반영(기획 v2.32): 비교 매물은 상태와 무관 → 무사고 ≥ 판금 ≥ 교환 · 교환·판금 ≤ 미상 · 수리필요는 수리비
+  const car = { '모델': res.best.model, '등급': gr.grade, '세부등급': gr.trim, '등록연월': 202003, '주행km': 60000, '색상계열': '흰색·진주', '렌트': false, '연료': '가솔린' };
+  const at = st => eng.estimateCar(G, Object.assign({}, car, { '상태': st }), { sold: true });
+  const U = at(null), C = at({ items: [] }), P = at({ items: [{ part: '프론트 패널', status: '판금' }] }), XF = at({ items: [{ part: '후드', status: '교환' }] }),
+    WF = at({ items: [{ part: '후드', status: '판금' }] }), RF = at({ items: [{ part: '후드', status: '수리필요' }, { part: '앞범퍼', status: '수리필요', outside: true }] });
+  ok(U && C && P && XF && WF && RF && C.price >= WF.price && WF.price >= XF.price && P.price <= U.price && WF.price <= U.price && C.base === P.base && C.base === U.base,
+    `기록부 감가 순서 — 무사고 ${Math.round(C.price)} ≥ 후드 판금 ${Math.round(WF.price)} ≥ 교환 ${Math.round(XF.price)} · 프론트 패널 판금 ${Math.round(P.price)} ≤ 미상 ${Math.round(U.price)}`,
+    JSON.stringify([C && C.price, WF && WF.price, XF && XF.price, P && P.price, U && U.price]));
+  ok(RF && RF.repairAuto === 55 && Math.abs(RF.price - (C.price - 55)) < 1e-6 && Math.abs(P.D - (1 - (1 - 0.027) * (1 - 0.015) * (1 - 0.032))) < 1e-9,
+    `수리필요 수리비(후드 30 + 앞범퍼 25 = ${RF && RF.repairAuto}만) · 프론트 패널 판금 감가 ${(P.D * 100).toFixed(2)}%`, JSON.stringify([RF && RF.repairAuto, P && P.D]));
 }
 const before = eng.conversionRate(1500, 4, '현대', '더 뉴 그랜저 IG', '가솔린');
 RS.apply(rates, { rev: 1, cells: rates.rates.map(r => r.map(() => null)), models: [{ '제조사': '현대', '모델': '더 뉴 그랜저 IG', '연료': '', '비율': 33.3 }] });

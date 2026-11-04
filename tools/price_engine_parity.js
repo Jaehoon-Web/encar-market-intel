@@ -5,11 +5,13 @@
 const fs = require('fs');
 const path = require('path');
 const PE = require(path.join(__dirname, '..', 'web', 'lib', 'price_engine.js'));
+const CTB = require(path.join(__dirname, '..', 'web', 'lib', 'cond_table.js'));
 
 const [fixturePath, compsDir, coefPath, ratesPath] = process.argv.slice(2);
 const read = p => JSON.parse(fs.readFileSync(p, 'utf8'));
 const index = read(path.join(compsDir, 'index.json'));
-const eng = PE.create({ config: index.engine, coef: read(coefPath), rates: read(ratesPath) });
+const CT = CTB.create(read(path.join(compsDir, '..', 'inspection_model.json')));   // 기록부 감가 표(기획 v2.32)
+const eng = PE.create({ config: index.engine, coef: read(coefPath), rates: read(ratesPath), cond: CT });
 const { cases, cars } = read(fixturePath);
 const groups = {};
 const grp = f => groups[f] || (groups[f] = eng.group(read(path.join(compsDir, f))));
@@ -59,26 +61,26 @@ function compare(title, list, run, numF, exactF) {
 const t0 = Date.now();
 compare('매물 단위 산정', cases, c => {
   const r = eng.estimate(grp(c.f), c.m, { grade: c.grade, trim: c.trim, age: c.age, km: c.km, rent: c.rent, color: c.color,
-    dep: c.dep, perf: c.perf, excludeId: c.id, dv: c.dv, se: c.se, us: c.us });   // 구동·인승·용도(절반만)
+    items: c.dmg == null ? null : CT.fromNames(c.dmg), excludeId: c.id, dv: c.dv, se: c.se, us: c.us });   // 기록부 = 그 매물의 손상 목록 · 구동·인승·용도(절반만)
   if (!r) return null;
   const cv = eng.conversionRate(r.est, c.yrs, c.maker, c.m, c.fuel);
   return Object.assign(r, { rate: cv.rate, src: cv.source });
-}, ['est', 'lo', 'hi', 'est0', 'rate'], ['n', 'out', 'step', 'grade', 'src']);
+}, ['est', 'lo', 'hi', 'est0', 'base', 'D', 'rate'], ['n', 'out', 'step', 'grade', 'src']);
 console.log(`  모델그룹 파일 ${Object.keys(groups).length}개 읽음 · 전체 ${((Date.now() - t0) / 1000).toFixed(1)}초`);
 
 // 2) 사이트 입력 형태 — 등록연월·기준연월로 차령 계산, 환산가·수리비 차감까지
 compare('사이트 입력(estimateCar)', cars.map(c => Object.assign({ id: c.car.excludeId }, c)), c => {
   const r = eng.estimateCar(grp(c.f), c.car);
   return r && Object.assign(r, { 시세: r.price, 환산가: r.converted, 환산비율: r.rate, 환산출처: r.rateSource });
-}, ['est', 'lo', 'hi', 'est0', '시세', '환산가', '환산비율'], ['n', 'step', 'grade', '환산출처']);
+}, ['est', 'lo', 'hi', 'est0', 'base', 'D', '시세', '환산가', '환산비율', 'repairAuto'], ['n', 'step', 'grade', '환산출처']);
 
 // 3) 예시 한 건 — 화면에 나갈 값
-const ex = cars.find(c => c.exp && c.car['성능']);
+const ex = cars.find(c => c.exp && c.car['상태'] && c.car['상태'].items.length);
 if (ex) {
   const r = eng.estimateCar(grp(ex.f), ex.car);
   const car = ex.car;
   console.log(`\n[예시] ${car['제조사']} ${car['모델']} · ${car['등급']} · ${car['등록연월']} · ${car['주행km'].toLocaleString()}km · ` +
-    `성능 ${car['성능']['등급']}등급 · 수리비 ${car['수리비']}만`);
+    `기록부 ${car['상태'].items.length}곳(이력 감가 ${(r.D * 100).toFixed(1)}%) · 수리비 직접 ${car['수리비']}만 + 자동 ${r.repairAuto}만`);
   console.log(`  추정 시세 ${Math.round(r.est).toLocaleString()}만 (범위 ${Math.round(r.lo).toLocaleString()}~${Math.round(r.hi).toLocaleString()}) · ` +
     `신뢰도 ${r.grade} · 비교 ${r.n}대 · ${r.stepName} · 계수 ${r.coefLevel}`);
   console.log(`  수리비 반영 시세 ${Math.round(r.price).toLocaleString()}만 · 환산가 ${Math.round(r.converted).toLocaleString()}만 (비율 ${r.rate}%, ${r.rateSource})`);

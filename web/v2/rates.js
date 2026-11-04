@@ -4,6 +4,7 @@
  * 보기: 호가대×차령 기준표(팀이 고친 칸 강조 · 초기값·표본 수) · 팀 수정(모델별 비율) · 모델 예외(데이터) · 변경 기록 · 시험 계산
  * 고치기: [수정하기] → 이름·비밀번호 → 칸·모델 고치기 → [저장] = PUT /api/rates(worker/index.js). 저장소가 없으면 보기만 된다.
  * 저장하면 같은 비율 객체(X.rates)에 바로 합쳐서, 열려 있는 한 대 산정·묶음 산정도 새 비율로 계산한다.
+ * 아래 '기록부 감가 · 수리비 표'(기획 v2.32 Q220 · Q222)는 따로 고치고 따로 저장한다 = PUT /api/cond(같은 비밀번호).
  *
  *   var V = V2Rates.create(ctx);   V.show(el);
  */
@@ -17,6 +18,9 @@
     var X = ctx.X, R = X.rates, esc = ctx.esc, el = null;
     var S = { store: false, writable: false, team: null, edit: null, msg: '', err: false, busy: false, loaded: false };
     var MODELS = [], byLabel = {};
+    var CD = { store: false, writable: false, team: null, edit: null, msg: '', err: false, busy: false };   // 기록부 감가 · 수리비 표 고치기
+    var REP = [['외판', '외판 한 판'], ['루프 패널', '루프'], ['라디에이터 서포트', '라디에이터 서포트'], ['골격', '골격 부위']];
+    var ONCE = [['사고', '사고 이력(한 번)'], ['골격', '골격(한 번) · 무사고 시세 1,500만 원 이상'], ['골격_저가', '골격(한 번) · 1,000만 원 아래']];
     X.idx.makers.forEach(function (mk) {
       mk.groups.forEach(function (g) {
         g.models.forEach(function (m) {
@@ -134,6 +138,85 @@
       return h + '</div>';
     }
 
+    // ───── 기록부 감가 · 수리비 표 ─────
+    function condCur() {                                     // 지금 쓰는 값(초기값 + 팀 수정)
+      var T = ctx.cond.CT().table;
+      return { rows: T.rows.map(function (r) { return { key: r.key, label: r.label, '교환': r['교환'], '판금': r['판금'] }; }), once: Object.assign({}, T.once),
+        repair: JSON.parse(JSON.stringify(T.repair)) };
+    }
+    function cdCell(name, val, base, unit, attr) {           // 보기 · 고치기 칸 하나(팀이 바꾼 칸 강조, 아래 작게 초기값)
+      var team = base != null && val != null && Math.abs(val - base) > 1e-9, b = base == null ? '' : f1u(base, unit);
+      if (CD.edit) return '<td class="' + (team ? 'is-team' : '') + '"><input class="v2-in v2-rin" ' + attr + ' inputmode="decimal" autocomplete="off" value="' + (val == null ? '' : val) +
+        '" aria-label="' + esc(name) + '"><small>' + (team ? '초기 ' + esc(b) : '') + '</small></td>';
+      return '<td class="' + (team ? 'is-team' : '') + '"><b>' + (val == null ? '단계 기본' : esc(f1u(val, unit))) + '</b><small>' + (team ? '초기 ' + esc(b) : '') + '</small></td>';
+    }
+    function f1u(v, unit) { return unit === '%' ? (Math.round(v * 10) / 10).toFixed(1) + '%' : unit === '배' ? v + '배' : Math.round(v) + '만'; }
+    function condCard() {
+      var C = CD.edit || condCur(), base = ctx.cond.base, t = CD.team;
+      var h = '<div class="card" id="condCard"><div class="card-title">기록부 감가 · 수리비 표 — 팀 공용 <span class="hint">교환 · 판금은 1곳당 % · 수리필요는 수리비(만원) · 초기값은 판매 매물 호가 차이(' +
+        esc(base.version) + ')</span><span class="v2-actions" style="margin:0 0 0 auto">';
+      if (CD.edit) h += '<button type="button" class="v2-btn" data-r="cdCancel"' + (CD.busy ? ' disabled' : '') + '>취소</button><button type="button" class="v2-btn primary" data-r="cdSave"' +
+        (CD.busy ? ' disabled' : '') + '>' + (CD.busy ? '저장 중…' : '저장') + '</button>';
+      else h += '<button type="button" class="v2-btn primary" data-r="cdEdit"' + (CD.store && CD.writable ? '' : ' disabled title="저장소 연결 후 수정할 수 있습니다"') + '>수정하기</button>';
+      h += '</span></div>';
+      h += '<p class="v2-help">' + (t ? '팀 수정 ' + t.rev + '판 · ' + esc(RatesStore.kst(t.updated_at)) + ' ' + esc(t.updated_by) : '팀이 고친 것 없음(초기값)') + '</p>';
+      if (CD.msg) h += '<div class="notebox ' + (CD.err ? 'v2-bad' : '') + '">' + esc(CD.msg) + '</div>';
+      if (CD.edit) h += '<div class="v2-rform"><label class="v2-f"><span class="v2-l">이름</span><input class="v2-in" id="cdBy" autocomplete="name" value="' + esc(CD.edit.by) + '"></label>' +
+        '<label class="v2-f"><span class="v2-l">수정 비밀번호<em>환산 비율과 같은 비밀번호</em></span><input class="v2-in" id="cdPw" type="password" autocomplete="current-password"></label>' +
+        '<label class="v2-f v2-rnote"><span class="v2-l">무엇을 왜 고쳤나<em>선택</em></span><input class="v2-in" id="cdNote" autocomplete="off" value="' + esc(CD.edit.note) + '"></label></div>';
+      h += '<div class="v2-two-col"><div><div class="v2-sub">교환 · 판금 — 1곳당 감가(%)</div><div class="v2-tablewrap"><table class="t v2-rtbl v2-ctbl"><thead><tr><th>부위</th><th>교환</th><th>판금</th></tr></thead><tbody>';
+      C.rows.forEach(function (r, k) {
+        var b = base.rows.filter(function (x) { return x.key === r.key; })[0] || {};
+        h += '<tr><td><b>' + esc(r.label || b.label) + '</b></td>' + cdCell(r.label + ' 교환', r['교환'], b['교환'], '%', 'data-cdr="' + k + '|교환"') +
+          cdCell(r.label + ' 판금', r['판금'], b['판금'], '%', 'data-cdr="' + k + '|판금"') + '</tr>';
+      });
+      ONCE.forEach(function (o) { h += '<tr><td><b>' + esc(o[1]) + '</b></td>' + cdCell(o[1], C.once[o[0]], base.once[o[0]], '%', 'data-cdo="' + o[0] + '"') + '<td></td></tr>'; });
+      h += '</tbody></table></div><p class="v2-help">같은 부위 묶음 · 같은 상태는 ' + (base.cap) + '곳까지 셉니다. 1,000만~1,500만 원 사이 골격 한 번은 두 값 사이를 이어서. 예외 줄의 빈칸은 단계 기본 값.</p></div>';
+      h += '<div><div class="v2-sub">수리필요 — 표준 수리비(만원, 국산)</div><div class="v2-tablewrap"><table class="t v2-rtbl v2-ctbl"><thead><tr><th>부위</th><th>수리비</th></tr></thead><tbody>';
+      REP.forEach(function (x) { h += '<tr><td><b>' + esc(x[1]) + '</b></td>' + cdCell(x[1], C.repair[x[0]], base.repair[x[0]], '만', 'data-cdp="' + x[0] + '"') + '</tr>'; });
+      Object.keys(base.repair.outside).forEach(function (c) {
+        h += '<tr><td><b>기록부 밖 · ' + esc(c) + '</b></td>' + cdCell(c, C.repair.outside[c], base.repair.outside[c], '만', 'data-cdq="' + c + '"') + '</tr>';
+      });
+      h += '<tr><td><b>수입차 배수</b></td>' + cdCell('수입차 배수', C.repair['수입배수'], base.repair['수입배수'], '배', 'data-cdp="수입배수"') + '</tr>';
+      h += '</tbody></table></div><p class="v2-help">기계 결함(누유 등)은 한 대 산정의 \'예상 수리비\' 칸에 직접 넣습니다(자동 수리비에 더함).</p></div></div>';
+      var log = (t && t.log) || [];
+      if (log.length) h += '<ul class="v2-log">' + log.slice(0, 10).map(function (l) {
+        return '<li><b>' + l.rev + '판</b> <span class="v2-dim">' + esc(RatesStore.kst(l.at)) + ' · ' + esc(l.by) + '</span>' + (l.note ? ' — ' + esc(l.note) : '') +
+          '<br><span class="v2-dim">' + esc((l.what || []).join(' · ')) + '</span></li>';
+      }).join('') + '</ul>';
+      return h + '</div>';
+    }
+    function cdRead() {
+      if (!CD.edit) return;
+      var e = CD.edit, num = function (v) { v = String(v).trim(); return v === '' ? null : Number(v); };
+      ['by', 'password', 'note'].forEach(function (k, n) { var x = $(['cdBy', 'cdPw', 'cdNote'][n]); if (x) e[k] = x.value; });
+      el.querySelectorAll('input[data-cdr]').forEach(function (x) { var p = x.getAttribute('data-cdr').split('|'); e.rows[+p[0]][p[1]] = num(x.value); });
+      el.querySelectorAll('input[data-cdo]').forEach(function (x) { e.once[x.getAttribute('data-cdo')] = num(x.value); });
+      el.querySelectorAll('input[data-cdp]').forEach(function (x) { e.repair[x.getAttribute('data-cdp')] = num(x.value); });
+      el.querySelectorAll('input[data-cdq]').forEach(function (x) { e.repair.outside[x.getAttribute('data-cdq')] = num(x.value); });
+    }
+    function cdSave() {
+      cdRead();
+      var e = CD.edit;
+      if (!e.by.trim() || !e.password) { CD.msg = '이름과 수정 비밀번호를 넣어 주세요'; CD.err = true; render(); return; }
+      remember('by', e.by.trim());
+      CD.busy = true;
+      render();
+      RatesStore.save('/api/cond', { password: e.password, rev: CD.team ? CD.team.rev : 0, by: e.by.trim(), note: e.note,
+        rows: e.rows.map(function (r) { return { key: r.key, '교환': r['교환'], '판금': r['판금'] }; }), once: e.once, repair: e.repair })
+        .then(function (team) {
+          CD.busy = false; CD.edit = null; CD.team = team; CD.err = false;
+          ctx.cond.apply(team);
+          CD.msg = team.rev + '판으로 저장했습니다. 한 대 산정으로 돌아가면 새 표로 계산합니다(묶음 산정은 [산정하기]를 다시 누르면 반영).';
+          render();
+        })
+        .catch(function (err) {
+          CD.busy = false; CD.err = true; CD.msg = err.message;
+          if (err.status === 409) { CD.team = err.team; CD.edit = null; ctx.cond.apply(err.team); CD.msg += ' (지금 ' + (err.team ? err.team.rev : 0) + '판)'; }
+          render();
+        });
+    }
+
     function tryCard() {
       return '<div class="card"><div class="card-title">시험 계산 <span class="hint">지금 비율로 환산가가 얼마나 나오는지</span></div><div class="v2-rtry">' +
         '<label class="v2-f"><span class="v2-l">추정 시세(만원)</span><input class="v2-in" id="rTryPrice" inputmode="numeric" value="2000"></label>' +
@@ -153,11 +236,12 @@
 
     function render() {
       if (!el) return;
-      el.innerHTML = head() + tableCard() + teamCard() + '<div class="v2-two-col">' + tryCard() + exCard() + '</div>' + logCard() +
+      el.innerHTML = head() + tableCard() + teamCard() + '<div class="v2-two-col">' + tryCard() + exCard() + '</div>' + logCard() + (ctx.cond ? condCard() : '') +
         '<p class="v2-help">적용 순서: 한 대 산정에서 직접 넣은 비율 → 팀 수정(모델별) → 모델 예외(기준표 값 ± 가감) → 호가대×차령 기준표(팀이 고친 칸 우선). ' +
           '기준표는 칸 가운데(호가대 가운데 만원 · 차령 가운데 해) 사이를 이어서 읽습니다 — 예: 추정 1,900만·6년이면 1~2천·2~3천, 5~6년·7~9년 네 칸을 거리만큼 섞어 씁니다. ' +
         '환산가 = 추정 시세 × (1 − 환산 비율) − 수리비.</p>';
       if (S.edit && $('rPw')) $('rPw').value = S.edit.password;   // 비밀번호는 화면 글(속성)에 남기지 않는다
+      if (CD.edit && $('cdPw')) $('cdPw').value = CD.edit.password;
       tryCalc();
     }
 
@@ -233,6 +317,9 @@
       else if (a === 'add') addModel();
       else if (a === 'del') { readForm(); S.edit.models.splice(+b.getAttribute('data-k'), 1); render(); }
       else if (a === 'reload') reload();
+      else if (a === 'cdEdit') { var c0 = condCur(); CD.edit = { by: remember('by'), password: '', note: '', rows: c0.rows, once: c0.once, repair: c0.repair }; CD.msg = ''; render(); }
+      else if (a === 'cdCancel') { CD.edit = null; CD.msg = ''; render(); }
+      else if (a === 'cdSave') cdSave();
     }
     function onInput(e) { if (/^rTry/.test(e.target.id || '')) tryCalc(); }
     function onKey(e) { if (e.key === 'Enter' && /^rAdd/.test(e.target.id || '')) { e.preventDefault(); addModel(); } }
@@ -256,6 +343,7 @@
       }
       S.loaded = !!ctx.store;
       if (ctx.store) { S.store = ctx.store.store; S.writable = ctx.store.writable; S.team = ctx.store.team; }
+      if (ctx.cond && ctx.cond.store) { CD.store = ctx.cond.store.store; CD.writable = ctx.cond.store.writable; CD.team = ctx.cond.store.team; }
       render();
     }
     return { show: show, reload: reload };
