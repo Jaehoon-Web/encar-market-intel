@@ -774,19 +774,21 @@
     }
     el.innerHTML = condBreak(st, R && R.base, R && R.repairManual);
   }
-  function condMarketLine(label, base) {                    // 감가 옆 시장 근거(기획 v2.33 Q238) — 같은 사고 단계 · 같은 차값대 판매 매물의 무사고 대비 호가 차이(주간 점검)
+  function condMarketLine(label, nloc, base) {              // 감가 옆 시장 근거(기획 v2.33 Q238) — 같은 사고 단계 · 같은 손상 곳수(· 같은 차값대) 판매 매물의 무사고 대비 호가 차이(주간 점검)
     var M = X.condMarket, row = M && M.classes && label ? M.classes[label] : null;
-    if (!row) return '';
-    var b = base == null ? null : base < 1000 ? '1천 미만' : base < 2000 ? '1~2천' : base < 4000 ? '2~4천' : '4천+', cell = b && row[b] ? row[b] : null, use = cell || row.all;
+    if (!row || !nloc) return '';
+    var nb = nloc >= 3 ? '3곳+' : nloc + '곳', b = base == null ? null : base < 1000 ? '1천 미만' : base < 2000 ? '1~2천' : base < 4000 ? '2~4천' : '4천+';
+    var both = b ? row[nb + '|' + b] : null, use = both || row[nb], what = both ? ' · 손상 ' + nb + ' · 차값 ' + b : use ? ' · 손상 ' + nb : '';
+    if (!use) { use = row.all; what = ''; }
     if (!use || use[1] < 30) return '';
-    return '같은 사고 단계(' + esc(label) + ')' + (cell ? ' · 차값 ' + b : '') + ' 판매 매물은 무사고보다 평균 <b>' + Math.abs(use[0]).toFixed(1) + '%</b> ' + (use[0] <= 0 ? '낮게' : '높게') + ' 올라와 있습니다(' +
+    return '같은 사고 단계(' + esc(label) + ')' + what + ' 판매 매물은 무사고보다 평균 <b>' + Math.abs(use[0]).toFixed(1) + '%</b> ' + (use[0] <= 0 ? '낮게' : '높게') + ' 올라와 있습니다(' +
       use[1].toLocaleString('ko-KR') + '대 · ' + esc(M.date || '') + ' 점검)';
   }
   function condBreak(st, base, manual) {                     // 감가 내역: 부위 → 한 번 감가 → 합계, 수리필요 수리비, 직접 입력 수리비
     var c = condResult(), h = CTB.hist(st.items, base), rp = CTB.repair(st.items, isImport()), cap = CTB.table.cap;
     var out = '<b>' + esc(c['사고라벨'] || '무사고') + '</b> · 이력 감가 <b>' + (h.D ? '−' + (h.D * 100).toFixed(1) + '%' : '없음') + '</b>' +
       (base && h.D ? ' (−' + man(base * h.D) + '만)' : '') + (rp.sum ? ' · 수리필요 수리비 <b>−' + rp.sum + '만</b>' : '') + (manual ? ' · 직접 입력 수리비 <b>−' + man(manual) + '만</b>' : '');
-    var ml = h.D ? condMarketLine(c['사고라벨'], base) : '';
+    var ml = h.D ? condMarketLine(c['사고라벨'], CTB.classOf(st.items).n, base) : '';
     if (ml) out += '<div class="v2-mkt">' + ml + '</div>';
     if (h.D && h.mult) {                                     // 차값 배수(v2.33 Q241) — 1에서 멀 때만 밝힌다
       var mn = [];

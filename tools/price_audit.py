@@ -45,7 +45,8 @@ def run(pool, C, sample=None):
     for r in T.itertuples():
         it = items[r.Index]
         t = tgt(r, it)
-        o = {"id": r.Index, "sold": bool(r.sold), "actual": r.price * (r.tf if r.sold else 1.0), "label": r.사고라벨 if isinstance(r.사고라벨, str) else "미상"}
+        o = {"id": r.Index, "sold": bool(r.sold), "actual": r.price * (r.tf if r.sold else 1.0), "label": r.사고라벨 if isinstance(r.사고라벨, str) else "미상",
+             "nloc": sum(1 for x in it if PE.STATUS3.get(x["status"]) in ("교환", "판금"))}
         a = PE.estimate_one(G[r.key], t)
         if a:
             o.update(est=a["est"], lo=a["lo"], hi=a["hi"], base=a["base"], D=a["D"], grade=a["grade"])
@@ -94,19 +95,24 @@ def summarize(R):
 
 
 def market(R):
-    """감가 옆 시장 근거 — 무사고 비교 매물만으로 본 무사고 시세 대비 호가 차이(판매중, 사고 단계 × 차값 구간)"""
+    """감가 옆 시장 근거 — 무사고 비교 매물만으로 본 무사고 시세 대비 호가 차이(판매중). 사고 단계마다: 전체 · 손상 곳수(1 · 2 · 3곳+) · 곳수 × 차값 구간
+    (같은 단계라도 곳수에 따라 차이가 커서, 화면은 내 차와 같은 곳수 칸을 먼저 쓴다)"""
     d = R[~R["sold"] & R["base_c"].notna()].copy()
     d["g"] = d["actual"] / d["base_c"]
     lvl = d.loc[d["label"] == "무사고", "g"].median()
     d["gap"] = d["g"] / lvl - 1
     d["band"] = pd.cut(d["base_c"], BANDS, labels=BLAB).astype(str)
-    out = {"date": datetime.date.today().isoformat(), "bands": BLAB, "anchors": BANDS[1:-1], "classes": {}}
+    d["nb"] = np.where(d["nloc"] >= 3, "3곳+", d["nloc"].astype(str) + "곳")
+    out = {"date": datetime.date.today().isoformat(), "bands": BLAB, "anchors": BANDS[1:-1], "counts": ["1곳", "2곳", "3곳+"], "classes": {}}
+    cell = lambda y: [round(float(y["gap"].median()) * 100, 1), int(len(y))] if len(y) >= 30 else None
     for c in ORDER[1:]:
         x = d[d["label"] == c]
-        row = {"all": [round(float(x["gap"].median()) * 100, 1), int(len(x))]}
-        for b in BLAB:
-            y = x[x["band"] == b]
-            row[b] = [round(float(y["gap"].median()) * 100, 1), int(len(y))] if len(y) >= 30 else None
+        row = {"all": cell(x) or [round(float(x["gap"].median()) * 100, 1), int(len(x))]}
+        for nb in out["counts"]:
+            y = x[x["nb"] == nb]
+            row[nb] = cell(y)
+            for b in BLAB:
+                row[nb + "|" + b] = cell(y[y["band"] == b])
         out["classes"][c] = row
     return out
 
