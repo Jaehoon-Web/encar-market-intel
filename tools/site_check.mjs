@@ -38,6 +38,12 @@ const noFile = groupFiles.filter(f => !fs.existsSync(path.join(DATA, 'comps', f)
 ok(!noFile.length, '모델그룹 파일이 모두 있음', noFile.slice(0, 5).join(', '));
 const models = idx.makers.flatMap(m => m.groups.flatMap(g => g.models));
 ok(models.every(m => m.y0 && m.y1 && m.y0 <= m.y1), `세부모델 ${models.length}개 모두 연도 범위(y0·y1)`);
+ok(idx.engine.stale && idx.engine.stale.tau > 0 && ['A', 'B', 'C'].every(g => idx.engine.range_k && idx.engine.range_k[g].length === 3 && idx.engine.range_k[g].every(k => k >= 0.8 && k <= 3)),
+  `엔진 설정: 오래된 매물 가중(${idx.engine.stale && idx.engine.stale.d0}일 · ${idx.engine.stale && idx.engine.stale.tau}) · 범위 배수(기획 v2.33)`);
+const audit = read(path.join(DATA, 'audit.json')), cmk = read(path.join(DATA, 'cond_market.json'));
+ok(audit.mdape > 0 && audit.class && audit.class['무사고'] && audit.coverage && audit.coverage.A && Array.isArray(audit.warnings),
+  `시세 점검 audit.json(${audit.date} · 오차 가운데 ${audit.mdape}% · 경고 ${audit.warnings.length}건)`);
+ok(cmk.classes && cmk.classes['골격·판금'] && cmk.classes['골격·판금'].all && cmk.bands.length === 4, `감가 옆 시장 근거 cond_market.json(${cmk.date})`);
 const coef = read(path.join(DATA, 'adj_coef.json'));
 ok(coef.market && coef.models && Object.keys(coef.models).length > 100, `보정 계수(모델 ${Object.keys(coef.models).length}개)`);
 const rates = read(path.join(DATA, 'conversion_rates.json'));
@@ -193,8 +199,31 @@ ok(R && R.price > 500 && R.price < 6000 && R.n >= 5 && ['A', 'B', 'C'].includes(
   ok(U && C && P && XF && WF && RF && C.price >= WF.price && WF.price >= XF.price && P.price <= U.price && WF.price <= U.price && C.base === P.base && C.base === U.base,
     `기록부 감가 순서 — 무사고 ${Math.round(C.price)} ≥ 후드 판금 ${Math.round(WF.price)} ≥ 교환 ${Math.round(XF.price)} · 프론트 패널 판금 ${Math.round(P.price)} ≤ 미상 ${Math.round(U.price)}`,
     JSON.stringify([C && C.price, WF && WF.price, XF && XF.price, P && P.price, U && U.price]));
-  ok(RF && RF.repairAuto === 55 && Math.abs(RF.price - (C.price - 55)) < 1e-6 && Math.abs(P.D - (1 - (1 - 0.027) * (1 - 0.015) * (1 - 0.032))) < 1e-9,
-    `수리필요 수리비(후드 30 + 앞범퍼 25 = ${RF && RF.repairAuto}만) · 프론트 패널 판금 감가 ${(P.D * 100).toFixed(2)}%`, JSON.stringify([RF && RF.repairAuto, P && P.D]));
+  ok(RF && RF.repairAuto === 55 && Math.abs(RF.price - (C.price - 55)) < 1e-6 && Math.abs(P.D - CT.hist([{ part: '프론트 패널', status: '판금' }], P.base).D) < 1e-12 && P.D > 0.02 && P.D < 0.12,
+    `수리필요 수리비(후드 30 + 앞범퍼 25 = ${RF && RF.repairAuto}만) · 프론트 패널 판금 감가 ${(P.D * 100).toFixed(2)}%(표와 같음)`, JSON.stringify([RF && RF.repairAuto, P && P.D]));
+  // 환산가(v2.33): 기록부를 넣으면 무사고 시세 × (1 − 경매 기준 감가) × (1 − 환산 비율) − 수리비, 미상은 소매 감가 그대로
+  ok(P.convD > 0 && Math.abs(P.converted - (P.base * (1 - P.convD) * (1 - P.rate / 100) - P.repair)) < 1e-6 && U.convD === U.D && C.convD === 0,
+    `환산가 사고 감가 — 프론트 패널 판금 경매 기준 ${(P.convD * 100).toFixed(1)}%(소매 ${(P.D * 100).toFixed(1)}%) · 미상은 소매와 같음`, JSON.stringify([P.convD, P.D, U.convD, U.D]));
+}
+{                                                            // 감가 표 구조(v2.33): 차값이 높으면 사고 차 값도 높다 · 손상을 더하거나 판금→교환이면 값이 오르지 않는다
+  const heavy = [{ part: '프론트 패널', status: '교환' }, { part: '크로스 멤버', status: '교환' }, { part: '인사이드 패널', side: '좌', status: '판금' },
+    { part: '후드', status: '교환' }, { part: '프론트 휀더', side: '좌', status: '교환' }, { part: '프론트 휀더', side: '우', status: '판금' }, { part: '쿼터 패널', side: '좌', status: '교환' }];
+  let prev = 0, mono = true;
+  for (let p = 100; p <= 20000; p *= 1.05) { const v = p * (1 - CT.hist(heavy, p).D); if (v < prev - 1e-9) mono = false; prev = v; }
+  ok(mono, '차값 배수: 무사고 시세가 오르면 사고 차 값(시세 × (1 − 감가))도 오르거나 같음(100만~2억, 손상 7곳)');
+  const parts = ['후드', '프론트 휀더', '프론트 도어', '리어 도어', '트렁크 리드', '쿼터 패널', '루프 패널', '사이드실 패널', '프론트 패널', '크로스 멤버', '리어 패널', '트렁크 플로어'];
+  let bad = 0, seed = 7;
+  const rnd = n => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  for (let k = 0; k < 2000; k++) {
+    const items = [], n = 1 + rnd(8), price = 300 + rnd(9000);
+    for (let i = 0; i < n; i++) items.push({ part: parts[rnd(parts.length)], side: rnd(2) ? '좌' : '우', status: rnd(2) ? '교환' : '판금' });
+    const d0 = CT.hist(items, price).D, more = CT.hist(items.concat([{ part: parts[rnd(parts.length)], side: '좌', status: rnd(2) ? '교환' : '판금' }]), price).D;
+    const up = items.map(x => x.status === '판금' ? Object.assign({}, x, { status: '교환' }) : x), dUp = CT.hist(up, price).D;
+    if (more < d0 - 1e-12 || dUp < d0 - 1e-12) bad++;
+  }
+  ok(!bad, `곳 배수: 손상 하나를 더하거나 판금을 교환으로 바꿔도 감가가 줄지 않음(무작위 2,000건 · 어긋남 ${bad})`);
+  ok([300, 800, 1500, 3000, 6000].every(p => CT.lightAt(p) > 0 && CT.lightAt(p) <= CT.hist([{ part: '사이드실 패널', side: '좌', status: '판금' }], p).D + 1e-12),
+    '가장 가벼운 사고(미상의 하한)는 어떤 한 곳 사고보다 같거나 작음(차값마다)');
 }
 const before = eng.conversionRate(1500, 4, '현대', '더 뉴 그랜저 IG', '가솔린');
 RS.apply(rates, { rev: 1, cells: rates.rates.map(r => r.map(() => null)), models: [{ '제조사': '현대', '모델': '더 뉴 그랜저 IG', '연료': '', '비율': 33.3 }] });

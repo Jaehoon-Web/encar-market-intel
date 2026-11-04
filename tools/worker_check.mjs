@@ -137,6 +137,17 @@ ok(r.status === 409 && r.body.team.rev === 1, '예전 판으로 저장 → 409',
 r = await ccall(env, 'PUT', { password: '팀비번-2026', rev: 1, by: '김팀원', rows: [{ key: '후드', '교환': -4, '판금': -1.6 }], repair: { '외판': 35, outside: { '범퍼': 30 } } });
 ok(r.status === 400 && /바뀐 것/.test(r.body.error), '바뀐 것 없음 → 400', r.body);
 
+r = await ccall(env, 'PUT', { password: '팀비번-2026', rev: 1, by: '김팀원', order: [1, 1, 0.8, 0.9, 0.7, 0.5] });
+ok(r.status === 400 && /앞 곳보다/.test(r.body.error), '곳 배수가 뒤에서 커짐 → 400(v2.33)', r.body);
+r = await ccall(env, 'PUT', { password: '팀비번-2026', rev: 1, by: '김팀원', band: { '외판': [0.1, 1, 1, 1] } });
+ok(r.status === 400 && /차값 배수/.test(r.body.error), '차값 배수 범위 밖 → 400(v2.33)', r.body);
+r = await ccall(env, 'PUT', { password: '팀비번-2026', rev: 1, by: '김팀원', auction: { count: [[-3, -2, -6, -9, -11, -13]] } });
+ok(r.status === 400 && /곳이 늘면/.test(r.body.error), '경매 감가가 곳이 늘며 줄어듦 → 400(v2.33)', r.body);
+r = await ccall(env, 'PUT', { password: '팀비번-2026', rev: 1, by: '김팀원', band: { '골격': [0.9, 1, 0.8, 0.8] }, order: [1, 1, 1, 0.9, 0.8, 0.6],
+  auction: { band: { '외판': [0.5, 1, 1.2, 1.4] } } });
+ok(r.status === 200 && r.body.team.rev === 2 && r.body.team.band['골격'][2] === 0.8 && r.body.team.order[3] === 0.9 && r.body.team.auction.band['외판'][0] === 0.5 &&
+   r.body.team.log[0].what.some(w => /곳 배수/.test(w)) && r.body.team.log[0].what.some(w => /경매 차값 배수/.test(w)), '차값 · 곳 배수 · 경매 감가 저장 → 2판(v2.33)', r.body);
+
 console.log('[이용 통계 기록 /api/ev (기획 v2.28)]');
 const U = 'abcdefgh12345678', SI = 'session000000001';
 const ev = (env2, body, headers = {}) => worker.fetch(new Request('https://x.test/api/ev', {

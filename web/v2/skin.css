@@ -686,6 +686,13 @@ header .adm-link:hover, header .adm-link.on { color: var(--tx-1); background: #f
 #condOut .v2-cl li { font-size: 12px; padding: 3px 8px; border-radius: 8px; background: var(--bg-2); color: var(--tx-2); }
 #condOut .v2-cl li b { color: var(--down); font-weight: 650; margin-left: 2px; }
 #condOut .v2-cl li.once { background: var(--down-wash); }
+/* 감가 옆 시장 근거 · 차값 배수 · k번째 곳 · 환산가 경매 기준 감가 · 신뢰도 C 경고 (기획 v2.33) */
+#condOut .v2-mkt { margin-top: 6px; font-size: 13px; color: var(--tx-2); }
+#condOut .v2-mnote { margin-top: 4px; font-size: 12px; color: var(--tx-3); }
+#condOut .v2-cl i { font-style: normal; font-size: 11px; color: var(--tx-3); }
+.v2-conv .foot.v2-convd { margin-top: 8px; color: #ffd2bd; }
+.v2-cwarn { margin-top: 12px; }
+
 /* ⚙ 기록부 감가 표: 열이 둘·셋뿐이라 환산 비율 표의 최소 폭(600px)을 풀고 부위 이름은 줄바꿈 */
 .v2-rtbl.v2-ctbl { min-width: 0; }
 .v2-ctbl td:first-child { white-space: normal; }

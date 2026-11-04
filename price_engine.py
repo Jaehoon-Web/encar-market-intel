@@ -51,12 +51,15 @@ MIN_COMPS, GOOD_COMPS = 5, 10
 OUT_MAD, OUT_FLOOR = 3.0, 0.15        # 이상치: 3×MAD, 최소 15%
 A_WIDTH = 0.08                        # 신뢰도 A: 범위(25~75%)가 대표값 ±8% 안
 SIM = {"age": 12.0, "km": 4.0, "grade": 0.5, "trim": 0.25, "perf": 0.25, "sold": 1.0, "attr": 0.25}   # 유사도 거리(차령 12개월·주행 4만km = 1)
+TUNING = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "engine_tuning.json"), encoding="utf-8"))
+RANGE_K = TUNING["range_k"]           # 추정 범위 배수 — 신뢰도(A·B·C) × [무사고, 사고, 미상] (기획 v2.33 Q245, 검증으로 맞춤)
+STALE = {"d0": 30, "tau": 180.0, "min": 0.5}   # 판매중 비교 매물이 올라온 지 d0일 넘으면 가중 × exp(−(일 − d0)/tau), 최소 min (기획 v2.33 Q246)
 # attr: 구동·인승·용도가 둘 다 알려져 있고 다르면 하나마다 더함
 # 판매 매물 감점 1.0: 0.25 대비 오차 5.6→5.5%, 편향 +0.8→+0.4%(1겹 시험). 판매 매물은 마지막 호가라 조금 높게 남는다
-OPTS = {"sold": True, "time": True, "weight": True, "outlier": True, "adjust": True}
+OPTS = {"sold": True, "time": True, "weight": True, "outlier": True, "adjust": True, "stale": True}
 ENGINE = {"steps": [list(s) for s in STEPS], "colors": COLORS, "km_cap": KM_CAP, "min_comps": MIN_COMPS, "good_comps": GOOD_COMPS,
           "out_mad": OUT_MAD, "out_floor": OUT_FLOOR, "a_width": A_WIDTH, "sim": SIM, "a_step": A_STEP, "b_step": B_STEP,
-          "drives": DRIVES, "uses": USES}                                            # 사이트 엔진이 읽는 설정(한곳에서 관리)
+          "drives": DRIVES, "uses": USES, "stale": STALE, "range_k": RANGE_K}                                            # 사이트 엔진이 읽는 설정(한곳에서 관리)
 ROW_FIELDS = ["id", "m", "g", "t", "reg", "om", "km", "rent", "col", "perf", "dep", "price", "sold", "tk",
               "acc", "gv", "gp", "ds", "p0", "sd", "fu", "q", "dv", "se", "us", "en", "op", "dm"]
 # 행에는 매물이 바뀌지 않으면 그대로인 값만 둔다 — 매주 바뀌는 값(현재 월·시점 보정 배수)은 파일 머리말(now_ym·tf)에.
@@ -73,7 +76,8 @@ STATUS3 = {"교환": "교환", "용접절단": "교환", "판금": "판금", "�
 
 
 class Cond:
-    """이력 감가(교환·판금) · 수리비(수리필요) · 미상의 '가장 가벼운 사고'. 표는 inspection_score.COND_TABLE"""
+    """이력 감가(교환·판금) · 수리비(수리필요) · 미상의 '가장 가벼운 사고'. 표는 cond_table.json(inspection_score.COND_TABLE)
+    사이트 web/lib/cond_table.js 와 같은 계산 · 같은 순서(파이썬 ↔ 사이트 일치 점검)"""
 
     def __init__(self, table=None):
         T = json.loads(json.dumps(table or IS.COND_TABLE))
@@ -91,11 +95,28 @@ class Cond:
             pg = r["판금"] if r["판금"] is not None else (rk["판금"] if rk else None)
             if pg is not None and r["교환"] is not None and r["교환"] > pg:
                 r["교환"] = pg
-        for k in ("사고", "골격", "골격_저가"):
-            T["once"][k] = neg(T["once"][k]) or 0.0
-        most = max(v for r in T["rows"] for v in (r["교환"], r["판금"]) if v is not None)
-        self.light = 1 - (1 + T["once"]["사고"] / 100) * (1 + most / 100)
+        for k in ("사고", "골격"):
+            T["once"][k] = neg(T["once"].get(k)) or 0.0
+        B = T["band"]
+        self.anchors = [float(a) for a in B["anchors"]]
+        self.band = {g: [max(0.0, float(v)) for v in B[g]] for g in ("외판", "골격")}
+        order, prev = [], None                                                       # k번째 곳 배수 — 늘지 않게(곳을 더해도 값이 오르지 않음)
+        for v in T["order"]:
+            v = max(0.0, float(v))
+            prev = v if prev is None else min(prev, v)
+            order.append(prev)
+        self.order = order
         self.cat = {w.replace(" ", ""): c for c, ws in T["outside_cat"].items() for w in ws}
+        A = T.get("auction")
+        if A:                                                                        # 경매 기준 감가: 값 ≤ 0, 곳이 늘면 덜 깎이지 않게, 배수 ≥ 0
+            for row in A["count"]:
+                prev = 0.0
+                for k in range(len(row)):
+                    prev = min(prev, min(0.0, float(row[k])))
+                    row[k] = prev
+            for key in ("band", "age"):
+                for g in ("외판", "골격"):
+                    A[key][g] = [max(0.0, float(v)) for v in A[key][g]]
 
     def info(self, part):
         return self.parts.get(part) or (self.parts.get(self.generic[part]) if part in self.generic else None)
@@ -107,18 +128,23 @@ class Cond:
         rk = self.rows.get(inf["rank"])
         return rk[s] if rk and rk.get(s) is not None else 0
 
-    def frame_once(self, price):
-        lo, hi = self.T["once"]["저가"]
-        a, b = self.T["once"]["골격_저가"], self.T["once"]["골격"]
-        if price is None or price >= hi:
-            return b
-        if price <= lo:
-            return a
-        return a + (b - a) * (price - lo) / (hi - lo)
+    def mult(self, g, price):
+        """차값 배수 — 무사고 시세(만원)가 anchors 사이면 로그 차값으로 이어서, 밖이면 끝 값. 값을 모르면 1"""
+        A, V = self.anchors, self.band[g]
+        if price is None or not price > 0:
+            return 1.0
+        if price <= A[0]:
+            return V[0]
+        for k in range(len(A) - 1):
+            if price < A[k + 1]:
+                t = (math.log(price) - math.log(A[k])) / (math.log(A[k + 1]) - math.log(A[k]))
+                return V[k] + t * (V[k + 1] - V[k])
+        return V[-1]
 
     def hist(self, items, price):
-        """이력 감가 D(0~1) — 부위(적힌 순) → 사고 이력 한 번 → 골격 한 번"""
-        L, cnt, any_, frame = 0.0, {}, False, False
+        """이력 감가 D(0~1) — 부위(감가 큰 곳부터 k번째 배수) → 사고 이력 한 번 → 골격 한 번"""
+        cnt, any_, frame, ent = {}, False, False, []
+        mo, mf = self.mult("외판", price), self.mult("골격", price)
         for it in items:
             s, inf = STATUS3.get(it["status"]), self.info(it["part"])
             if s not in ("교환", "판금") or not inf:
@@ -129,12 +155,76 @@ class Cond:
             cnt[key] = cnt.get(key, 0) + 1
             if cnt[key] > self.T["cap"]:
                 continue
-            L += math.log(1 + self.row_value(inf, s) / 100)
+            ent.append(math.log(1 + self.row_value(inf, s) / 100) * (mf if inf["rank"] == "골격" else mo))
+        L = 0.0
+        for k, v in enumerate(sorted(ent)):                                          # 감가가 큰(로그가 작은) 곳부터 — 같으면 적힌 순
+            L += self.order[min(k, len(self.order) - 1)] * v
         if any_:
-            L += math.log(1 + self.T["once"]["사고"] / 100)
+            L += mo * math.log(1 + self.T["once"]["사고"] / 100)
         if frame:
-            L += math.log(1 + self.frame_once(price) / 100)
+            L += mf * math.log(1 + self.T["once"]["골격"] / 100)
         return 1 - math.exp(L)
+
+    def class_of(self, items):
+        """사고 단계(골격 · 외판2 · 외판1 중 가장 높은 것 × 그 단계에 교환이 있으면 교환)와 교환 · 판금 곳수"""
+        has, n = set(), 0
+        for it in items:
+            s, inf = STATUS3.get(it["status"]), self.info(it["part"])
+            if s not in ("교환", "판금") or not inf:
+                continue
+            n += 1
+            has.add(inf["rank"] + "|" + s)
+        for rk in ("골격", "외판2", "외판1"):
+            for s in ("교환", "판금"):
+                if rk + "|" + s in has:
+                    return rk + "·" + s, n
+        return None, n
+
+    @staticmethod
+    def interp(A, V, x, logx):
+        """A 칸 사이를 이어서(logx 면 로그 값으로) — 값을 모르면 1, 밖이면 끝 값"""
+        if x is None or (logx and not x > 0):
+            return 1.0
+        if x <= A[0]:
+            return V[0]
+        for k in range(len(A) - 1):
+            if x < A[k + 1]:
+                t = (math.log(x) - math.log(A[k])) / (math.log(A[k + 1]) - math.log(A[k])) if logx else (x - A[k]) / (A[k + 1] - A[k])
+                return V[k] + t * (V[k + 1] - V[k])
+        return V[-1]
+
+    def auction_d(self, items, price, age):
+        """환산가용 경매 기준 사고 감가(0~1, 기획 v2.33 Q236 Q239 Q242) — 사고 단계 × 곳수 기본값 × 차값 배수 × 연식 배수. 표가 없으면 None"""
+        A = self.T.get("auction")
+        if not A:
+            return None
+        lab, n = self.class_of(items)
+        if not lab:
+            return 0.0
+        if lab not in A["classes"]:
+            return None
+        g = "골격" if lab.startswith("골격") else "외판"
+        base = A["count"][A["classes"].index(lab)][min(n, 6) - 1]
+        mb = self.interp(A["band"]["anchors"], A["band"][g], price, True)
+        ma = self.interp(A["age"]["anchors"], A["age"][g], age, False)
+        return 1 - math.exp(math.log(1 + base / 100) * mb * ma)
+
+    def light_at(self, price):
+        """그 차값에서 가장 가벼운 사고 한 곳의 감가 — 미상은 이보다 덜 깎지 않는다(교환 · 판금 입력 ≤ 미상, Q215)"""
+        best = None
+        for r in self.T["rows"]:
+            g = "골격" if r["key"] == "골격" else "외판"
+            m = self.mult(g, price)
+            for s in ("교환", "판금"):
+                v = r[s]
+                if v is None:                                                        # 빈 칸은 단계 줄 값을 쓰므로 단계 줄에서 이미 셈
+                    continue
+                L = self.order[0] * math.log(1 + v / 100) * m + self.mult("외판", price) * math.log(1 + self.T["once"]["사고"] / 100)
+                if g == "골격":
+                    L += m * math.log(1 + self.T["once"]["골격"] / 100)
+                d = 1 - math.exp(L)
+                best = d if best is None or d < best else best
+        return best or 0.0
 
     @staticmethod
     def from_names(names):
@@ -205,6 +295,9 @@ def load_pool():
     d["key"] = d["제조사"] + "|" + d["모델"]
     d["dep"] = d["성능감가율"] / 100
     d["D"] = [COND.comps_d(damage_names(a), p) for a, p in zip(d["손상부위"], d["price"])]   # 이력 감가(기록부 감가 표)
+    now = pd.Timestamp(d["마지막관측일"].astype(str).max())                          # 올라온 날 = 최신 크롤일 − 체류일(내보내기의 ds 와 같은 날짜) — 사이트도 ds 로 같은 날수를 센다
+    start = (now - pd.to_timedelta(d["체류일"], unit="D")).dt.normalize()
+    d["dl"] = np.where(d["sold"], 0.0, (now - start).dt.days.fillna(0).astype(float))
     d["tf"] = time_factor(d)
     return d
 
@@ -258,6 +351,7 @@ class Group:
         self.grades, self.trims = g["등급"].values, g["세부"].values
         self.perf, self.D = g["성능등급"].values.astype(float), g["D"].values
         self.price, self.sold, self.tf = g["price"].values, g["sold"].values.astype(bool), g["tf"].values
+        self.dl = g["dl"].values.astype(float)                                       # 판매중 매물이 올라와 있은 날수(판매 완료는 0)
         self.carkey = g["차키"].values
         self.q, self.dv, self.se, self.us = g["q"].values.astype(bool), g["dv"].values, g["se"].values, g["us"].values
         self.fe = np.array([self.grade.get(a, 0.0) + self.trim.get(a, {}).get(t, 0.0) for a, t in zip(self.grades, self.trims)])
@@ -325,6 +419,9 @@ def estimate_one(G, t, opts=None, detail=False):
             + SIM["trim"] * ((t["세부"] != "") & (G.trims[idx] != "") & (G.trims[idx] != t["세부"]))
             + SIM["sold"] * G.sold[idx] + SIM["attr"] * attr)                       # 상태 차이는 가중치에 넣지 않는다
     w = np.exp(-dist) if o["weight"] else np.ones(len(idx))
+    st = STALE if o["stale"] is True else o["stale"]
+    if st and st.get("tau"):                                                         # 오래 안 팔린 매물은 덜 믿음(v2.33)
+        w = w * np.maximum(st["min"], np.exp(-np.maximum(0.0, G.dl[idx] - st["d0"]) / st["tau"]))
     la = np.log(cl)
     dev = np.abs(la - wquantile(la, w, 0.5))
     keep = np.ones(len(idx), bool)
@@ -340,11 +437,13 @@ def estimate_one(G, t, opts=None, detail=False):
         sd += w[j] * G.D[idx[j]]
     Dbar, Dt = sd / sw, 0.0
     if o["adjust"]:
-        Dt = COND.hist(t["items"], b0) if known else min(Dbar, COND.light)          # 미상 = 평균 상태, 단 가장 가벼운 사고보다 높게
+        Dt = COND.hist(t["items"], b0) if known else min(Dbar, COND.light_at(b0))   # 미상 = 평균 상태, 단 그 차값의 가장 가벼운 사고보다 높게
     est, lo, hi = b0 * (1 - Dt), lo0 * (1 - Dt), hi0 * (1 - Dt)
     n = int(keep.sum())
     tight = hi / est - 1 <= A_WIDTH and 1 - lo / est <= A_WIDTH
     grade = "A" if n >= GOOD_COMPS and step <= A_STEP and tight else ("B" if step <= B_STEP else "C")
+    k = RANGE_K[grade][2 if not known else (1 if Dt > 0 else 0)]                     # 범위를 실제 호가의 50%가 들게(신뢰도는 넓히기 전 범위로)
+    lo, hi = est * (lo / est) ** k, est * (hi / est) ** k
     r = {"est": est, "lo": lo, "hi": hi, "base": b0, "D": Dt, "n": n, "out": int((~keep).sum()), "step": step, "step_name": STEPS[step - 1][0],
          "grade": grade}
     if not known:
@@ -429,11 +528,13 @@ def estimate_car(groups, R, car, opts=None):
     if r is None:
         return None
     yrs = ym // 100 - (car.get("연식") or car["등록연월"] // 100)
-    rate, src = conversion_rate(R, r["est"], yrs, car["제조사"], car["모델"], car.get("연료"), car.get("팀환산"))
+    rate, src = conversion_rate(R, r["base"], yrs, car["제조사"], car["모델"], car.get("연료"), car.get("팀환산"))   # 환산 비율은 무사고 시세로 찾는다(무사고 차끼리 맞춘 비율)
     auto = COND.repair(st.get("items") or [], bool(car.get("수입"))) if st is not None else 0
     fix = float(car.get("수리비") or 0) + auto
+    da = COND.auction_d(st.get("items") or [], r["base"], yrs) if st is not None else None
+    conv_d = r["D"] if da is None else da                                            # 환산가의 사고 감가: 경매 기준(기록부를 넣었을 때), 미상은 소매와 같게
     r.update({"repairAuto": auto, "수리비": fix, "시세": r["est"] - fix, "범위": (r["lo"] - fix, r["hi"] - fix),
-              "환산비율": rate, "환산출처": src, "환산가": r["est"] * (1 - rate / 100) - fix})
+              "환산비율": rate, "환산출처": src, "환산감가": conv_d, "환산가": r["base"] * (1 - conv_d) * (1 - rate / 100) - fix})
     return r
 
 
@@ -709,7 +810,7 @@ def parity(pool):
                    "수리비": 30, "기준연월": 202610, "exclude_id": r.name}
             x = estimate_car(groups, R, car)
             exp = None if x is None else {k: x[k] for k in ["est", "lo", "hi", "base", "D", "n", "step", "grade", "시세", "환산가", "환산비율", "환산출처",
-                                                            "repairAuto"] + (["est0"] if unknown else [])}
+                                                            "환산감가", "repairAuto"] + (["est0"] if unknown else [])}
             cars.append({"f": file_of[(r["제조사"], r["모델"])], "car": dict(car, exclude_id=None, excludeId=int(r.name)), "exp": exp})
     with open(PARITY, "w", encoding="utf-8") as f:
         json.dump({"cases": cases, "cars": cars}, f, ensure_ascii=False, separators=(",", ":"))

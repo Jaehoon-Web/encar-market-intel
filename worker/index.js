@@ -5,7 +5,8 @@
  *   GET /api/rates?rev=N    → { ok, team }                    N판(되돌리기용, 180일 보관)
  *   PUT /api/rates          본문 { password, rev, by, note, cells, models } → { ok, team }   새 판 저장
  *   GET /api/cond           → { ok, store, writable, team }   기록부 감가 · 수리비 표 팀 수정(기획 v2.32 Q220 · Q222 — 환산 비율과 같은 비밀번호)
- *   PUT /api/cond           본문 { password, rev, by, note, rows: [{ key, 교환, 판금 }], once: { 사고, 골격, 골격_저가 }, repair: { …, outside: { … }, 수입배수 } }
+ *   PUT /api/cond           본문 { password, rev, by, note, rows: [{ key, 교환, 판금 }], once: { 사고, 골격 }, band: { 외판: [4], 골격: [4] }, order: [6],
+ *                                 auction: { count: [6 × 6], band: { 외판, 골격 }, age: { 외판, 골격 } }, repair: { …, outside: { … }, 수입배수 } }   (v2.33)
  *   GET /api/terms          → { ok, store, writable, team }   팀 표기 사전(기록부 글 읽기, 기획 v2.31 Q201·Q209 — 환산 비율과 같은 비밀번호)
  *   PUT /api/terms          본문 { password, by, add: [{ t, kind, part, side, pillar, status }], del: [t…] } → { ok, team }   더하기·지우기
  *   POST /api/ev            본문 { u, s, d, e: [[시각, 종류, 화면, 이름, 값], …] } → 204   이용 통계(web/v2/track.js)
@@ -165,6 +166,11 @@ function wonIn(v, name) {                                      // 수리비(만�
   if (v === null || v === undefined || v === '' || !Number.isFinite(n) || n < 0 || n > 2000) throw new Error(name + ': 0~2,000(만원) 사이 숫자로 넣어 주세요');
   return Math.round(n);
 }
+function mulIn(v, lo, hi, name) {                              // 배수 — lo~hi, 소수 셋째 자리
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < lo || n > hi) throw new Error(name + ': ' + lo + '~' + hi + ' 사이 배수로 넣어 주세요');
+  return Math.round(n * 1000) / 1000;
+}
 function buildCond(cur, body, base, now) {
   const by = str(body.by, 30);
   if (!by) throw new Error('수정하는 사람 이름을 넣어 주세요');
@@ -176,7 +182,20 @@ function buildCond(cur, body, base, now) {
     return { key: b.key, '교환': ex, '판금': pg };
   });
   const o = body.once || {}, once = {};
-  ['사고', '골격', '골격_저가'].forEach(k => { once[k] = pctIn(k in o ? o[k] : base.once[k], -20, '한 번 감가 ' + k); });
+  ['사고', '골격'].forEach(k => { once[k] = pctIn(k in o ? o[k] : base.once[k], -20, '한 번 감가 ' + k); });
+  const bd = body.band || {}, band = {}, bl = base.band.labels || [];               // 차값 배수(v2.33 Q241)
+  ['외판', '골격'].forEach(g => { band[g] = base.band[g].map((v, j) => mulIn(Array.isArray(bd[g]) && bd[g][j] != null ? bd[g][j] : v, 0.3, 2, '차값 배수 ' + g + ' ' + (bl[j] || j))); });
+  const order = base.order.map((v, j) => mulIn(Array.isArray(body.order) && body.order[j] != null ? body.order[j] : v, 0.3, 1, (j + 1) + '번째 곳 배수'));   // Q243
+  order.forEach((v, j) => { if (j && v > order[j - 1]) throw new Error((j + 1) + '번째 곳 배수는 앞 곳보다 크면 안 됩니다(곳이 늘수록 같거나 작게)'); });
+  let auction = null;                                                              // 경매 기준 감가(환산가, Q236 Q239 Q242)
+  if (base.auction) {
+    const A = base.auction, ba = body.auction || {};
+    const count = A.count.map((row, i) => row.map((v, j) => pctIn(Array.isArray(ba.count) && ba.count[i] && ba.count[i][j] != null ? ba.count[i][j] : v, -40,
+      '경매 감가 ' + A.classes[i] + ' ' + (j + 1) + '곳')));
+    count.forEach((row, i) => row.forEach((v, j) => { if (j && v > row[j - 1]) throw new Error('경매 감가 ' + A.classes[i] + ': 곳이 늘면 같거나 더 깎여야 합니다'); }));
+    const part = k => { const out = {}; ['외판', '골격'].forEach(g => { out[g] = A[k][g].map((v, j) => mulIn(ba[k] && Array.isArray(ba[k][g]) && ba[k][g][j] != null ? ba[k][g][j] : v, 0.2, 2.5, '경매 ' + (k === 'band' ? '차값' : '연식') + ' 배수 ' + g)); }); return out; };
+    auction = { count, band: part('band'), age: part('age') };
+  }
   const r = body.repair || {}, repair = { outside: {} };
   Object.keys(base.repair).forEach(k => {
     if (k === 'outside') Object.keys(base.repair.outside).forEach(c => { repair.outside[c] = wonIn(r.outside && c in r.outside ? r.outside[c] : base.repair.outside[c], '수리비 ' + c); });
@@ -186,12 +205,20 @@ function buildCond(cur, body, base, now) {
       repair[k] = Math.round(n * 10) / 10;
     } else repair[k] = wonIn(k in r ? r[k] : base.repair[k], '수리비 ' + k);
   });
-  const prev = cur || { rows: base.rows, once: base.once, repair: base.repair }, what = [];
+  const prev = cur || { rows: base.rows, once: base.once, repair: base.repair, band: base.band, order: base.order, auction: base.auction && { count: base.auction.count, band: base.auction.band, age: base.auction.age } }, what = [];
   rows.forEach(x => {
     const p = (prev.rows || []).find(y => y.key === x.key) || {};
     ['교환', '판금'].forEach(s => { if (p[s] !== x[s]) what.push(x.key + ' ' + s + ' ' + p[s] + ' → ' + x[s] + '%'); });
   });
   Object.keys(once).forEach(k => { if ((prev.once || {})[k] !== once[k]) what.push('한 번 ' + k + ' ' + (prev.once || {})[k] + ' → ' + once[k] + '%'); });
+  const pb = prev.band || base.band, po = prev.order || base.order, same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  ['외판', '골격'].forEach(g => { if (!same(pb[g], band[g])) what.push('차값 배수 ' + g + ' ' + band[g].join(' · ')); });
+  if (!same(po, order)) what.push('곳 배수 ' + order.join(' · '));
+  if (auction) {
+    const pa = prev.auction || base.auction;
+    auction.count.forEach((row, i) => { if (!same((pa.count || [])[i], row)) what.push('경매 감가 ' + base.auction.classes[i] + ' ' + row.join(' · ') + '%'); });
+    ['band', 'age'].forEach(k => ['외판', '골격'].forEach(g => { if (!same(((pa[k] || {})[g]), auction[k][g])) what.push('경매 ' + (k === 'band' ? '차값' : '연식') + ' 배수 ' + g + ' ' + auction[k][g].join(' · ')); }));
+  }
   Object.keys(repair).forEach(k => {
     if (k === 'outside') Object.keys(repair.outside).forEach(c => { if (((prev.repair || {}).outside || {})[c] !== repair.outside[c]) what.push('수리비 ' + c + ' → ' + repair.outside[c] + '만'); });
     else if ((prev.repair || {})[k] !== repair[k]) what.push('수리비 ' + k + ' → ' + repair[k] + (k === '수입배수' ? '배' : '만'));
@@ -199,7 +226,7 @@ function buildCond(cur, body, base, now) {
   if (!what.length) throw new Error('바뀐 것이 없습니다');
   const rev = (cur ? cur.rev : 0) + 1, note = str(body.note, 200);
   const log = [{ rev, at: now, by, note, what: what.slice(0, 40) }].concat((cur && cur.log) || []).slice(0, MAX_LOG);
-  return { rev, updated_at: now, updated_by: by, rows, once, repair, log };
+  return Object.assign({ rev, updated_at: now, updated_by: by, rows, once, band, order, repair, log }, auction ? { auction } : {});
 }
 async function condPut(request, env) {
   if (!env.RATES) return json({ ok: false, error: '저장소(KV)가 아직 연결되지 않았습니다' }, 503);

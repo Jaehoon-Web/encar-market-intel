@@ -116,6 +116,24 @@
         (sub ? '<span class="v2-peek">' + esc(sub) + '</span>' : '') + '</div>' + body + '</section>';
     }
     function card(title, body, hint) { return '<div class="card"><div class="card-title">' + esc(title) + (hint ? ' <span class="hint">' + esc(hint) + '</span>' : '') + '</div>' + body + '</div>'; }
+    function auditCard() {                                    // 시세 점검(주간, 기획 v2.33 Q250 Q251) — tools/price_audit.py --write 가 만든 audit.json
+      var A = ctx.audit && ctx.audit();
+      if (!A || !A.class) return '';
+      var f1 = function (v) { return (v > 0 ? '+' : '') + v.toFixed(1); }, b0 = (A.class['무사고'] || {}).bias || 0, s0 = (A.class_sold['무사고'] || {}).bias || 0;
+      var cls = ['외판1·판금', '외판1·교환', '외판2·판금', '외판2·교환', '골격·판금', '골격·교환'];
+      var h = '<ul class="adm-audit"><li>오차 가운데 <b>' + A.mdape.toFixed(1) + '%</b> · ±10% 안 ' + A.within10.toFixed(0) + '% · 20% 넘게 틀림 ' + A.over20.toFixed(1) +
+        '% · 상태 미상 ' + A.mdape_unknown.toFixed(1) + '%</li><li>팔린 차의 마지막 호가는 추정보다 ' + f1(A.sold_bias) + '%(판매중 ' + f1(A.bias) + '%)</li></ul>';
+      h += '<div class="v2-tablewrap"><table class="t"><thead><tr><th>사고 단계 — 무사고 대비 치우침(%p)</th><th>판매중</th><th>판매 완료</th></tr></thead><tbody>' + cls.map(function (c) {
+        var a = A.class[c], o = A.class_sold[c];
+        return '<tr><td>' + c + '</td><td class="num">' + (a ? f1(a.bias - b0) : '—') + '</td><td class="num">' + (o ? f1(o.bias - s0) : '—') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+      h += '<div class="v2-tablewrap"><table class="t"><thead><tr><th>범위 적중(%) — 50이 맞음</th><th>무사고</th><th>사고</th><th>미상</th></tr></thead><tbody>' + ['A', 'B', 'C'].map(function (g) {
+        return '<tr><td>신뢰도 ' + g + '</td>' + (A.coverage[g] || []).map(function (v) { return '<td class="num">' + (v == null ? '—' : v.toFixed(0)) + '</td>'; }).join('') + '</tr>';
+      }).join('') + '</tbody></table></div>';
+      h += A.warnings && A.warnings.length ? '<div class="notebox v2-bad">' + A.warnings.map(esc).join('<br>') + '</div>'
+        : '<p class="v2-help">경고 없음 — 사고 단계별 치우침 ±1%p · 오차 가운데 0.5%p 악화가 기준</p>';
+      return card('시세 점검(주간)', h, A.date + ' · 판매중 ' + n0(A.n_onsale) + '대 · 판매 완료 ' + n0(A.n_sold) + '대');
+    }
 
     function summaryLines(x, label, prev) {                    // 어제 요약 3줄(Q172)
       if (!x.sessions) return ['<li>' + label + '은 방문 기록이 없습니다.</li>'];
@@ -193,7 +211,7 @@
       var yd = days[di - 1], bd = days[di - 2], useToday = !(yd && yd.sessions), X = useToday ? day(days[di]) : day(yd), P = useToday ? (yd ? day(yd) : null) : (bd ? day(bd) : null);
       var label = useToday ? '오늘(진행 중)' : '어제';
       var h = head + '<div class="card adm-sum"><div class="card-title">' + label + ' 요약' + (useToday ? ' <span class="hint">어제 기록이 없어 오늘을 보여 줍니다</span>' : '') + '</div><ul>' +
-        summaryLines(X, label, P).join('') + '</ul></div>';
+        summaryLines(X, label, P).join('') + '</ul></div>' + auditCard();
       var Pz = P || { visitors: 0, sessions: 0, sec: 0, results: 0, err: {} };
       h += '<div class="adm-tiles">' +
         tile('방문자', X.visitors, P ? Pz.visitors : null, n0) +

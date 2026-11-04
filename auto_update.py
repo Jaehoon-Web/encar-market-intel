@@ -201,6 +201,12 @@ def main():
         except Exception as e:
             log("모델 리포트 실패(무시하고 계속): %s" % e)
 
+        # 2.93) 시세 점검(오차 · 사고 단계별 치우침 · 범위 적중 → web/data/audit.json 관리자 요약, 감가 옆 시장 근거 cond_market.json — 기획 v2.33). 실패해도 배포는 계속
+        try:
+            run([PY, os.path.join("tools", "price_audit.py"), "--write"], "시세 점검(price_audit.py)")
+        except Exception as e:
+            log("시세 점검 실패(무시하고 계속): %s" % e)
+
         # 3) 사이트 데이터 빌드
         run([PY, "build_data.py"], "사이트 빌드(build_data.py)")
 

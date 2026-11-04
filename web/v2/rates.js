@@ -20,7 +20,8 @@
     var MODELS = [], byLabel = {};
     var CD = { store: false, writable: false, team: null, edit: null, msg: '', err: false, busy: false };   // 기록부 감가 · 수리비 표 고치기
     var REP = [['외판', '외판 한 판'], ['루프 패널', '루프'], ['라디에이터 서포트', '라디에이터 서포트'], ['골격', '골격 부위']];
-    var ONCE = [['사고', '사고 이력(한 번)'], ['골격', '골격(한 번) · 무사고 시세 1,500만 원 이상'], ['골격_저가', '골격(한 번) · 1,000만 원 아래']];
+    var ONCE = [['사고', '사고 이력(한 번)'], ['골격', '골격(한 번)']];
+    var GRP = ['외판', '골격'];
     X.idx.makers.forEach(function (mk) {
       mk.groups.forEach(function (g) {
         g.models.forEach(function (m) {
@@ -142,7 +143,8 @@
     function condCur() {                                     // 지금 쓰는 값(초기값 + 팀 수정)
       var T = ctx.cond.CT().table;
       return { rows: T.rows.map(function (r) { return { key: r.key, label: r.label, '교환': r['교환'], '판금': r['판금'] }; }), once: Object.assign({}, T.once),
-        repair: JSON.parse(JSON.stringify(T.repair)) };
+        repair: JSON.parse(JSON.stringify(T.repair)), band: JSON.parse(JSON.stringify(T.band)), order: T.order.slice(),
+        auction: T.auction ? JSON.parse(JSON.stringify(T.auction)) : null };
     }
     function cdCell(name, val, base, unit, attr) {           // 보기 · 고치기 칸 하나(팀이 바꾼 칸 강조, 아래 작게 초기값)
       var team = base != null && val != null && Math.abs(val - base) > 1e-9, b = base == null ? '' : f1u(base, unit);
@@ -150,10 +152,10 @@
         '" aria-label="' + esc(name) + '"><small>' + (team ? '초기 ' + esc(b) : '') + '</small></td>';
       return '<td class="' + (team ? 'is-team' : '') + '"><b>' + (val == null ? '단계 기본' : esc(f1u(val, unit))) + '</b><small>' + (team ? '초기 ' + esc(b) : '') + '</small></td>';
     }
-    function f1u(v, unit) { return unit === '%' ? (Math.round(v * 10) / 10).toFixed(1) + '%' : unit === '배' ? v + '배' : Math.round(v) + '만'; }
+    function f1u(v, unit) { return unit === '%' ? (Math.round(v * 10) / 10).toFixed(1) + '%' : unit === '배' ? v + '배' : unit === '×' ? '×' + (+v).toFixed(2) : Math.round(v) + '만'; }
     function condCard() {
       var C = CD.edit || condCur(), base = ctx.cond.base, t = CD.team;
-      var h = '<div class="card" id="condCard"><div class="card-title">기록부 감가 · 수리비 표 — 팀 공용 <span class="hint">교환 · 판금은 1곳당 % · 수리필요는 수리비(만원) · 초기값은 판매 매물 호가 차이(' +
+      var h = '<div class="card" id="condCard"><div class="card-title">기록부 감가 · 수리비 표 — 팀 공용 <span class="hint">교환 · 판금은 1곳당 % · 수리필요는 수리비(만원) · 초기값은 팔린 차 중심의 매물 호가 차이(' +
         esc(base.version) + ')</span><span class="v2-actions" style="margin:0 0 0 auto">';
       if (CD.edit) h += '<button type="button" class="v2-btn" data-r="cdCancel"' + (CD.busy ? ' disabled' : '') + '>취소</button><button type="button" class="v2-btn primary" data-r="cdSave"' +
         (CD.busy ? ' disabled' : '') + '>' + (CD.busy ? '저장 중…' : '저장') + '</button>';
@@ -171,7 +173,7 @@
           cdCell(r.label + ' 판금', r['판금'], b['판금'], '%', 'data-cdr="' + k + '|판금"') + '</tr>';
       });
       ONCE.forEach(function (o) { h += '<tr><td><b>' + esc(o[1]) + '</b></td>' + cdCell(o[1], C.once[o[0]], base.once[o[0]], '%', 'data-cdo="' + o[0] + '"') + '<td></td></tr>'; });
-      h += '</tbody></table></div><p class="v2-help">같은 부위 묶음 · 같은 상태는 ' + (base.cap) + '곳까지 셉니다. 1,000만~1,500만 원 사이 골격 한 번은 두 값 사이를 이어서. 예외 줄의 빈칸은 단계 기본 값.</p></div>';
+      h += '</tbody></table></div><p class="v2-help">같은 부위 묶음 · 같은 상태는 ' + (base.cap) + '곳까지 셉니다. 예외 줄의 빈칸은 단계 기본 값. 아래 차값 · 곳 배수를 곱해 씁니다.</p></div>';
       h += '<div><div class="v2-sub">수리필요 — 표준 수리비(만원, 국산)</div><div class="v2-tablewrap"><table class="t v2-rtbl v2-ctbl"><thead><tr><th>부위</th><th>수리비</th></tr></thead><tbody>';
       REP.forEach(function (x) { h += '<tr><td><b>' + esc(x[1]) + '</b></td>' + cdCell(x[1], C.repair[x[0]], base.repair[x[0]], '만', 'data-cdp="' + x[0] + '"') + '</tr>'; });
       Object.keys(base.repair.outside).forEach(function (c) {
@@ -179,6 +181,36 @@
       });
       h += '<tr><td><b>수입차 배수</b></td>' + cdCell('수입차 배수', C.repair['수입배수'], base.repair['수입배수'], '배', 'data-cdp="수입배수"') + '</tr>';
       h += '</tbody></table></div><p class="v2-help">기계 결함(누유 등)은 한 대 산정의 \'예상 수리비\' 칸에 직접 넣습니다(자동 수리비에 더함).</p></div></div>';
+      // 차값 배수 · k번째 곳 배수(소매 감가, 기획 v2.33 Q241 Q243)
+      var BL = base.band.labels || ['1천 미만', '1~2천', '2~4천', '4천+'];
+      h += '<div class="v2-two-col"><div><div class="v2-sub">차값 배수 — 소매 감가에 곱함</div><div class="v2-tablewrap"><table class="t v2-rtbl v2-ctbl"><thead><tr><th>무사고 시세</th>' +
+        BL.map(function (l) { return '<th>' + esc(l) + '</th>'; }).join('') + '</tr></thead><tbody>';
+      GRP.forEach(function (g) {
+        h += '<tr><td><b>' + g + '</b></td>' + C.band[g].map(function (v, j) { return cdCell(g + ' ' + BL[j], v, base.band[g][j], '×', 'data-cdb="' + g + '|' + j + '"'); }).join('') + '</tr>';
+      });
+      h += '</tbody></table></div><p class="v2-help">구간 가운데(' + base.band.anchors.map(function (a) { return a.toLocaleString('ko-KR'); }).join(' · ') +
+        '만 원)일 때 값, 사이는 이어서(경계에서 값이 튀지 않게) — 1~2천 = 1.</p>';
+      h += '<div class="v2-sub">k번째 곳 배수 — 감가가 큰 곳부터</div><div class="v2-tablewrap"><table class="t v2-rtbl v2-ctbl"><thead><tr>' +
+        C.order.map(function (v, j) { return '<th>' + (j + 1) + (j === C.order.length - 1 ? '곳+' : '곳') + '</th>'; }).join('') + '</tr></thead><tbody><tr>' +
+        C.order.map(function (v, j) { return cdCell((j + 1) + '번째 곳', v, base.order[j], '×', 'data-cdk="' + j + '"'); }).join('') + '</tr></tbody></table></div>' +
+        '<p class="v2-help">곳이 늘수록 같거나 작게(곳을 더해도 값이 오르지 않게).</p></div>';
+      // 경매 기준 사고 감가(환산가, 기획 v2.33 Q236 Q239 Q242)
+      if (C.auction) {
+        var A = C.auction, BA = base.auction || A, AL = A.age.labels || ['0~3년', '3~6년', '6~10년', '10년+'];
+        h += '<div><div class="v2-sub">경매 기준 사고 감가 — 환산가에만(%)</div><div class="v2-tablewrap"><table class="t v2-rtbl"><thead><tr><th>사고 단계</th>' +
+          [1, 2, 3, 4, 5, 6].map(function (n) { return '<th>' + n + (n === 6 ? '곳+' : '곳') + '</th>'; }).join('') + '</tr></thead><tbody>';
+        A.classes.forEach(function (c, i) {
+          h += '<tr><td><b>' + esc(c) + '</b></td>' + A.count[i].map(function (v, j) { return cdCell(c + ' ' + (j + 1) + '곳', v, BA.count[i][j], '%', 'data-cda="' + i + '|' + j + '"'); }).join('') + '</tr>';
+        });
+        h += '</tbody></table></div><div class="v2-tablewrap"><table class="t v2-rtbl"><thead><tr><th>배수</th>' + BL.map(function (l) { return '<th>' + esc(l) + '</th>'; }).join('') +
+          AL.map(function (l) { return '<th>' + esc(l) + '</th>'; }).join('') + '</tr></thead><tbody>';
+        GRP.forEach(function (g) {
+          h += '<tr><td><b>' + g + '</b></td>' + A.band[g].map(function (v, j) { return cdCell('경매 차값 ' + g + ' ' + BL[j], v, BA.band[g][j], '×', 'data-cdab="' + g + '|' + j + '"'); }).join('') +
+            A.age[g].map(function (v, j) { return cdCell('경매 연식 ' + g + ' ' + AL[j], v, BA.age[g][j], '×', 'data-cdag="' + g + '|' + j + '"'); }).join('') + '</tr>';
+        });
+        h += '</tbody></table></div><p class="v2-help">환산가 = 무사고 시세 × (1 − 경매 기준 감가) × (1 − 환산 비율) − 수리비. 초기값은 경매 낙찰 자료로 맞춘 요약(원자료는 비공개). 소매 시세에는 쓰지 않습니다.</p></div>';
+      }
+      h += '</div>';
       var log = (t && t.log) || [];
       if (log.length) h += '<ul class="v2-log">' + log.slice(0, 10).map(function (l) {
         return '<li><b>' + l.rev + '판</b> <span class="v2-dim">' + esc(RatesStore.kst(l.at)) + ' · ' + esc(l.by) + '</span>' + (l.note ? ' — ' + esc(l.note) : '') +
@@ -194,6 +226,11 @@
       el.querySelectorAll('input[data-cdo]').forEach(function (x) { e.once[x.getAttribute('data-cdo')] = num(x.value); });
       el.querySelectorAll('input[data-cdp]').forEach(function (x) { e.repair[x.getAttribute('data-cdp')] = num(x.value); });
       el.querySelectorAll('input[data-cdq]').forEach(function (x) { e.repair.outside[x.getAttribute('data-cdq')] = num(x.value); });
+      el.querySelectorAll('input[data-cdb]').forEach(function (x) { var p = x.getAttribute('data-cdb').split('|'); e.band[p[0]][+p[1]] = num(x.value); });
+      el.querySelectorAll('input[data-cdk]').forEach(function (x) { e.order[+x.getAttribute('data-cdk')] = num(x.value); });
+      el.querySelectorAll('input[data-cda]').forEach(function (x) { var p = x.getAttribute('data-cda').split('|'); e.auction.count[+p[0]][+p[1]] = num(x.value); });
+      el.querySelectorAll('input[data-cdab]').forEach(function (x) { var p = x.getAttribute('data-cdab').split('|'); e.auction.band[p[0]][+p[1]] = num(x.value); });
+      el.querySelectorAll('input[data-cdag]').forEach(function (x) { var p = x.getAttribute('data-cdag').split('|'); e.auction.age[p[0]][+p[1]] = num(x.value); });
     }
     function cdSave() {
       cdRead();
@@ -203,7 +240,9 @@
       CD.busy = true;
       render();
       RatesStore.save('/api/cond', { password: e.password, rev: CD.team ? CD.team.rev : 0, by: e.by.trim(), note: e.note,
-        rows: e.rows.map(function (r) { return { key: r.key, '교환': r['교환'], '판금': r['판금'] }; }), once: e.once, repair: e.repair })
+        rows: e.rows.map(function (r) { return { key: r.key, '교환': r['교환'], '판금': r['판금'] }; }), once: e.once, repair: e.repair,
+        band: { '외판': e.band['외판'], '골격': e.band['골격'] }, order: e.order,
+        auction: e.auction ? { count: e.auction.count, band: e.auction.band, age: e.auction.age } : undefined })
         .then(function (team) {
           CD.busy = false; CD.edit = null; CD.team = team; CD.err = false;
           ctx.cond.apply(team);
@@ -317,7 +356,7 @@
       else if (a === 'add') addModel();
       else if (a === 'del') { readForm(); S.edit.models.splice(+b.getAttribute('data-k'), 1); render(); }
       else if (a === 'reload') reload();
-      else if (a === 'cdEdit') { var c0 = condCur(); CD.edit = { by: remember('by'), password: '', note: '', rows: c0.rows, once: c0.once, repair: c0.repair }; CD.msg = ''; render(); }
+      else if (a === 'cdEdit') { var c0 = condCur(); CD.edit = { by: remember('by'), password: '', note: '', rows: c0.rows, once: c0.once, repair: c0.repair, band: c0.band, order: c0.order, auction: c0.auction }; CD.msg = ''; render(); }
       else if (a === 'cdCancel') { CD.edit = null; CD.msg = ''; render(); }
       else if (a === 'cdSave') cdSave();
     }

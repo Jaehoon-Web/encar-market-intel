@@ -61,6 +61,7 @@
     var MIN = E.min_comps, GOOD = E.good_comps, OUT_MAD = E.out_mad, OUT_FLOOR = E.out_floor, A_WIDTH = E.a_width;
     var A_STEP = E.a_step || 2, B_STEP = E.b_step || 4, ATTR = SIM.attr || 0;          // 신뢰도 A·B 단계 상한 · 구동·인승·용도 거리
     var DRIVES = E.drives || [''], USES = E.uses || [''], CT = opt.cond || null;   // CT: 기록부 감가 표(cond_table.js) — 없으면 상태 보정 안 함
+    var STALE = E.stale || null, RANGE_K = E.range_k || null;                          // 추정 범위 배수 — 신뢰도 × [무사고, 사고, 미상](v2.33)                                                       // 오래 안 팔린 판매중 매물은 덜 믿음(v2.33): d0일 넘으면 × exp(−(일 − d0)/tau), 최소 min
 
     function vec(e) {
       return [e.age, e.km, e.rent].concat(COLORS.map(function (c) { return num(own(e.color, c)); }));
@@ -93,7 +94,7 @@
       var G = { n: n, rows: rows, cf: cf, ids: new Array(n), age: new Float64Array(n), km: new Float64Array(n), x: new Array(n),
         grades: new Array(n), trims: new Array(n), perf: new Float64Array(n), D: new Float64Array(n), price: new Float64Array(n),
         sold: new Uint8Array(n), tf: new Float64Array(n), fe: new Float64Array(n),
-        q: new Uint8Array(n), dv: new Int32Array(n), se: new Int32Array(n), us: new Int32Array(n) };   // 근거 약한 이름 · 구동 · 인승 · 용도
+        q: new Uint8Array(n), dv: new Int32Array(n), se: new Int32Array(n), us: new Int32Array(n), dl: new Float64Array(n) };   // 근거 약한 이름 · 구동 · 인승 · 용도 · 올라와 있은 날수
       for (var i = 0; i < n; i++) {
         var r = rows[i], col = F.colors[r[fi.col]], g = F.grades[r[fi.g]], t = F.trims[r[fi.t]];
         var km = Math.min(r[fi.km], KM_CAP) / 1e4, om = r[fi.om] == null ? F.now_ym : r[fi.om], reg = r[fi.reg];
@@ -104,6 +105,7 @@
         G.price[i] = r[fi.price]; G.sold[i] = r[fi.sold]; G.tf[i] = r[fi.tk] == null ? 1 : F.tf[r[fi.tk]];
         G.D[i] = CT && fi.dm != null && r[fi.dm] ? CT.compsD(r[fi.dm].map(function (k) { return F.damage[k]; }), r[fi.price]) : 0;   // 비교 매물의 이력 감가(같은 표)
         G.fe[i] = feOf(cf, g, t);
+        G.dl[i] = !r[fi.sold] && fi.ds != null && r[fi.ds] != null ? days(r[fi.ds], F.now_date) : 0;   // 판매 완료는 0
         if (fi.q != null) { G.q[i] = r[fi.q] || 0; G.dv[i] = r[fi.dv] || 0; G.se[i] = r[fi.se] || 0; G.us[i] = r[fi.us] || 0; }
       }
       grp.cache[name] = G;
@@ -114,11 +116,11 @@
        items(기록부 부위 [{ part, side, pillar, status }] — [] 이면 무사고, null 이면 상태 미상), excludeId(비교에서 뺄 매물 ID),
        dv·se·us(구동·인승·용도 번호, 모르면 0 — 차명 글에서 읽은 값),
        excludeIds(화면에서 사용자가 뺀 매물 ID 목록 — 사이트 전용, 후보에서 빼는 것 말고는 계산이 같다)
-       o: { sold, time, weight, outlier, adjust } — 기본 모두 true. 비교 매물이 5대 미만이면 null */
+       o: { sold, time, weight, outlier, adjust, stale } — 기본 모두 true. 비교 매물이 5대 미만이면 null */
     function estimate(grp, name, t, o) {
       var G = prepare(grp, name);
       if (!G) return null;
-      o = Object.assign({ sold: true, time: true, weight: true, outlier: true, adjust: true }, o || {});
+      o = Object.assign({ sold: true, time: true, weight: true, outlier: true, adjust: true, stale: true }, o || {});
       var known = t.items != null;
       var tage = t.age, tkm = Math.min(t.km, KM_CAP) / 1e4, tg = t.grade, tt = t.trim || '';
       var n0 = G.n, i, j, k, excl = t.excludeIds && t.excludeIds.length ? new Set(t.excludeIds) : null;
@@ -166,6 +168,7 @@
           + SIM.trim * (tt !== '' && G.trims[i] !== '' && G.trims[i] !== tt ? 1 : 0)
           + SIM.sold * G.sold[i] + ATTR * attr;                                 // 상태 차이는 가중치에 넣지 않는다(값이 상태에 따라 뒤집히지 않게)
         w[k] = o.weight ? Math.exp(-dist) : 1;
+        if (STALE && STALE.tau && o.stale) w[k] *= Math.max(STALE.min, Math.exp(-Math.max(0, G.dl[i] - STALE.d0) / STALE.tau));   // 오래 안 팔린 매물은 덜 믿음
         la[k] = Math.log(cl[k]);
         parts[k] = pr; feD[k] = tfe - G.fe[i]; tfL[k] = Math.log(tf);
       }
@@ -188,12 +191,17 @@
       var Dt = 0, lines = [], Dbar = sd / sw;
       if (CT && o.adjust) {
         if (known) { var h = CT.hist(t.items, b0); Dt = h.D; lines = h.lines; }
-        else Dt = Math.min(Dbar, CT.light);                                   // 미상 = 비교 매물 평균 상태, 단 가장 가벼운 사고보다는 높게(Q215)
+        else Dt = Math.min(Dbar, CT.lightAt(b0));                             // 미상 = 비교 매물 평균 상태, 단 그 차값의 가장 가벼운 사고보다는 높게(Q215)
       }
       var est = b0 * (1 - Dt), lo = lo0 * (1 - Dt), hi = hi0 * (1 - Dt);
       var n = lk.length, tight = hi / est - 1 <= A_WIDTH && 1 - lo / est <= A_WIDTH;
+      var grade = n >= GOOD && step <= A_STEP && tight ? 'A' : (step <= B_STEP ? 'B' : 'C');
+      if (RANGE_K) {                                                         // 범위를 실제 호가의 50%가 들게(신뢰도는 넓히기 전 범위로)
+        var kk = RANGE_K[grade][!known ? 2 : (Dt > 0 ? 1 : 0)];
+        lo = est * Math.pow(lo / est, kk); hi = est * Math.pow(hi / est, kk);
+      }
       var r = { est: est, lo: lo, hi: hi, base: b0, D: Dt, condLines: lines, n: n, out: m - n, step: step, stepName: STEPS[step - 1][0],
-        grade: n >= GOOD && step <= A_STEP && tight ? 'A' : (step <= B_STEP ? 'B' : 'C'), coefLevel: G.cf.level };
+        grade: grade, coefLevel: G.cf.level };
       if (!known) { r.est0 = b0; r.Dbar = Dbar; }                          // 무사고 기준 값 · 비교 매물 평균 감가
       for (k = 0; k < m; k++) {                                              // 보정가 = 무사고 값 × (1 − 내 차 감가) · 상태 보정 근거
         adj[k] = cl[k] * (1 - Dt);
@@ -272,11 +280,13 @@
       }, o);
       if (!r) return null;
       var yrs = Math.floor(ym / 100) - (car['연식'] || Math.floor(reg / 100));
-      var cv = conversionRate(r.est, yrs, grp.F.maker, car['모델'], car['연료'], car['팀환산']);
+      var cv = conversionRate(r.base, yrs, grp.F.maker, car['모델'], car['연료'], car['팀환산']);   // 환산 비율은 무사고 시세로 찾는다(무사고 차끼리 맞춘 비율)
       var rp = CT && st ? CT.repair(st.items, !!car['수입']) : { sum: 0, lines: [] }, man0 = +(car['수리비'] || 0), fix = man0 + rp.sum;
       r.repairAuto = rp.sum; r.repairLines = rp.lines; r.repairManual = man0;   // 수리필요 자동 + 직접 입력(Q230)
       r.repair = fix; r.price = r.est - fix; r.range = [r.lo - fix, r.hi - fix];
-      r.rate = cv.rate; r.rateSource = cv.source; r.converted = r.est * (1 - cv.rate / 100) - fix;
+      var da = CT && st ? CT.auctionD(st.items || [], r.base, yrs) : null;
+      r.convD = da == null ? r.D : da;                                       // 환산가의 사고 감가: 경매 기준(기록부를 넣었을 때), 미상은 소매와 같게(v2.33)
+      r.rate = cv.rate; r.rateSource = cv.source; r.converted = r.base * (1 - r.convD) * (1 - cv.rate / 100) - fix;
       return r;
     }
 

@@ -1140,7 +1140,7 @@
       var nc = T.roles.length, head = T.header ? T.table[0].slice() : T.roles.map(function (_, c) { return colName(c) + '열'; });
       var calc = ['산정_제조사', '산정_모델', '산정_세부모델', '산정_등급', '산정_세부등급', '차명 확신', '산정_최초등록', '산정_주행(km)', '성능 상태(읽은 결과)',
         '사고 단계', '이력 감가(%)', '무사고 시세(만원)', '수리필요 수리비(만원)', '직접 입력 수리비(만원)', '추정 시세(만원)', '범위 하한(만원)', '범위 상한(만원)',
-        '환산 비율(%)', '환산가(만원)', '환산 비율 출처', '신뢰도', '비교 매물(대)', '매칭 단계', '계산 안 된 이유', '한 대 산정 주소'];
+        '환산 비율(%)', '환산가 사고 감가(%)', '환산가(만원)', '환산 비율 출처', '신뢰도', '비교 매물(대)', '매칭 단계', '계산 안 된 이유', '한 대 산정 주소'];
       var vs = verify(), hasAsk = rows.some(function (r) { return r.ask != null; });
       if (vs) calc = calc.concat(['실제 낙찰가(만원)', '환산가 오차(%)', '실제 환산 비율(%)']);
       if (hasAsk) calc = calc.concat(['판매 가격(만원)', '시세 대비(만원)', '시세 대비(%)', '판정']);
@@ -1155,7 +1155,8 @@
           CONF[r.conf] || r.conf, r.reg ? r.reg.y + '-' + pad(r.reg.m) + (r.reg.guess ? '(월 미상)' : '') : null, r.km, cond,
           c && c['상태'] !== '미상' ? c['사고라벨'] : null, R ? Math.round(R.D * 1000) / 10 : null, R ? Math.round(R.base) : null,
           R ? R.repairAuto || null : null, r.cost || null,
-          R ? Math.round(R.price) : null, R ? Math.round(R.range[0]) : null, R ? Math.round(R.range[1]) : null, R ? R.rate : null, R ? Math.round(R.converted) : null,
+          R ? Math.round(R.price) : null, R ? Math.round(R.range[0]) : null, R ? Math.round(R.range[1]) : null, R ? R.rate : null,
+          R ? Math.round((R.convD || 0) * 1000) / 10 : null, R ? Math.round(R.converted) : null,
           R ? R.rateSource : null, R ? R.grade : null, R ? R.n : null, R ? R.stepName : null, why.join(' · ') || null, R ? base + link(r) : null]);
         if (vs) line.push(r.actual != null ? r.actual : null, R && r.actual != null ? +((R.converted - r.actual) / r.actual * 100).toFixed(1) : null,
           R && r.actual != null ? +((1 - (r.actual + (r.cost || 0)) / R.est) * 100).toFixed(1) : null);
