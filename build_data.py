@@ -35,7 +35,7 @@ BUILD_YM = 2026 * 12 + 4  # 차령 계산 기준월 (as-of 기준)
 # 공통 정규화 헬퍼
 # ============================================================
 def norm_fuel(f):
-    if not f or f.strip() == "":
+    if not isinstance(f, str) or f.strip() == "":   # 빈칸(NaN)도 — 연료만 빈 매물 한 대가 빌드 전체를 멈췄다(2026-11-04)
         return "기타"
     f = f.strip()
     if "전기" in f and "+" not in f and "가솔린" not in f and "디젤" not in f and "LPG" not in f:
