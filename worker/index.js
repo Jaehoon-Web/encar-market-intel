@@ -4,6 +4,8 @@
  *   GET /api/rates          → { ok, store, writable, team }   팀이 고친 것(아직 없으면 team = null)
  *   GET /api/rates?rev=N    → { ok, team }                    N판(되돌리기용, 180일 보관)
  *   PUT /api/rates          본문 { password, rev, by, note, cells, models } → { ok, team }   새 판 저장
+ *   GET /api/terms          → { ok, store, writable, team }   팀 표기 사전(기록부 글 읽기, 기획 v2.31 Q201·Q209 — 환산 비율과 같은 비밀번호)
+ *   PUT /api/terms          본문 { password, by, add: [{ t, kind, part, side, pillar, status }], del: [t…] } → { ok, team }   더하기·지우기
  *   POST /api/ev            본문 { u, s, d, e: [[시각, 종류, 화면, 이름, 값], …] } → 204   이용 통계(web/v2/track.js)
  *   POST /api/admin/login   본문 { password } → { ok, token, exp }   관리자 30일 출입증(web/v2/admin.js)
  *   GET  /api/admin/stats?days=7|30|90   머리글 Authorization: Bearer 출입증 → { ok, today, days: [하루 요약…] }
@@ -145,6 +147,68 @@ async function put(request, env) {
   return json({ ok: true, team: next });
 }
 
+// ───── 팀 표기 사전(기획 v2.31 5.14) — 기록부 글에서 사용자가 고친 표기를 팀이 함께 쓴다 ─────
+// items = [{ t: 표기, kind: part|status|outside|ignore|paint, part, side, pillar, status, by, at }]. 고친 표기는 부위·상태 이름이 사이트 사전과 맞아야 받는다.
+const TERMS = 'terms', MAX_TERMS = 500;
+const TERM_KINDS = new Set(['part', 'status', 'outside', 'ignore', 'paint']);
+const termKey = t => String(t).replace(/\s+/g, '').toUpperCase();
+async function termNames(env, origin) {                      // 사이트 사전의 부위·상태 이름(정적 파일)
+  try {
+    const m = await (await env.ASSETS.fetch(new Request(origin + '/data/inspection_model.json'))).json();
+    return { parts: new Set(Object.keys(m.parts).concat(Object.keys(m.generic_parts || {}))), status: new Set(Object.keys(m.status_kind)) };
+  } catch (e) {
+    return null;
+  }
+}
+function termOf(x, N, by, now) {
+  const t = str(x.t, 30), kind = str(x.kind, 10);
+  if (termKey(t).length < 2) throw new Error('표기는 두 글자 이상이어야 합니다: ' + t);
+  if (!TERM_KINDS.has(kind)) throw new Error('종류가 맞지 않습니다: ' + kind);
+  const o = { t, kind, by, at: now };
+  if (kind === 'part') {
+    o.part = str(x.part, 30);
+    if (N && !N.parts.has(o.part)) throw new Error('없는 부위 이름입니다: ' + o.part);
+    o.side = x.side === '좌' || x.side === '우' ? x.side : null;
+    o.pillar = ['앞', '중간', '뒤'].includes(x.pillar) ? x.pillar : null;
+  }
+  if (kind === 'status') {
+    o.status = str(x.status, 10);
+    if (N && !N.status.has(o.status)) throw new Error('없는 상태 이름입니다: ' + o.status);
+  }
+  return o;
+}
+async function termsPut(request, env) {
+  if (!env.RATES) return json({ ok: false, error: '저장소(KV)가 아직 연결되지 않았습니다' }, 503);
+  if (!env.RATES_PASSWORD) return json({ ok: false, error: '수정 비밀번호가 아직 설정되지 않았습니다' }, 503);
+  const text = await request.text();
+  if (text.length > MAX_BODY) return json({ ok: false, error: '보낸 내용이 너무 큽니다' }, 413);
+  let body;
+  try { body = JSON.parse(text); } catch (e) { return json({ ok: false, error: '내용을 읽을 수 없습니다' }, 400); }
+  if (!body || typeof body !== 'object') return json({ ok: false, error: '내용을 읽을 수 없습니다' }, 400);
+  if (!(await samePassword(body.password == null ? '' : body.password, env.RATES_PASSWORD))) {
+    await sleep(1000);
+    return json({ ok: false, error: '비밀번호가 맞지 않습니다' }, 401);
+  }
+  const by = str(body.by, 30);
+  if (!by) return json({ ok: false, error: '고치는 사람 이름을 넣어 주세요' }, 400);
+  const cur = (await env.RATES.get(TERMS, 'json')) || { rev: 0, items: [] }, now = new Date().toISOString();
+  let items = cur.items.slice();
+  try {
+    const N = await termNames(env, new URL(request.url).origin);
+    (Array.isArray(body.del) ? body.del : []).forEach(t => { const k = termKey(t); items = items.filter(x => termKey(x.t) !== k); });
+    (Array.isArray(body.add) ? body.add : []).slice(0, 50).forEach(x => {
+      const o = termOf(x || {}, N, by, now), k = termKey(o.t);
+      items = items.filter(y => termKey(y.t) !== k).concat([o]);   // 같은 표기는 새것으로
+    });
+  } catch (e) {
+    return json({ ok: false, error: e.message }, 400);
+  }
+  if (items.length > MAX_TERMS) return json({ ok: false, error: '사전은 ' + MAX_TERMS + '개까지입니다' }, 400);   // 판이 꼬이지 않게 덮어쓰지 않고 더하기·지우기만 받는다
+  const next = { rev: cur.rev + 1, updated_at: now, updated_by: by, items };
+  await env.RATES.put(TERMS, JSON.stringify(next));
+  return json({ ok: true, team: next });
+}
+
 // ───── 이용 통계(기획 v2.28 · 5.11, 인터뷰 Q148~Q173) ─────
 // 익명 번호(u · 방문 s)와 행동만 받는다. 이름·IP·위치는 받지도 적지도 않는다(요청 머리글의 IP를 읽지 않음).
 // 받은 묶음은 SQL 한 문장(json_each)으로 넣는다 — D1 무료 요금제의 '요청 한 번에 50문장' 한도와 무관하게.
@@ -268,6 +332,14 @@ export default {
     if (url.pathname === '/api/rates') {
       if (request.method === 'GET') return get(url, env);
       if (request.method === 'PUT') return put(request, env);
+      return json({ ok: false, error: 'GET 또는 PUT만 됩니다' }, 405);
+    }
+    if (url.pathname === '/api/terms') {
+      if (request.method === 'GET') {
+        if (!env.RATES) return json({ ok: true, store: false, writable: false, team: null });
+        return json({ ok: true, store: true, writable: !!env.RATES_PASSWORD, team: await env.RATES.get(TERMS, 'json') });
+      }
+      if (request.method === 'PUT') return termsPut(request, env);
       return json({ ok: false, error: 'GET 또는 PUT만 됩니다' }, 405);
     }
     if (url.pathname === '/api/ev') {

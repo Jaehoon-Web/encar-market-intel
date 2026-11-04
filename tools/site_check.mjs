@@ -151,6 +151,17 @@ for (const f of ['batch.js', 'rates.js', 'market.js', 'pulse.js', 'curve.js', 'd
 const isc = IS.create(read(path.join(DATA, 'inspection_model.json')));
 const cond = isc.parseText('좌프론트휀더 X, 본넷 W');
 ok(cond.items.length === 2 && !cond.unknown.length, '성능 표기 읽기(좌프론트휀더 X, 본넷 W)', JSON.stringify(cond));
+{                                                            // 기록부 글 읽기(기획 v2.31): 소리 맞추기 · 짐작 · 못 읽음 후보 · 팀 사전 · 고른 것
+  const a = isc.parseText('프론트 헨다 좌 판, 휜더 우 교환, 도어 수리');
+  const [t0, t1, t2] = a.tokens;
+  ok(t0.kind === 'ok' && t0.label === '프론트 휀더(좌) 판금' && t1.kind === 'guess' && t1.label === '프론트 휀더(우) 교환' &&
+     t2.kind === 'unknown' && t2.cands.some(c => c.label === '도어 판금' && c.save && c.save.t === '수리'),
+  '글 읽기 — 같은 소리 · 짐작 · 못 읽음 후보', JSON.stringify(a.tokens.map(t => [t.kind, t.label, t.cands.map(c => c.label)])));
+  const b = isc.parseText('도어 수리', { terms: [{ t: '수리', kind: 'status', status: '판금' }] });
+  const c = isc.parseText('도어 수리', { picks: { '도어 수리': [{ part: '도어', side: null, pillar: null, status: '교환' }] } });
+  ok(b.items.length === 1 && b.items[0].status === '판금' && b.tokens[0].kind === 'ok' && c.tokens[0].kind === 'picked' && c.items[0].status === '교환',
+    '글 읽기 — 팀 사전 · 후보에서 고른 것', JSON.stringify([b.tokens, c.tokens]));
+}
 const ev = isc.evaluate({ state: '입력', items: cond.items, mechLevel: 0 });
 ok(ev['성능등급'] >= 1 && ev['성능등급'] <= 9 && ev['사고라벨'], `성능 계산 → ${ev['사고라벨']} · ${ev['성능등급']}등급`);
 const nm = NM.create(idx);

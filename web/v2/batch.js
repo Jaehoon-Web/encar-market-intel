@@ -144,6 +144,7 @@
     var X = ctx.X, ENG = ctx.ENG, ISC = ctx.ISC, GROUPS = ctx.GROUPS, esc = ctx.esc, man = ctx.man, pad = ctx.pad;
     var NM = NameMatch.create(X.idx), el = null, token = 0, onlyCheck = false;
     var T = { text: '', table: [], header: false, roles: [], over: 0 };
+    var TS = { list: [], msg: '' };                           // 팀 표기 사전에 넣을, 이번에 고른 표기(기획 v2.31)
     var rows = [], FIX = load('fix') || {};
     ['name', 'grade', 'cond'].forEach(function (k) { FIX[k] = FIX[k] || {}; });
     var MODELS = [], byName = {};                            // 다른 모델 찾기 목록
@@ -240,7 +241,7 @@
       if (s.normalize) s = s.normalize('NFKC');
       s = s.replace(/:/g, ' ');
       Object.keys(FIX.cond).forEach(function (tok) { if (s.indexOf(tok) >= 0) s = s.split(tok).join(FIX.cond[tok]); });
-      r.cond = ISC.parseText(s);
+      r.cond = ISC.parseText(s, { terms: ctx.terms ? ctx.terms.list() : [] });   // 소리 맞추기 · 짐작 · 팀 사전(기획 v2.31)
       r.c = null;
       if (!r.cond.unknown.length) {
         var st = r.cond.state, input = st === '미상' ? { state: '미상' } : { state: st === '무사고' ? '무사고' : '입력', items: r.cond.items, mechLevel: 0 };
@@ -447,29 +448,64 @@
       $('bCols').innerHTML = h + '</div>';
     }
 
+    function tokOf(text) {                                   // 그 표기를 가진 첫 차의 읽은 결과(후보 · 짐작)
+      for (var i = 0; i < rows.length; i++) {
+        var t = (rows[i].cond.tokens || []).filter(function (x) { return x.text === text; })[0];
+        if (t) return t;
+      }
+      return null;
+    }
     function renderFix() {
-      var unk = {}, order = [];
+      var unk = {}, order = [], gss = {}, gorder = [];
       rows.forEach(function (r) {
         r.cond.unknown.forEach(function (t) { if (!unk[t]) { unk[t] = 0; order.push(t); } unk[t]++; });
+        (r.cond.tokens || []).forEach(function (t) { if (t.kind === 'guess') { if (!gss[t.text]) { gss[t.text] = 0; gorder.push(t.text); } gss[t.text]++; } });
       });
       var low = rows.filter(needsCheck).length, none = rows.filter(function (r) { return r.text && !r.best; }).length;
       var guess = rows.filter(function (r) { return r.reg && r.reg.guess; }).length;
       var missKm = rows.filter(function (r) { return r.km == null; }).length, missReg = rows.filter(function (r) { return !r.reg; }).length;
       var remembered = Object.keys(FIX.name).length + Object.keys(FIX.grade).length + Object.keys(FIX.cond).length;
-      if (!order.length && !low && !none && !guess && !missKm && !missReg && !remembered) { $('bFix').innerHTML = ''; return; }
-      var h = '<div class="card"><div class="card-title">③ 확인할 것' + IB + '</div>' + info('같은 표기는 한 번 고치면 모두 적용됩니다. 쓸 수 있는 성능 표기: ' +
-        '부위(프론트 휀더·도어·후드·트렁크·쿼터·루프·필러…) + 좌·우 + 상태(X 교환 · W 판금 · 용접 · 절단 · U 요철 · T 손상 · C 부식 · A 흠집). 여러 부위는 쉼표로 나눕니다.');
+      if (!order.length && !gorder.length && !low && !none && !guess && !missKm && !missReg && !remembered && !TS.list.length) { $('bFix').innerHTML = ''; return; }
+      var h = '<div class="card"><div class="card-title">③ 확인할 것' + IB + '</div>' + info('같은 표기는 한 번 고치면 모두 적용됩니다. 성능 표기는 띄어쓰기 · 줄임말 · 소리가 같은 철자(펜터 · 헨다 → 휀더)를 ' +
+        '읽고, 비슷한 이름은 짐작해 읽은 뒤 아래에 보여 줍니다. 쓸 수 있는 표기: 부위(프론트 휀더·도어·후드·트렁크·쿼터·루프·필러…) + 좌·우(운전석·조수석 · FL·RR) + ' +
+        '상태(교환·교 · 판금·판 · 용접 · 절단 · 요철 · 손상 · 부식 · 흠집 · 기스 · 수리필요). 여러 부위는 쉼표로 나눕니다.');
       if (order.length) {
         h += '<div class="v2-sub">못 읽은 성능 표기 ' + order.length + '가지 — 고치기 전에는 그 차를 계산하지 않습니다</div><div class="v2-fixes">';
         order.forEach(function (t, k) {
-          h += '<div class="v2-fixrow"><span class="v2-tok">' + esc(t) + '</span><span class="v2-dim">' + unk[t] + '대</span>' +
-            '<input class="v2-in" data-tok="' + k + '" autocomplete="off" placeholder="바르게 고쳐 쓰기 (예: 좌프론트휀더 X)">' +
+          var tk = tokOf(t), cs = tk && tk.cands || [];
+          h += '<div class="v2-fixrow"><span class="v2-tok">' + esc(t) + '</span><span class="v2-dim">' + unk[t] + '대' + (tk && tk.why ? ' · ' + esc(tk.why) : '') + '</span>' +
+            (cs.length ? '<span class="bt-cands">' + cs.map(function (c, ci) {
+              return '<button type="button" class="v2-btn v2-cand" data-b="tokPick" data-k="' + k + '" data-c="' + ci + '">' + esc(c.label) + '</button>';
+            }).join('') + '</span>' : '') +
+            '<input class="v2-in" data-tok="' + k + '" autocomplete="off" placeholder="바르게 고쳐 쓰기 (예: 좌프론트휀더 판금)">' +
             '<button type="button" class="v2-btn" data-b="tokFix" data-k="' + k + '">적용</button>' +
             '<button type="button" class="v2-btn" data-b="tokSkip" data-k="' + k + '">무시하고 계산</button></div>';
         });
         h += '</div>';
         T.unk = order;
       }
+      if (gorder.length) {                                   // 짐작해 읽은 표기 — 계산에는 넣었고, 틀렸으면 고친다(인터뷰 Q199)
+        h += '<div class="v2-sub">짐작해 읽은 성능 표기 ' + gorder.length + '가지 — 계산에 넣었습니다. 틀렸으면 고르거나 고쳐 쓰세요</div><div class="v2-fixes">';
+        gorder.forEach(function (t, k) {
+          var tk = tokOf(t), cs = tk && tk.cands || [];
+          h += '<div class="v2-fixrow"><span class="v2-tok">' + esc(t) + '</span><span class="v2-dim">' + gss[t] + '대</span>' +
+            '<span class="bt-gread">→ <b>' + esc(tk ? tk.label : '') + '</b>' + (tk && tk.guess.length ? ' <small>' + esc(tk.guess.map(function (g) { return g.from === '좌우' ? g.to : g.from + '→' + g.to; }).join(' · ')) + '</small>' : '') + '</span>' +
+            (cs.length ? '<span class="bt-cands">다른 것: ' + cs.map(function (c, ci) {
+              return '<button type="button" class="v2-btn v2-cand" data-b="gPick" data-k="' + k + '" data-c="' + ci + '">' + esc(c.label) + '</button>';
+            }).join('') + '</span>' : '') + '</div>';
+        });
+        h += '</div>';
+        T.gss = gorder;
+      }
+      if (TS.list.length) {                                  // 고른 표기를 팀 사전에(환산 비율과 같은 비밀번호, 인터뷰 Q201·Q209)
+        var by = ''; try { by = localStorage.getItem('v2.rates.by') || ''; } catch (e) { /* 없어도 된다 */ }
+        h += '<div class="bt-tsave"><b>고른 표기 ' + TS.list.length + '개를 팀 사전에 넣으면</b> 다음부터 팀 모두가 자동으로 읽습니다: ' +
+          esc(TS.list.map(function (x) { return "'" + x.t + "' = " + (x.kind === 'part' ? x.part + (x.side ? '(' + x.side + ')' : '') + (x.pillar ? '(' + x.pillar + ')' : '') : x.status); }).join(' · ')) +
+          '<span class="bt-tform"><input class="v2-in" id="bTermBy" autocomplete="name" placeholder="이름" value="' + esc(by) + '">' +
+          '<input class="v2-in" id="bTermPw" type="password" autocomplete="current-password" placeholder="수정 비밀번호" value="' + esc(ctx.terms.pw()) + '">' +
+          '<button type="button" class="v2-btn primary" data-b="termSave">팀 사전에 저장</button><button type="button" class="v2-link" data-b="termSkip">안 넣음</button>' +
+          '<em id="bTermMsg">' + esc(TS.msg) + '</em></span></div>';
+      } else if (TS.msg) h += '<p class="v2-note bt-tdone">' + esc(TS.msg) + '</p>';
       var notes = [];
       if (low) notes.push('차명 확신이 낮은 차 <b>' + low + '대</b> — 아래 표의 노란 칸에서 맞는 모델·등급을 고르세요');
       if (none) notes.push('차명을 찾지 못한 차 <b>' + none + '대</b> — 빨간 칸에서 "다른 모델 찾기"로 고르세요');
@@ -527,7 +563,9 @@
       var out = c.outside && c.outside.length ? '<br><span class="v2-dim" title="성능점검 대상이 아니라 시세 계산에서 뺌(경매 평가에서는 감점될 수 있음)">계산 제외: ' +
         esc(c.outside.join(', ')) + '</span>' : '';
       if (c.state === '무사고' && !c.items.length) return '무사고' + out;
-      return '<span title="' + esc(ISC.summary(c.items)) + '">' + esc(r.c['사고라벨']) + ' · ' + r.c['성능등급'] + '등급</span>' + out;
+      var gs = (c.tokens || []).filter(function (t) { return t.kind === 'guess'; });
+      return '<span title="' + esc(ISC.summary(c.items)) + '">' + esc(r.c['사고라벨']) + ' · ' + r.c['성능등급'] + '등급</span>' +
+        (gs.length ? ' <i class="bt-guess" title="' + esc(gs.map(function (t) { return t.text + ' → ' + t.label; }).join('\n')) + '">짐작</i>' : '') + out;
     }
     function link(r) {
       return ctx.href({ mk: r.best.maker, grp: r.best.group, model: r.best.model, grade: r.grade, trim: r.trim, y: String(r.reg.y), m: String(r.reg.m),
@@ -1248,6 +1286,24 @@
       else if (a === 'clear') { $('bPaste').value = ''; run(); }
       else if (a === 'xlsx') exportAll();
       else if (a === 'forget') { FIX = { name: {}, grade: {}, cond: {} }; save('fix', null); process(); }
+      else if (a === 'tokPick' || a === 'gPick') {
+        var tx = (a === 'tokPick' ? T.unk : T.gss || [])[k], tk2 = tx != null ? tokOf(tx) : null, cand = tk2 && tk2.cands[+b.getAttribute('data-c')];
+        if (!cand) return;
+        if (cand.save && ctx.terms && ctx.terms.writable() && !TS.list.some(function (x) { return x.t === cand.save.t; })) TS.list.push(cand.save);
+        TS.msg = '';
+        setCond(tx, cand.label);
+      }
+      else if (a === 'termSkip') { TS.list = []; TS.msg = ''; renderFix(); }
+      else if (a === 'termSave') {
+        var by2 = ($('bTermBy').value || '').trim(), pw2 = $('bTermPw').value;
+        if (!by2) { $('bTermMsg').textContent = '이름을 넣어 주세요'; $('bTermBy').focus(); return; }
+        $('bTermMsg').textContent = '저장하는 중…';
+        ctx.terms.save(TS.list.slice(), by2, pw2).then(function () {
+          TS.msg = '팀 사전에 넣었습니다(' + TS.list.length + '개) — 다음부터 팀 모두가 자동으로 읽습니다';
+          TS.list = [];
+          renderFix();
+        }).catch(function (e2) { var m = $('bTermMsg'); if (m) m.textContent = e2.message || '저장하지 못했습니다'; });
+      }
       else if (a === 'tokFix' || a === 'tokSkip') {
         var tok = T.unk && T.unk[k], inp = el.querySelector('input[data-tok="' + k + '"]');
         if (tok == null) return;

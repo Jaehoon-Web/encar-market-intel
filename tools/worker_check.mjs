@@ -96,6 +96,25 @@ ok(r.status === 400 || r.status === 413, '모델 501개 → 거절', r.status);
 r = await worker.fetch(new Request('https://x.test/api/rates', { method: 'PUT', body: 'x'.repeat(70000) }), env);
 ok(r.status === 413, '64KB 넘는 본문 → 413', r.status);
 
+console.log('[팀 표기 사전 /api/terms (기획 v2.31)]');
+const tcall = (env2, method, body) => worker.fetch(new Request('https://x.test/api/terms', {
+  method, headers: { 'content-type': 'application/json' }, body: body == null ? undefined : JSON.stringify(body)
+}), env2).then(async x => ({ status: x.status, body: await x.json().catch(() => null) }));
+r = await tcall({ ASSETS }, 'GET');
+ok(r.status === 200 && r.body.store === false, '저장소 없음 → 읽기만(store=false)', r);
+r = await tcall(env, 'GET');
+ok(r.status === 200 && r.body.writable && r.body.team === null, '처음 → 사전 없음', r.body);
+r = await tcall(env, 'PUT', { password: '틀림', by: '권재훈', add: [{ t: '보조석휀다', kind: 'part', part: '프론트 휀더', side: '우' }] });
+ok(r.status === 401, '틀린 비밀번호 → 401', r.status);
+r = await tcall(env, 'PUT', { password: '팀비번-2026', by: '권재훈', add: [{ t: '보조석휀다', kind: 'part', part: '없는 부위' }] });
+ok(r.status === 400 && /부위/.test(r.body.error), '없는 부위 이름 → 400', r.body);
+r = await tcall(env, 'PUT', { password: '팀비번-2026', by: '권재훈', add: [{ t: '문', kind: 'part', part: '도어' }] });
+ok(r.status === 400 && /두 글자/.test(r.body.error), '한 글자 표기 → 400', r.body);
+r = await tcall(env, 'PUT', { password: '팀비번-2026', by: '권재훈', add: [{ t: '보조석휀다', kind: 'part', part: '프론트 휀더', side: '우' }, { t: '수리', kind: 'status', status: '판금' }] });
+ok(r.status === 200 && r.body.team.rev === 1 && r.body.team.items.length === 2 && r.body.team.items[0].side === '우', '더하기 → 1판 · 2개', r.body);
+r = await tcall(env, 'PUT', { password: '팀비번-2026', by: '김팀원', add: [{ t: '수 리', kind: 'status', status: '손상' }], del: ['보조석 휀다'] });
+ok(r.status === 200 && r.body.team.items.length === 1 && r.body.team.items[0].status === '손상' && r.body.team.items[0].by === '김팀원', '같은 표기(띄어쓰기 무시)는 바꾸고 지우기', r.body);
+
 console.log('[이용 통계 기록 /api/ev (기획 v2.28)]');
 const U = 'abcdefgh12345678', SI = 'session000000001';
 const ev = (env2, body, headers = {}) => worker.fetch(new Request('https://x.test/api/ev', {

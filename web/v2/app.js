@@ -25,7 +25,8 @@
   var AV = null;                                             // 관리자(admin.js · 기획 v2.28)
   var VIEW = { sort: 'sim', all: false, mode: 'one', condWarn: [], condOut: [], exKeep: {}, allGrades: false, nameText: '', nameMsg: '', nameCands: [], recentOpen: false,
     posx: 'km', hl: null,                                    // posx: 내 차 위치 그림 가로축(km·age) · hl: 그림에서 누른 비교 매물 ID      // mode: one(한 대 산정) · model(모델 요약) · batch(묶음 산정) · rates(⚙ 환산 비율)
-    open: {}, info: {}, carOpen: false, moreOpen: null, recOpen: null, shown: null, shownKey: '', countId: 0, riseKey: '' };   // 화면 정리(기획 v2.26·v2.27): open = 처음 접힌 섹션을 펼침 · info = 섹션 i 설명 펼침 · carOpen = 차 고르는 5칸 펼침 · moreOpen = 더 보기 · recOpen = 기록부 입력 창 · shown = 추정 시세 숫자 올라가기 · riseKey = 처음 그릴 때만 떠오르기
+    open: {}, info: {}, carOpen: false, moreOpen: null, recOpen: null, shown: null, shownKey: '', countId: 0, riseKey: '',
+    condText: '', condRes: null, condPicks: {}, condAlt: {}, condSave: null, condSaveMsg: '', condTerms: false, condDel: null };   // 기록부 글 읽기(기획 v2.31): 적은 글 · 읽은 결과 · 후보에서 고른 것(조각 원문 → 부위) · '다른 것' 펼침 · 팀 사전 저장 창   // 화면 정리(기획 v2.26·v2.27): open = 처음 접힌 섹션을 펼침 · info = 섹션 i 설명 펼침 · carOpen = 차 고르는 5칸 펼침 · moreOpen = 더 보기 · recOpen = 기록부 입력 창 · shown = 추정 시세 숫자 올라가기 · riseKey = 처음 그릴 때만 떠오르기
   var TIP = {                                                // 용어 설명(결과 카드·비교 매물 표의 ? — 마우스를 올리거나 누르면)
     est: '비슷한 온라인 매물(판매중 + 최근 3개월 판매)의 호가를 이 차 조건으로 맞춘 값(보정 후) 가운데 값입니다. 비슷한 매물일수록 크게 반영합니다. ' +
       '온라인 소매 호가 기준이라 실제 거래가와는 다릅니다. 범위는 보정 후 값의 가운데 50%입니다.',
@@ -479,9 +480,10 @@
       if (!b || b.name !== p.board) boards.push(b = { name: p.board, list: [] });
       b.list.push(i);
     });
-    var h = '<div class="v2-cond v2-rec" id="recPanel"><div class="v2-rec-h"><b>성능·상태점검기록부</b><span>' + (S.items.length ? S.items.length + '곳 입력' : '부위 입력 전') + '</span>' +
-      '<button type="button" class="v2-link" data-act="recFold" aria-expanded="true">접기 ▴</button></div><div class="v2-text"><input class="v2-in" id="condText" autocomplete="off" placeholder="텍스트로: 좌프론트휀더 X, 우쿼터 W">' +
-      '<button type="button" class="v2-btn" data-act="parse">읽기</button></div><div class="v2-msg" id="condMsg">' + condMsgHtml() + '</div>';
+    var h = '<div class="v2-cond v2-rec" id="recPanel"><div class="v2-rec-h"><b>성능·상태점검기록부</b><span id="recCount">' + (S.items.length ? S.items.length + '곳 입력' : '부위 입력 전') + '</span>' +
+      '<button type="button" class="v2-link" data-act="recFold" aria-expanded="true">접기 ▴</button></div><div class="v2-text v2-text2"><textarea class="v2-in" id="condText" rows="2" spellcheck="false" autocomplete="off" ' +
+      'aria-label="기록부 글로 적기" placeholder="글로 적기 — 좌앞휀다 판, 본넷 교, 운전석 뒷도어 교환 (치는 대로 읽습니다)">' + esc(VIEW.condText) + '</textarea></div>' +
+      '<div class="v2-msg" id="condMsg">' + condMsgHtml() + '</div>';
     boards.forEach(function (b) {
       h += '<div class="v2-board"><div class="v2-board-t">' + esc(b.name) + '</div><div class="v2-pos">';
       b.list.forEach(function (i) {
@@ -492,12 +494,12 @@
       });
       h += '</div></div>';
     });
+    return h + '<div id="recExtra">' + extraHtml() + '</div></div>';
+  }
+  function extraHtml() {                                     // 아래 37곳에 없는 부위(글에서 읽은 앞뒤 모를 도어 · 위치 모를 필러 등)
     var extra = S.items.filter(function (it) { return !posIndex(it); });
-    if (extra.length) {
-      h += '<p class="v2-help">목록 밖 부위(텍스트로 읽음): ' + esc(ISC.summary(extra)) +
-        ' <button type="button" class="v2-btn" data-act="clearExtra">지우기</button></p>';
-    }
-    return h + '</div>';
+    return extra.length ? '<p class="v2-help">목록 밖 부위(글에서 읽음): ' + esc(ISC.summary(extra)) +
+      ' <button type="button" class="v2-btn" data-act="clearExtra">지우기</button></p>' : '';
   }
 
   function recOpen() { return VIEW.recOpen != null ? VIEW.recOpen : !S.items.length; }   // 부위를 넣은 채로 열면(주소·최근 산정) 접어 둔다
@@ -583,11 +585,163 @@
       }).join('') + '</ul><button type="button" class="v2-link" data-act="recentClear">기록 지우기</button>' : '') + '</div>';
   }
 
-  function condMsgHtml() {                                   // 텍스트 읽기 결과 — 못 읽은 표기(반영 안 됨) · 계산에서 뺀 부위
-    var h = '';
-    if (VIEW.condWarn.length) h += '<span class="v2-bad">못 읽은 표기: ' + esc(VIEW.condWarn.join(', ')) + ' — 반영하지 않았습니다. 고쳐서 다시 읽어 주세요</span>';
-    if (VIEW.condOut.length) h += (h ? '<br>' : '') + '계산에서 뺀 부위: ' + esc(VIEW.condOut.join(', ')) + ' — 성능점검 대상이 아님(경매 평가에서는 감점될 수 있음)';
+  // ───── 기록부 글 읽기(기획 v2.31 5.14 · 인터뷰 Q198~Q212) — 치는 대로 읽고, 조각마다 읽은 것 · 짐작 · 못 읽음(후보)을 한 줄씩 ─────
+  var TERMS = { store: false, writable: false, team: null }, TERM_PW = '', condTimer = null;   // 팀 표기 사전(/api/terms) · 이번 방문 동안 기억하는 비밀번호
+  function termList() { return TERMS.team && TERMS.team.items || []; }
+  function condParse(text) {
+    var picks = {};
+    Object.keys(VIEW.condPicks).forEach(function (k) { picks[k] = VIEW.condPicks[k].items; });
+    return ISC.parseText(text, { terms: termList(), picks: picks });
+  }
+  function condLive() { clearTimeout(condTimer); VIEW.condSaveMsg = ''; condTimer = setTimeout(applyCondText, 250); }   // 치다가 0.25초 쉬면
+  function applyCondText() {
+    clearTimeout(condTimer);
+    var el = $('condText');
+    if (el) VIEW.condText = el.value;
+    var r = VIEW.condRes = VIEW.condText.trim() ? condParse(VIEW.condText) : null;
+    S.items = r && r.state === '입력' ? r.items : [];
+    VIEW.condWarn = r ? r.unknown : []; VIEW.condOut = r ? r.outside || [] : [];
+    refreshRec();
+    changed();
+  }
+  function refreshRec() {                                    // 입력 칸은 그대로 두고(치는 중) 부위 칸 · 머리 숫자 · 목록 밖 부위 · 읽은 결과만 바꾼다
+    var rp = $('recPanel');
+    if (!rp) { renderInputs(); return; }
+    rp.querySelectorAll('select[data-k="pos"]').forEach(function (sel) {
+      var cur = statusAt(ISC.positions[+sel.getAttribute('data-i')]);
+      sel.value = cur;
+      sel.parentNode.classList.toggle('set', !!cur);
+    });
+    $('recCount').textContent = S.items.length ? S.items.length + '곳 입력' : '부위 입력 전';
+    $('recExtra').innerHTML = extraHtml();
+    $('condMsg').innerHTML = condMsgHtml();
+    updateCond();
+  }
+  function condMsgHtml() {
+    var r = VIEW.condRes, h;
+    if (!r) h = '<span class="v2-dim">줄임말 · 오타도 읽습니다(펜터 · 헨다 → 휀더, 교 · 판 → 교환 · 판금, FL · RR, 운전석 · 조수석). [교환] 본넷, 앞휀다처럼 상태를 앞에 써도 됩니다.</span>';
+    else {
+      h = '<ol class="v2-rd" aria-label="읽은 결과">' + r.tokens.map(condRow).join('') + '</ol>';
+      r.notes.filter(function (n) { return /두 번|'경미'/.test(n); }).forEach(function (n) { h += '<p class="v2-help">' + esc(n) + '</p>'; });
+      if (r.state === '무사고' && !r.items.length) h += '<p class="v2-help">기록부 37곳에 해당하는 손상이 없습니다 <button type="button" class="v2-btn" data-act="condClean">무사고로 바꾸기</button></p>';
+    }
+    if (VIEW.condSaveMsg) h += '<p class="v2-help rd-done">' + VIEW.condSaveMsg + '</p>';
+    var tl = termList();
+    if (tl.length) {                                         // 팀 표기 사전 보기 · 지우기(잘못 넣은 것)
+      h += '<p class="v2-help rd-terms"><button type="button" class="v2-link" data-act="condTerms" aria-expanded="' + !!VIEW.condTerms + '">팀 표기 사전 ' + tl.length + '개 ' + (VIEW.condTerms ? '▴' : '▾') + '</button></p>';
+      if (VIEW.condTerms) {
+        h += '<ul class="rd-tl">' + tl.map(function (x, i) {
+          var what = x.kind === 'part' ? x.part + (x.side ? '(' + x.side + ')' : '') + (x.pillar ? '(' + x.pillar + ')' : '') : x.kind === 'status' ? x.status : x.kind;
+          return '<li><b>' + esc(x.t) + '</b> = ' + esc(what) + ' <small>' + esc(x.by || '') + ' · ' + esc(RatesStore.kst(x.at).slice(0, 10)) + '</small>' +
+            (TERMS.writable ? ' <button type="button" class="v2-link" data-act="condTermDel" data-i="' + i + '">지우기</button>' : '') +
+            (VIEW.condDel === i ? delForm(x) : '') + '</li>';
+        }).join('') + '</ul>';
+      }
+    }
     return h;
+  }
+  function delForm(x) {
+    var by = ''; try { by = localStorage.getItem('v2.rates.by') || ''; } catch (e) { /* 없어도 된다 */ }
+    return '<span class="rd-save"><b>사전에서 지울 표기: \'' + esc(x.t) + '\'</b>' +
+      '<input class="v2-in" id="termBy" autocomplete="name" placeholder="이름" value="' + esc(by) + '">' +
+      '<input class="v2-in" id="termPw" type="password" autocomplete="current-password" placeholder="수정 비밀번호" value="' + esc(TERM_PW) + '">' +
+      '<button type="button" class="v2-btn primary" data-act="condTermDelGo">지우기</button><button type="button" class="v2-link" data-act="condSaveClose">닫기</button><em id="termMsg"></em></span>';
+  }
+  function guessTxt(t) {
+    return t.guess.map(function (g) { return g.from === '좌우' ? g.to : "'" + g.from + "' → " + g.to; }).join(' · ') || (t.inh === 'later' ? '상태는 뒤 조각에서' : '');
+  }
+  function condRow(t, k) {
+    var b = '', body, extra = '', cands = '';
+    function candBtns(list) {
+      return list.map(function (c, ci) {
+        return '<button type="button" class="v2-btn v2-cand" data-act="condPick" data-t="' + k + '" data-c="' + ci + '">' + esc(c.label) + '</button>';
+      }).join('');
+    }
+    if (t.kind === 'ok') body = esc(t.label);
+    else if (t.kind === 'guess') {
+      b = '<i class="rd-g">짐작</i>';
+      body = esc(t.label) + ' <small>' + esc(guessTxt(t)) + '</small>';
+      if (t.cands.length) {
+        extra = VIEW.condAlt[t.text] ? '<span class="rd-c">다른 것: ' + candBtns(t.cands) + '</span>'
+          : '<button type="button" class="v2-link" data-act="condAlt" data-t="' + k + '">다른 것 ▾</button>';
+      }
+    } else if (t.kind === 'picked') {
+      var pk = VIEW.condPicks[t.text] || {};
+      b = '<i class="rd-p">고름</i>';
+      body = esc(t.label);
+      extra = '<button type="button" class="v2-link" data-act="condUnpick" data-t="' + k + '">되돌리기</button>' +
+        (pk.save && TERMS.writable && !pk.saved ? '<button type="button" class="v2-link" data-act="condSaveOpen" data-t="' + k + '">팀 사전에 저장</button>' : '');
+      if (VIEW.condSave === t.text) extra += termForm(pk.save);
+    } else if (t.kind === 'outside') { b = '<i class="rd-o">계산 제외</i>'; body = '기록부 밖 부위(' + esc(t.label) + ')'; }
+    else if (t.kind === 'paint') { b = '<i class="rd-o">계산 제외</i>'; body = '도색만 — 기록부에 안 적히는 항목'; }
+    else if (t.kind === 'header') body = esc(t.label);
+    else if (t.kind === 'clean') { b = '<i class="rd-o">무시</i>'; body = '이상 없음 — 다른 부위가 함께 있어 무시'; }
+    else if (t.kind === 'ignore') body = '<span class="v2-dim">읽을 부위 없음</span>';
+    else {
+      b = '<i class="rd-b">못 읽음</i>';
+      body = esc(t.why) + (t.cands.length ? ' — 맞는 것을 고르세요' : ' — 고쳐 써 주세요');
+      cands = t.cands.length ? '<span class="rd-c">' + candBtns(t.cands) + '</span>' : '';
+    }
+    return '<li class="rd-' + t.kind + '"><span class="rd-src">' + esc(t.text) + '</span><span class="rd-ar" aria-hidden="true">→</span><span class="rd-res">' + b + body +
+      '</span>' + (extra || cands ? '<span class="rd-x">' + extra + cands + '</span>' : '') + '</li>';
+  }
+  function termForm(save) {                                  // 팀 표기 사전에 저장 — 환산 비율과 같은 비밀번호(인터뷰 Q209)
+    var what = save.kind === 'part' ? save.part + (save.side ? '(' + save.side + ')' : '') + (save.pillar ? '(' + save.pillar + ')' : '') : save.status;
+    var by = ''; try { by = localStorage.getItem('v2.rates.by') || ''; } catch (e) { /* 이름 기억 못 해도 저장은 된다 */ }
+    return '<span class="rd-save"><b>\'' + esc(save.t) + '\' = ' + esc(what) + '</b> 다음부터 팀 모두가 이렇게 읽습니다' +
+      '<input class="v2-in" id="termBy" autocomplete="name" placeholder="이름" value="' + esc(by) + '">' +
+      '<input class="v2-in" id="termPw" type="password" autocomplete="current-password" placeholder="수정 비밀번호" value="' + esc(TERM_PW) + '">' +
+      '<button type="button" class="v2-btn primary" data-act="condSave">저장</button><button type="button" class="v2-link" data-act="condSaveClose">닫기</button>' +
+      '<em id="termMsg"></em></span>';
+  }
+  function condAct(act, el) {                                // 결과 줄의 단추들
+    var r = VIEW.condRes, t = r && r.tokens[+el.getAttribute('data-t')];
+    if (act === 'condClean') { S.cond = '무사고'; S.items = []; VIEW.condWarn = []; VIEW.recOpen = null; renderInputs(); changed(); return; }
+    if (act === 'condTerms') { VIEW.condTerms = !VIEW.condTerms; VIEW.condDel = null; $('condMsg').innerHTML = condMsgHtml(); return; }
+    if (act === 'condTermDel') { VIEW.condDel = +el.getAttribute('data-i'); $('condMsg').innerHTML = condMsgHtml(); return; }
+    if (act === 'condTermDelGo') {
+      var x = termList()[VIEW.condDel], by0 = ($('termBy').value || '').trim(), pw0 = $('termPw').value;
+      if (!x) return;
+      if (!by0) { $('termMsg').textContent = '이름을 넣어 주세요'; $('termBy').focus(); return; }
+      $('termMsg').textContent = '지우는 중…';
+      RatesStore.save('/api/terms', { password: pw0, by: by0, del: [x.t] }).then(function (team) {
+        TERM_PW = pw0; TERMS.team = team; VIEW.condDel = null;
+        VIEW.condSaveMsg = "팀 사전에서 지웠습니다: '" + esc(x.t) + "'";
+        applyCondText();
+      }).catch(function (e) { var m = $('termMsg'); if (m) m.textContent = e.message || '지우지 못했습니다'; });
+      return;
+    }
+    if (!t && act !== 'condSave' && act !== 'condSaveClose') return;
+    if (act === 'condAlt') { VIEW.condAlt[t.text] = true; $('condMsg').innerHTML = condMsgHtml(); return; }
+    if (act === 'condPick') {
+      var c = t.cands[+el.getAttribute('data-c')];
+      if (!c) return;
+      VIEW.condPicks[t.text] = { items: c.items, save: c.save };
+      VIEW.condSaveMsg = '';
+      applyCondText();
+      return;
+    }
+    if (act === 'condUnpick') { delete VIEW.condPicks[t.text]; VIEW.condSave = null; applyCondText(); return; }
+    if (act === 'condSaveOpen') { VIEW.condSave = t.text; $('condMsg').innerHTML = condMsgHtml(); var pw = $('termPw'); if (pw && !pw.value) pw.focus(); return; }
+    if (act === 'condSaveClose') { VIEW.condSave = null; VIEW.condDel = null; $('condMsg').innerHTML = condMsgHtml(); return; }
+    if (act === 'condSave') {
+      var key = VIEW.condSave, pk = VIEW.condPicks[key], by = ($('termBy').value || '').trim(), pw2 = $('termPw').value;
+      if (!pk || !pk.save) return;
+      if (!by) { $('termMsg').textContent = '이름을 넣어 주세요'; $('termBy').focus(); return; }
+      $('termMsg').textContent = '저장하는 중…';
+      RatesStore.save('/api/terms', { password: pw2, by: by, add: [pk.save] }).then(function (team) {
+        try { localStorage.setItem('v2.rates.by', by); } catch (e) { /* 이름 기억 못 해도 된다 */ }
+        TERM_PW = pw2; TERMS.team = team;
+        pk.saved = true;
+        delete VIEW.condPicks[key];                          // 이제 사전으로 읽힌다
+        VIEW.condSave = null;
+        VIEW.condSaveMsg = "팀 사전에 넣었습니다: '" + esc(pk.save.t) + "' — 다음부터 팀 모두가 자동으로 읽습니다";
+        applyCondText();
+      }).catch(function (e) {
+        var m = $('termMsg');
+        if (m) m.textContent = e.message || '저장하지 못했습니다';
+      });
+    }
   }
 
   function updateCond() {
@@ -607,15 +761,7 @@
     el.innerHTML = h;
   }
 
-  function parseCond() {
-    var r = ISC.parseText($('condText').value);
-    if (r.state === '미상') { $('condMsg').textContent = '읽을 내용이 없습니다'; return; }
-    S.cond = r.state === '무사고' ? '무사고' : '입력';
-    S.items = r.state === '무사고' ? [] : r.items;             // 못 읽은 표기가 있어도 읽은 부위는 반영하고, 못 읽은 것은 결과 맨 위에 경고
-    VIEW.condWarn = r.unknown; VIEW.condOut = r.outside || [];
-    renderInputs();
-    changed();
-  }
+  function parseCond() { applyCondText(); }                 // 못 읽은 표기가 있어도 읽은 부위는 반영하고, 못 읽은 것은 결과 맨 위에 경고
 
   function example() {                                      // 매물이 가장 많은 모델의 흔한 조건으로 채운다
     var mk = X.idx.makers[0], g = mk.groups.slice().sort(byN)[0];
@@ -1796,7 +1942,15 @@
   function batch() {                                         // 묶음 산정(batch.js) — 처음 쓸 때 만든다(묶음에 추가도 여기로)
     if (!B) {
       B = V2Batch.create({ X: X, ENG: ENG, ISC: ISC, GROUPS: GROUPS, getJSON: getJSON, esc: esc, man: man, pad: pad, today: today,
-        fileSafe: fileSafe, tile: tile, href: function (s) { return query(Object.assign(blank(), s), 'one'); } });
+        fileSafe: fileSafe, tile: tile, href: function (s) { return query(Object.assign(blank(), s), 'one'); },
+        terms: { list: termList, writable: function () { return !!TERMS.writable; }, pw: function () { return TERM_PW; },   // 기록부 팀 표기 사전(기획 v2.31)
+          save: function (adds, by, pw) {
+            return RatesStore.save('/api/terms', { password: pw, by: by, add: adds }).then(function (team) {
+              TERMS.team = team; TERM_PW = pw;
+              try { localStorage.setItem('v2.rates.by', by); } catch (e) { /* 이름 기억 못 해도 된다 */ }
+              return team;
+            });
+          } } });
     }
     return B;
   }
@@ -1996,6 +2150,7 @@
       changed();
     });
     inp.addEventListener('input', function (e) {
+      if (e.target.id === 'condText') { condLive(); return; }
       var k = e.target.getAttribute('data-k');
       if (k === 'km' || k === 'cost' || k === 'rate') { S[k] = e.target.value; changed(); }
     });
@@ -2004,7 +2159,6 @@
     }, true);
     inp.addEventListener('keydown', function (e) {
       if (e.key !== 'Enter') return;
-      if (e.target.id === 'condText') { e.preventDefault(); parseCond(); }
       if (e.target.id === 'nameText') { e.preventDefault(); findName(); }
     });
     function clicks(e) {
@@ -2036,6 +2190,7 @@
       if (chipK === 'color') { S.color = v; renderInputs(); changed(); return; }
       if (chipK === 'fix') { toggle(S.fixes, v); renderInputs(); changed(); return; }
       if (act === 'parse') { parseCond(); return; }
+      if (/^cond(Clean|Alt|Pick|Unpick|SaveOpen|SaveClose|Save|Terms|TermDel|TermDelGo)$/.test(act)) { condAct(act, b); return; }
       if (act === 'recFold' || act === 'recUnfold') { VIEW.recOpen = act === 'recUnfold'; renderInputs(); return; }
       if (act === 'findName') { findName(); return; }
       if (act === 'recent') { VIEW.recentOpen = !VIEW.recentOpen; renderInputs(); return; }
@@ -2046,7 +2201,7 @@
         return;
       }
       if (act === 'clearExtra') { S.items = S.items.filter(posIndex); renderInputs(); changed(); return; }
-      if (act === 'reset') { S = blank(); VIEW.all = false; VIEW.condWarn = []; VIEW.condOut = []; VIEW.nameText = ''; VIEW.nameMsg = ''; VIEW.nameCands = []; VIEW.carOpen = false; VIEW.moreOpen = null; VIEW.recOpen = null; renderInputs(); changed(); return; }
+      if (act === 'reset') { S = blank(); VIEW.all = false; VIEW.condWarn = []; VIEW.condOut = []; VIEW.condText = ''; VIEW.condRes = null; VIEW.condPicks = {}; VIEW.condAlt = {}; VIEW.condSave = null; VIEW.condSaveMsg = ''; VIEW.nameText = ''; VIEW.nameMsg = ''; VIEW.nameCands = []; VIEW.carOpen = false; VIEW.moreOpen = null; VIEW.recOpen = null; renderInputs(); changed(); return; }
       if (act === 'carOpen') { VIEW.carOpen = true; renderInputs(); var f = $('inp').querySelector('[data-k="grade"]'); if (f) f.focus(); return; }
       if (act === 'toCond') { goSec('top'); return; }
       if (act === 'example') { example(); return; }
@@ -2131,9 +2286,10 @@
 
   function boot() {
     Promise.all(['comps/index.json', 'adj_coef.json', 'conversion_rates.json', 'inspection_model.json', 'market_index.json'].map(getJSON)
-      .concat([RatesStore.load('/api/rates')]))                // 환산 비율 팀 수정(저장소가 없으면 초기값만)
+      .concat([RatesStore.load('/api/rates'), RatesStore.load('/api/terms')]))   // 환산 비율 팀 수정 · 기록부 팀 표기 사전(저장소가 없으면 초기값만)
       .then(function (a) {
-        X.idx = a[0]; X.coef = a[1]; X.rates = a[2]; X.model = a[3]; X.mi = a[4]; X.store = a[5];
+        X.idx = a[0]; X.coef = a[1]; X.rates = a[2]; X.model = a[3]; X.mi = a[4]; X.store = a[5]; TERMS = a[6];
+        X.terms = termList;                                  // 묶음 산정도 같은 팀 사전으로 읽는다
         RatesStore.apply(X.rates, X.store.team);
         X.yr = {}; X.yrN = {};                                 // 세부모델 연식 범위(목록에 '(2019~2022)' · 등록 연도 맞춤)
         X.idx.makers.forEach(function (mk) { mk.groups.forEach(function (g) { g.models.forEach(function (m) {

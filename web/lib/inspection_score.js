@@ -161,139 +161,365 @@
       return o;
     }
 
-    // ── 엑셀 '성능 상태' 한 칸 읽기 — 별칭·위치·기호. 못 읽은 표기는 unknown 으로 돌려준다 ──
-    var aliases = [];
-    Object.keys(P.part_aliases).forEach(function (part) {
-      P.part_aliases[part].forEach(function (a) { aliases.push({ c: compact(a), part: part, pillar: null }); });
-    });
-    Object.keys(P.pillar_aliases).forEach(function (a) {
-      aliases.push({ c: compact(a), part: '필러 패널', pillar: P.pillar_aliases[a] });
-    });
-    aliases.forEach(function (a) { a.re = spacedRe(a.c, 'i'); });
-    aliases.sort(function (a, b) { return b.c.length - a.c.length; });
+    // ── 글 읽기 — 기록부 메모 · 엑셀 '성능 상태' 한 칸 (기획 v2.31 5.14, 인터뷰 Q198~Q212) ──
+    //  ① 소리 맞추기: 외래어 표기가 흔들리는 자모를 한 소리로 모은 글자로 비교한다(펜터·헨다·팬더 → 펜더, 스탭 → 스텝, 은전석 → 운전석).
+    //     한 글자를 한 글자로 바꾸므로 원문과 자리가 같다. 한 글자 낱말(좌·우·앞·교·판·휀…)과 영문 기호(X·W·FL…)는 원문 그대로 비교한다.
+    //  ② 사전 낱말로 글자를 다 덮으면 끝. 남는 글자가 있으면 ③ 가장 가까운 낱말로 짐작한다(글자 단위 편집 거리 — 자모가 다른 만큼 1/3씩).
+    //     짐작한 조각은 결과(tokens)에 보여 주고, 그래도 못 읽은 조각은 후보(가까운 부위·상태)를 돌려준다.
+    var LV = [0, 0, 2, 3, 3, 5, 6, 17, 17, 9, 9, 11, 12, 12, 12, 0, 3, 17, 17];             // 초성: ㄱㄲㅋ · ㄷㄸㅌ · ㅂㅃㅍㅎ · ㅅㅆ · ㅈㅉㅊ
+    var VV = [4, 5, 4, 5, 4, 5, 4, 5, 8, 4, 5, 5, 8, 13, 4, 5, 16, 13, 13, 20, 20];        // 중성: ㅏㅑㅓㅕㅘㅝ · ㅐㅒㅔㅖㅙㅚㅞ · ㅗㅛ · ㅜㅠㅡ · ㅣㅢ · ㅟ
+    var TV = [0, 1, 1, 1, 4, 4, 4, 19, 8, 8, 8, 8, 8, 8, 8, 8, 16, 17, 17, 19, 19, 21, 19, 19, 1, 19, 17, 19];   // 종성: 소리 나는 7갈래
+    function canonChar(ch) {
+      var c = ch.charCodeAt(0) - 0xAC00;
+      if (c < 0 || c > 11171) return ch;
+      return String.fromCharCode(0xAC00 + (LV[Math.floor(c / 588)] * 21 + VV[Math.floor(c % 588 / 28)]) * 28 + TV[c % 28]);
+    }
+    function canon(s) { var o = ''; for (var i = 0; i < s.length; i++) o += canonChar(s.charAt(i)); return o; }
+    function jamo(ch) { var c = ch.charCodeAt(0) - 0xAC00; return c < 0 || c > 11171 ? ch : [Math.floor(c / 588), Math.floor(c % 588 / 28), c % 28]; }
+    function isLatin(ch) { return ch >= 'A' && ch <= 'Z'; }
+    function isLetter(ch) { return /[A-Zㄱ-ㆎ가-힣]/.test(ch); }       // 못 읽음을 가르는 글자(숫자는 '헤드램프2'처럼 건너뛰어도 된다)
+    function skipCost(ch) { return isLetter(ch) ? SKIP : /[0-9]/.test(ch) ? 0.2 : 0; }
 
-    var words = [];
-    function addWords(map, type) { Object.keys(map).forEach(function (w) { words.push({ w: w, type: type, value: map[w] }); }); }
-    addWords(P.status_words, 'status');
-    addWords(P.status_symbols, 'status');
-    addWords(P.side_words, 'side');
-    addWords(P.direction_words, 'dir');
-    P.both_words.forEach(function (w) { words.push({ w: w, type: 'both' }); });
-    P.ignore_words.forEach(function (w) { words.push({ w: w, type: 'ignore' }); });
-    words.forEach(function (v) {
-      v.c = compact(v.w);
-      v.latin = /^[A-Z]+$/.test(v.c);   // X·W·L·R 같은 영문 기호는 다른 영문자와 붙어 있으면 읽지 않는다
-      v.re = v.latin ? new RegExp('(^|[^A-Z])' + v.c + '(?![A-Z])', 'i') : spacedRe(v.c, 'i');
-    });
-    words.sort(function (a, b) { return b.c.length - a.c.length; });
+    var TYPE_RANK = { part: 0, outside: 1, status: 2, paint: 3, pos: 4, side: 5, dir: 6, both: 7, bothdir: 8, ignore: 9 };
+    function lexEntry(w, type, extra) {
+      var o = compact(w);
+      if (!o) return null;
+      var e = { w: w, o: o, c: canon(o), n: o.length, type: type, latin: /^[A-Z]+$/.test(o) };
+      e.exact = e.latin || o.length === 1;                     // 한 글자 · 영문 기호는 원문 그대로만
+      e.k = e.c.split('').map(jamo);
+      for (var x in extra) e[x] = extra[x];
+      e.mean = type + '|' + (e.part || e.status || e.side || e.dir || '') + '|' + (e.pillar || '') + '|' + (type === 'pos' ? e.side : '');
+      return e;
+    }
+    function sortLex(list) {                                   // 긴 낱말 먼저, 같은 길이면 부위 → 상태 → 위치 순(정렬은 안정적)
+      var seen = {};
+      return list.filter(function (e) {
+        var key = (e.exact ? 'o:' + e.o : 'c:' + e.c) + '|' + e.mean;
+        if (seen[key]) return false;
+        return (seen[key] = true);
+      }).sort(function (a, b) { return b.n - a.n || TYPE_RANK[a.type] - TYPE_RANK[b.type]; });
+    }
+    var BASE = [];
+    function add(w, type, extra) { var e = lexEntry(w, type, extra); if (e) BASE.push(e); }
+    Object.keys(P.part_aliases).forEach(function (part) { P.part_aliases[part].forEach(function (a) { add(a, 'part', { part: part }); }); });
+    Object.keys(P.pillar_aliases).forEach(function (a) { add(a, 'part', { part: '필러 패널', pillar: P.pillar_aliases[a] }); });
+    (P.outside_parts || []).forEach(function (a) { add(a, 'outside'); });
+    Object.keys(P.status_words).forEach(function (w) { add(w, 'status', { status: P.status_words[w] }); });
+    Object.keys(P.status_symbols).forEach(function (w) { add(w, 'status', { status: P.status_symbols[w], sym: true }); });
+    (P.paint_words || []).forEach(function (w) { add(w, 'paint'); });
+    Object.keys(P.side_words).forEach(function (w) { add(w, 'side', { side: P.side_words[w] }); });
+    Object.keys(P.pos_words || {}).forEach(function (w) { add(w, 'pos', { dir: P.pos_words[w][0], side: P.pos_words[w][1] }); });
+    Object.keys(P.direction_words).forEach(function (w) { add(w, 'dir', { dir: P.direction_words[w] }); });
+    P.both_words.forEach(function (w) { add(w, 'both'); });
+    (P.bothdir_words || []).forEach(function (w) { add(w, 'bothdir'); });
+    P.ignore_words.forEach(function (w) { add(w, 'ignore'); });
+    P.no_damage_cell.forEach(function (w) { if (compact(w).length > 1) add(w, 'ignore'); });   // '본넷 교환 외 이상없음'
+    BASE = sortLex(BASE);
 
-    function wordSet(list) { var s = {}; list.forEach(function (w) { s[compact(w)] = true; }); return s; }
-    var UNKNOWN_CELL = wordSet(P.unknown_cell), NO_DAMAGE = wordSet(P.no_damage_cell);
-    var OUTSIDE = (P.outside_parts || []).map(function (w) { var c = compact(w); return { c: c, re: spacedRe(c, 'i') }; })
-      .sort(function (a, b) { return b.c.length - a.c.length; });
-
-    // 성능점검 37곳 밖 부위(범퍼·램프·유리…)만 적힌 칸인가. 더 긴 성능점검 부위 이름이 맞으면 그쪽(휠 < 휠하우스), 그 이름과
-    // 상태·좌우·앞뒤·개수 말고 글자가 남으면 아니다 — 오타 '좌앞휠더 판금'을 휠로 읽어 조용히 빼지 않고 '못 읽음'으로 돌려준다
-    function outside(tok) {
-      var cs = compact(tok), o = null, i;
-      for (i = 0; i < OUTSIDE.length; i++) if (cs.indexOf(OUTSIDE[i].c) >= 0) { o = OUTSIDE[i]; break; }
-      if (!o) return false;
-      for (i = 0; i < aliases.length; i++) if (cs.indexOf(aliases[i].c) >= 0 && aliases[i].c.length >= o.c.length) return false;
-      var s = (' ' + tok.replace(/[()[\]{}<>]/g, ' ') + ' ').replace(o.re, ' ').replace(/\d+\s*(개|곳|짝|EA)/gi, ' ').replace(/[×*]\s*\d+/g, ' ');
-      words.forEach(function (w) {
-        var g = new RegExp(w.re.source, 'gi');
-        s = w.latin ? s.replace(g, function (all, pre) { return pre + ' '; }) : s.replace(g, ' ');
+    // 팀 표기 사전(사이트 저장소) — { t: 표기, kind: part|status|outside|ignore|paint, part, side, pillar, status }. 같은 길이면 기본 사전보다 먼저
+    var termCache = { src: null, lex: BASE };
+    function lexFor(terms) {
+      if (!terms || !terms.length) return BASE;
+      if (termCache.src === terms) return termCache.lex;
+      var extra = [];
+      terms.forEach(function (t) {
+        var e = null;
+        if (!t || !t.t) return;
+        if (t.kind === 'part' && (parts[t.part] || generic[t.part])) e = lexEntry(t.t, 'part', { part: t.part, side: t.side || null, pillar: t.pillar || null, team: true });
+        else if (t.kind === 'status' && kindOf[t.status]) e = lexEntry(t.t, 'status', { status: t.status, team: true });
+        else if (t.kind === 'outside' || t.kind === 'ignore' || t.kind === 'paint') e = lexEntry(t.t, t.kind, { team: true });
+        if (e) extra.push(e);
       });
-      return !/[0-9A-Za-zㄱ-ㆎ가-힣]/.test(s);
+      termCache = { src: terms, lex: sortLex(extra.concat(BASE)) };
+      return termCache.lex;
     }
 
-    function parseToken(tok, notes) {
+    var POS_KEY = {};                                          // 기록부 37곳(부위|좌우|필러 위치)
+    model.positions.forEach(function (p) { POS_KEY[p.part + '|' + (p.side || '') + '|' + (p.pillar || '')] = true; });
+    function wordSet(list) { var s = {}; list.forEach(function (w) { s[compact(w)] = true; }); return s; }
+    var UNKNOWN_CELL = wordSet(P.unknown_cell), NO_DAMAGE = wordSet(P.no_damage_cell);
+
+    // 조각 하나 → 원문 압축(O) · 소리 맞춘 압축(C) · 띄어쓰기 자리(brk) · 개수
+    function prepTok(tok) {
       var s = ' ' + tok.replace(/[()[\]{}<>]/g, ' ') + ' ', count = 1;
       var cm = s.match(/(\d+)\s*(개|곳|짝|EA)/i) || s.match(/[×*]\s*(\d+)/);
       if (cm) { count = parseInt(cm[1], 10); s = s.replace(cm[0], ' '); }
-      var cs = compact(s), al = null;
-      for (var i = 0; i < aliases.length; i++) if (cs.indexOf(aliases[i].c) >= 0) { al = aliases[i]; break; }
-      if (!al) return null;
-      var m = al.re.exec(s);
-      if (!m) return null;
-      s = s.slice(0, m.index) + ' ' + s.slice(m.index + m[0].length);
-
-      var st = [], side = null, both = false, dir = null, symbolOnly = true, hit;
-      for (;;) {
-        hit = null;
-        for (var j = 0; j < words.length; j++) if (words[j].re.test(s)) { hit = words[j]; break; }
-        if (!hit) break;
-        s = hit.latin ? s.replace(hit.re, function (all, pre) { return pre + ' '; }) : s.replace(hit.re, ' ');
-        if (hit.type === 'status') {
-          st.push(hit.value);
-          if (!hit.latin) symbolOnly = false;
-          if (hit.w === '경미') notes.push("'" + tok.trim() + "' — '경미'는 손상으로 계산");
-        } else if (hit.type === 'side') {
-          if (side && side !== hit.value) return null;
-          side = hit.value;
-        } else if (hit.type === 'both') {
-          both = true;
-        } else if (hit.type === 'dir') {
-          if (dir && dir !== hit.value) return null;
-          dir = hit.value;
-        }
+      var O = '', brk = [], gap = true;
+      for (var i = 0; i < s.length; i++) {
+        var ch = s.charAt(i);
+        if (/\s/.test(ch)) { gap = true; continue; }
+        brk.push(gap);
+        gap = false;
+        O += ch.toUpperCase();
       }
-      if (/[0-9A-Za-zㄱ-ㆎ가-힣]/.test(s)) return null;   // 읽지 못한 글자가 남음
-      if (!st.length || count < 1 || count > 6) return null;
-
-      var status = SEVERITY.filter(function (v) { return st.indexOf(v) >= 0; })[0];
-      var part = al.part, pillar = al.pillar;
-      if (dir) {
-        if (part === '필러 패널') {
-          if (pillar && pillar !== dir) return null;
-          pillar = dir;
-        } else if (P.generic_dir[part]) {
-          if (!P.generic_dir[part][dir]) return null;
-          part = P.generic_dir[part][dir];
-        } else if (!parts[part] || parts[part].dir !== dir) {
-          return null;
-        }
-      }
-      // 필러 + 기호 A·C 하나뿐: A·C필러(위치)인지 흠집·부식(상태)인지 알 수 없다
-      if (part === '필러 패널' && !pillar && symbolOnly && st.length === 1 && (status === '흠집' || status === '부식')) return null;
-      var inf = info(part);
-      if ((side || both) && !(inf && inf.sides)) return null;
-      if (both && count > 2) return null;
-      var out = [];
-      if (both) ['좌', '우'].forEach(function (sd) { out.push({ part: part, side: sd, pillar: pillar, status: status }); });
-      else for (var c = 0; c < count; c++) out.push({ part: part, side: side, pillar: pillar, status: status });
-      return out;
+      brk.push(true);
+      return { O: O, C: canon(O), brk: brk, count: count, sy: canon(O).split('').map(jamo) };
+    }
+    function edge(p, i, j, sym) {                              // 영문 기호는 다른 영문자와 붙어 있으면 안 읽는다(LHX = LH X 가 아니면).
+      if ((i === 0 || p.brk[i] || !isLatin(p.O.charAt(i - 1))) && (j === p.O.length || p.brk[j] || !isLatin(p.O.charAt(j)))) return true;
+      if (!sym) return false;                                  // 상태 기호만 붙은 묶음(WC = 판금 + 부식)은 하나씩
+      var a = i, b = j;
+      while (a > 0 && !p.brk[a] && isLatin(p.O.charAt(a - 1))) a--;
+      while (b < p.O.length && !p.brk[b] && isLatin(p.O.charAt(b))) b++;
+      return /^[XWUTCA]+$/.test(p.O.slice(a, b));
     }
 
-    // 쉼표 없이 여러 부위를 한 칸에 적은 경우('후드 교환 좌앞휀더 판금', '후드X 좌앞휀더W') — 부위 이름이 두 번째로 나오는 낱말 앞에서 나눈다.
-    // 그 바로 앞의 좌우·앞뒤 낱말('좌측 앞 휀더')은 새 부위 쪽으로 붙인다
-    function splitParts(tok) {
-      function hasPart(w) {
-        var c = compact(w), i;
-        for (i = 0; i < aliases.length; i++) if (c.indexOf(aliases[i].c) >= 0) return true;
-        for (i = 0; i < OUTSIDE.length; i++) if (c.indexOf(OUTSIDE[i].c) >= 0) return true;
-        return false;
-      }
-      function sideDir(w) { var c = compact(w); return words.some(function (x) { return (x.type === 'side' || x.type === 'dir' || x.type === 'both') && x.c === c; }); }
-      var groups = [], cur = [], seen = false;
-      tok.trim().split(/\s+/).forEach(function (w) {
-        var p = hasPart(w);
-        if (p && seen) {
-          var k = cur.length;
-          while (k > 0 && sideDir(cur[k - 1])) k--;
-          groups.push(cur.slice(0, k).join(' '));
-          cur = cur.slice(k);
-          seen = false;
+    // ② 사전 낱말로 나누기 — 글자를 건너뛰면 1. fz(짐작)이면 가까운 낱말도: 2글자 0.34 · 3글자 0.67 · 4글자 이상 1까지
+    //    (자모가 다르면 초성 0.5 · 중성·종성 0.34). 같은 값이면 원문 철자 그대로 · 띄어쓴 자리에서 끊긴 것 · 조각 수가 적은 것
+    var SKIP = 1, EPS = 0.01, D_CANON = 0.005, D_EDGE = 0.004;
+    function maxCost(n) { return n <= 1 ? 0 : n === 2 ? 0.34 : n === 3 ? 0.67 : 1; }
+    function subCost(a, b) {
+      if (typeof a === 'string' || typeof b === 'string') return a === b ? 0 : 1;
+      return (a[0] !== b[0] ? 0.5 : 0) + (a[1] !== b[1] ? 0.34 : 0) + (a[2] !== b[2] ? 0.34 : 0);
+    }
+    function edit(sy, i, j, k, lim) {                         // sy[i..j) 와 낱말 k 의 편집 거리(넣기·빼기 1) — lim 을 넘으면 Infinity
+      var m = k.length, prev = [], cur = [], x, y, t;
+      for (y = 0; y <= m; y++) prev[y] = y;
+      for (x = 1; x <= j - i; x++) {
+        cur[0] = x;
+        var low = x;
+        for (y = 1; y <= m; y++) {
+          cur[y] = Math.min(prev[y] + 1, cur[y - 1] + 1, prev[y - 1] + subCost(sy[i + x - 1], k[y - 1]));
+          if (cur[y] < low) low = cur[y];
         }
-        cur.push(w);
-        if (p) seen = true;
+        if (low > lim) return Infinity;
+        t = prev; prev = cur; cur = t;
+      }
+      return prev[m];
+    }
+    function costAt(p, e, i, j, lim) {                        // 토막 [i, j) 를 낱말 e 로 읽는 값(못 읽으면 Infinity)
+      var len = j - i;
+      if (e.exact) return len === e.n && p.O.substr(i, len) === e.o && (!e.latin || edge(p, i, j, e.sym)) ? 0 : Infinity;
+      if (len === e.n && p.C.substr(i, len) === e.c) return 0;
+      if (lim <= 0 || Math.abs(len - e.n) > 1) return Infinity;
+      var c = edit(p.sy, i, j, e.k, lim);
+      return c <= lim ? c : Infinity;
+    }
+    function seg(p, lex, fz, anchors) {                       // anchors: 앞 단계에서 맞은 두 글자 이상 낱말 — 짐작이 그 낱말을 반만 먹지 않게('도어 수리' ≠ 도+어수리)
+      var O = p.O, n = O.length, best = [0], back = [null], j, q, len, aid = [];
+      function bound(x) { return x === 0 || x === n || p.brk[x]; }
+      (anchors || []).forEach(function (a, k) { for (var x = a.i; x < a.j; x++) aid[x] = k; });
+      function cuts(i, j2) {
+        var a = aid[i] != null ? anchors[aid[i]] : null, b = aid[j2 - 1] != null ? anchors[aid[j2 - 1]] : null;
+        return (a && a.i < i) || (b && b.j > j2);
+      }
+      for (j = 1; j <= n; j++) {
+        best[j] = best[j - 1] + skipCost(O.charAt(j - 1));
+        back[j] = { i: j - 1, e: null, cost: 0 };
+        for (q = 0; q < lex.length; q++) {
+          var e = lex[q], lo = !fz || e.exact ? e.n : Math.max(2, e.n - 1), hi = !fz || e.exact ? e.n : e.n + 1;
+          for (len = lo; len <= hi; len++) {
+            var i = j - len;
+            if (i < 0) continue;
+            var c = costAt(p, e, i, j, fz ? maxCost(e.n) : 0);
+            if (c === Infinity || (c > 0 && anchors && cuts(i, j))) continue;
+            var v = best[i] + c + EPS + (!e.exact && O.substr(i, len) !== e.o ? D_CANON : 0) + (bound(i) ? 0 : D_EDGE) + (bound(j) ? 0 : D_EDGE);
+            if (v < best[j] - 1e-9) { best[j] = v; back[j] = { i: i, e: e, cost: c }; }
+          }
+        }
+      }
+      var segs = [], skipped = [], k = n;
+      while (k > 0) {
+        var b = back[k];
+        if (b.e) segs.unshift({ i: b.i, j: k, e: b.e, cost: b.cost });
+        else if (isLetter(O.charAt(k - 1))) skipped.unshift(k - 1);
+        k = b.i;
+      }
+      return { segs: segs, skipped: skipped };
+    }
+    function rivals(p, lex, i, j, lim, types) {                // 토막 [i, j) 와 가까운 낱말들(뜻마다 가장 가까운 것) — 짐작이 애매한지 · 후보
+      var bestOf = {};
+      lex.forEach(function (e) {
+        if (types.indexOf(e.type) < 0) return;
+        var c = e.exact ? costAt(p, e, i, j, 0) : (Math.abs(j - i - e.n) > 2 ? Infinity : edit(p.sy, i, j, e.k, lim));
+        if (c > lim) return;
+        var m = e.mean;
+        if (!bestOf[m] || c < bestOf[m].cost) bestOf[m] = { e: e, cost: c };
       });
-      groups.push(cur.join(' '));
-      return groups.filter(function (g) { return g; });
+      return Object.keys(bestOf).map(function (m) { return bestOf[m]; }).sort(function (a, b) { return a.cost - b.cost || b.e.n - a.e.n; });
     }
 
-    function parseText(text) {
-      var res = { state: '입력', items: [], unknown: [], notes: [], outside: [] }, ignored = [];
+    function family(a, b) {                                    // 같은 부위(앞뒤 미상 이름과 앞·뒤 이름 포함)
+      function of(x) { return P.generic_dir[x] ? [x, P.generic_dir[x]['앞'], P.generic_dir[x]['뒤']] : [x]; }
+      return a === b || of(a).indexOf(b) >= 0 || of(b).indexOf(a) >= 0;
+    }
+    // 조각 → 부위별 묶음. 좌우·앞뒤·상태를 앞뒤의 부위에 붙인다('좌앞휀다판 우뒤도어교' → 둘, '휀더 좌 도어 우' → 둘)
+    function grouping(segs) {
+      var out = [], g = { seq: [] };
+      function core(s) { var t = s.e.type; return t === 'part' || t === 'outside' || t === 'status' || t === 'paint'; }
+      function isMod(s) { var t = s.e.type; return t === 'side' || t === 'dir' || t === 'pos' || t === 'both' || t === 'bothdir'; }
+      segs.forEach(function (s) {
+        var t = s.e.type, head = null;
+        g.seq.forEach(function (x) { if (x.e.type === 'part' || x.e.type === 'outside') head = head || x; });
+        if ((t === 'part' || t === 'outside') && head) {
+          var last = -1, k;
+          for (k = 0; k < g.seq.length; k++) if (core(g.seq[k])) last = k;
+          var lastSt = last >= 0 && (g.seq[last].e.type === 'status' || g.seq[last].e.type === 'paint');
+          if (t === 'part' && head.e.type === 'part' && family(head.e.part, s.e.part) && !lastSt && last === g.seq.indexOf(head) &&
+              !g.seq.slice(last + 1).length) { g.seq.push(s); return; }   // '사이드멤버(프레임)' — 같은 부위 이름 두 번
+          var tail = g.seq.slice(last + 1), before = g.seq.slice(0, g.seq.indexOf(head)).some(isMod);
+          var move = tail.length && tail.every(function (x) { return isMod(x) || x.e.type === 'ignore'; }) && (lastSt || before);
+          if (move) g.seq = g.seq.slice(0, last + 1);
+          out.push(g);
+          g = { seq: move ? tail : [] };
+        }
+        g.seq.push(s);
+      });
+      out.push(g);
+      // 부위 없이 좌우·앞뒤만 남은 묶음은 앞 묶음에 붙인다('휀더 판금 좌')
+      var res = [];
+      out.forEach(function (x) {
+        var hasCore = x.seq.some(function (s) { return s.e.type !== 'ignore' && !isMod(s); });
+        if (!hasCore && res.length && x.seq.some(isMod)) res[res.length - 1].seq = res[res.length - 1].seq.concat(x.seq);
+        else if (x.seq.length) res.push(x);
+      });
+      return res.map(function (x) {
+        var o = { seq: x.seq, part: null, out: null, sts: [], mods: [], paint: false, stFirst: false, ign: [] };
+        x.seq.forEach(function (s) {
+          var t = s.e.type;
+          if (t === 'part') o.part = !o.part || (P.generic_dir[o.part.e.part] && !P.generic_dir[s.e.part]) ? s : o.part;   // '앞사이드멤버(프레임)' → 앞 쪽
+          else if (t === 'outside') o.out = o.out || s;
+          else if (t === 'status') { o.sts.push(s); if (!o.part && !o.out) o.stFirst = true; }
+          else if (t === 'paint') o.paint = true;
+          else if (t === 'ignore') o.ign.push(s);
+          else o.mods.push(s);
+        });
+        return o;
+      });
+    }
+    function topStatus(g) {
+      var st = g.sts.map(function (s) { return s.e.status; });
+      return SEVERITY.filter(function (v) { return st.indexOf(v) >= 0; })[0] || null;
+    }
+
+    // 묶음 하나를 부위 목록으로 — 앞뒤로 바뀌는 부위(뒤 휀더 = 쿼터), 좌우로 바뀌는 부위(운전석 뒤패널 = 쿼터(좌)), 좌우 없는 부위는 좌우를 버린다
+    function resolve(g, status, count) {
+      var e = g.part.e, part = e.part, pillar = e.pillar || null, side = e.side || null, dir = null, both = false, two = false;
+      for (var q = 0; q < g.mods.length; q++) {
+        var m = g.mods[q].e;
+        if (m.type === 'both') both = true;
+        else if (m.type === 'bothdir') two = true;
+        if (m.side) { if (side && side !== m.side) return { err: '좌우가 둘' }; side = m.side; }
+        if (m.dir) { if (dir && dir !== m.dir) return { err: '앞뒤가 둘' }; dir = m.dir; }
+      }
+      function withDir(d) {
+        if (!d) return { part: part, pillar: pillar };
+        if (part === '필러 패널') return pillar && pillar !== d ? null : { part: part, pillar: d };
+        if (P.generic_dir[part]) return P.generic_dir[part][d] ? { part: P.generic_dir[part][d], pillar: null } : null;
+        var rm = P.dir_remap && P.dir_remap[part] && P.dir_remap[part][d];
+        if (rm) return { part: rm, pillar: null };
+        if (parts[part] && parts[part].dir && parts[part].dir !== d) return null;
+        return { part: part, pillar: pillar };                 // 앞뒤가 없는 부위(후드·루프…)는 앞뒤를 버린다
+      }
+      var targets = (two ? ['앞', '뒤'] : [dir]).map(withDir);
+      if (targets.some(function (x) { return !x; })) return { err: '앞뒤가 맞지 않음' };
+      var items = [], dropped = false;
+      if (both && count > 2) return { err: '개수가 맞지 않음' };
+      if (count < 1 || count > 6) return { err: '개수가 맞지 않음' };
+      targets.forEach(function (tg) {
+        var p2 = tg.part, inf = info(p2), sd = side, bo = both;
+        if ((sd || bo) && !(inf && inf.sides)) {
+          var rs = P.side_remap && P.side_remap[p2];
+          if (rs && info(rs) && info(rs).sides) p2 = rs;
+          else { sd = null; bo = false; dropped = true; }
+        }
+        if (bo) ['좌', '우'].forEach(function (s2) { items.push({ part: p2, side: s2, pillar: tg.pillar, status: status }); });
+        else for (var c = 0; c < count; c++) items.push({ part: p2, side: sd, pillar: tg.pillar, status: status });
+      });
+      return { items: items, dropped: dropped };
+    }
+
+    // 조각 하나 읽기(상태 물려받기 전) — 덮기 → 안 되면 짐작
+    function readTok(raw, lex) {
+      var t = { text: raw, groups: [], header: null, nod: false, guess: [], skipped: [], amb: null, p: null };
+      if (NO_DAMAGE[compact(raw)]) { t.nod = true; return t; }
+      var p = t.p = prepTok(raw), f = seg(p, lex, false), segs = f.segs;
+      if (f.skipped.length) {                                   // 사전 낱말로 다 못 덮으면 짐작까지
+        f = seg(p, lex, true, f.segs.filter(function (s) { return s.j - s.i >= 2 && s.e.type !== 'outside'; }));
+        segs = f.segs; t.skipped = f.skipped;
+        segs.forEach(function (s) {
+          if (!(s.cost > 0)) return;
+          t.guess.push({ from: p.O.slice(s.i, s.j), to: s.e.w, cost: s.cost });
+          var r = rivals(p, lex, s.i, s.j, s.cost + 0.34, ['part', 'outside', 'status', 'side', 'dir', 'pos']);
+          if (r.some(function (x) { return x.e.mean !== s.e.mean && x.cost <= s.cost + 0.34 && !(x.e.type === 'part' && s.e.type === 'part' && x.e.part === s.e.part); }) && !t.amb) {
+            t.amb = { i: s.i, j: s.j };                         // 비슷하게 가까운 다른 뜻이 있다 — 짐작하지 않고 후보로
+          }
+        });
+      }
+      t.segs = segs;
+      t.groups = grouping(segs);
+      if (!t.skipped.length && !t.amb && t.groups.length && t.groups.every(function (g) { return !g.part && !g.out && !g.mods.length; }) &&
+          t.groups.some(function (g) { return g.sts.length; })) {
+        t.header = topStatus({ sts: [].concat.apply([], t.groups.map(function (g) { return g.sts; })) });   // '[교환]' · '교환:' 머리
+      }
+      return t;
+    }
+
+    // 못 읽은 조각의 후보 — 남은 글자와 가까운 부위·상태로 바꿔 끼워 다시 읽은 것(최대 4개). save = 팀 사전에 넣을 표기
+    function candidates(t, lex, carry) {
+      var p = t.p, out = [], seen = {};
+      if (!p) return out;
+      var span = null;
+      if (t.amb) span = t.amb;
+      else if (!t.skipped.length && t.segs.some(function (s) { return s.cost > 0; })) {   // 짐작한 조각의 다른 후보('짐작 → 다른 것')
+        var gs = t.segs.filter(function (s) { return s.cost > 0; }).sort(function (a, b) { return b.cost - a.cost; })[0];
+        span = { i: gs.i, j: gs.j };
+      }
+      else if (t.skipped.length) {                               // 가장 긴 건너뛴 토막
+        var runs = [], st = t.skipped[0], pv = st;
+        t.skipped.slice(1).concat([-9]).forEach(function (x) { if (x !== pv + 1) { runs.push({ i: st, j: pv + 1 }); st = x; } pv = x; });
+        span = runs.sort(function (a, b) { return (b.j - b.i) - (a.j - a.i); })[0];
+        t.segs.forEach(function (s) {
+          if (s.e.type !== 'outside' && !(s.cost > 0)) return;
+          if (s.j === span.i) span = { i: s.i, j: span.j };
+          else if (s.i === span.j) span = { i: span.i, j: s.j };
+        });
+      }
+      function tryWith(segs, save) {
+        var g2 = grouping(segs), items = [], ok = true;
+        g2.forEach(function (g) {
+          if (!ok || (!g.part && !g.out)) return;
+          if (g.out) return;
+          var stt = topStatus(g) || carry;
+          if (!stt) { ok = false; return; }
+          var r = resolve(g, stt, p.count);
+          if (r.err) ok = false; else items = items.concat(r.items);
+        });
+        if (!ok || !items.length) return;
+        var label = summary(items);
+        if (seen[label]) return;
+        seen[label] = true;
+        out.push({ items: items, label: label, save: save });
+      }
+      if (span) {
+        var others = t.segs.filter(function (s) { return s.j <= span.i || s.i >= span.j; });
+        var from = p.O.slice(span.i, span.j), lim = Math.max(1, (span.j - span.i) * 0.5);
+        rivals(p, lex, span.i, span.j, lim, ['part', 'status']).slice(0, 6).forEach(function (r) {
+          var segs = others.concat([{ i: span.i, j: span.j, e: r.e, cost: r.cost }]).sort(function (a, b) { return a.i - b.i; });
+          var save = r.e.type === 'part' ? { t: from, kind: 'part', part: r.e.part, pillar: r.e.pillar || null, side: r.e.side || null } : { t: from, kind: 'status', status: r.e.status };
+          if (r.e.type === 'status' || segs.some(function (s) { return s.e.type === 'status'; }) || carry) tryWith(segs, save);
+          else ['판금', '교환'].forEach(function (s2) {
+            tryWith(segs.concat([{ i: p.O.length, j: p.O.length, e: { type: 'status', status: s2, w: s2, mean: 'status|' + s2 } }]), save);
+          });
+        });
+        if (!t.segs.some(function (s) { return s.e.type === 'status'; }) && !carry) {   // 남은 글자가 상태 말일 수도('도어 수리') → 교환 · 판금 · 손상
+          ['교환', '판금', '손상'].forEach(function (s2) {
+            var st2 = { type: 'status', status: s2, w: s2, mean: 'status|' + s2 };
+            tryWith(others.concat([{ i: span.i, j: span.j, e: st2, cost: 1 }]).sort(function (a, b) { return a.i - b.i; }), { t: from, kind: 'status', status: s2 });
+          });
+        }
+      } else {                                                   // 부위는 읽었는데 상태가 없음 → 교환 · 판금 · 손상(수리필요)
+        ['교환', '판금', '손상'].forEach(function (s2) {
+          tryWith(t.segs.concat([{ i: p.O.length, j: p.O.length, e: { type: 'status', status: s2, w: s2, mean: 'status|' + s2 } }]), null);
+        });
+      }
+      return out.slice(0, 4);
+    }
+
+    // opt: { terms: 팀 표기 사전, picks: { 조각 원문: 부위 목록 } — 사용자가 후보에서 고른 것 }
+    function parseText(text, opt) {
+      var lex = lexFor(opt && opt.terms), picks = (opt && opt.picks) || {};
+      var res = { state: '입력', items: [], unknown: [], notes: [], outside: [], paint: [], tokens: [] }, ignored = [];
       var s = text == null ? '' : String(text);
       if (s.normalize) s = s.normalize('NFKC');   // 전각 문자 → 반각
       s = s.trim();
@@ -302,28 +528,109 @@
       s = s.replace(/판금\s*\/\s*용접\s*,\s*용접\s*,\s*절단/g, '절단')   // 원문 표기
         .replace(/교환\s*\(\s*교체\s*\)/g, '교환')
         .replace(/판금\s*\/\s*용접/g, '판금')
+        .replace(/[판빤]\s*[넬낼]/g, '패널')                      // 판넬 = 패널
+        .replace(/프레[임인]\s*\/\s*사이드\s*[멤맴]버/g, '사이드멤버')    // '프레임/사이드멤버' = 한 부위
         .replace(/좌\s*[·,\/&]\s*우/g, '좌우')
+        .replace(/앞\s*[·,\/&]\s*뒤/g, '앞뒤')
+        .replace(/\[([^\]\n]*)\]/g, '\n$1 ')                       // '[교환] 본넷, 앞펜더(좌)' — 꼬리표가 새 줄의 머리
         .replace(/:/g, ' ');
-      s.split(/[,\/;|\n\r·+&]+/).forEach(function (tok) {
-        tok = tok.trim();
-        if (!tok) return;
-        if (NO_DAMAGE[compact(tok)]) { ignored.push(tok); return; }
-        if (outside(tok)) { res.outside.push(tok); return; }
-        var r = parseToken(tok, res.notes);
-        if (r) { res.items = res.items.concat(r); return; }
-        var parts = splitParts(tok), got = [], outs = [], ok = parts.length > 1;
-        if (ok) parts.forEach(function (p) {
-          if (!ok) return;
-          if (outside(p)) { outs.push(p); return; }
-          var q = parseToken(p, res.notes);
-          if (q) got = got.concat(q); else ok = false;
-        });
-        if (ok) { res.items = res.items.concat(got); res.outside = res.outside.concat(outs); }
-        else res.unknown.push(tok);
+      var toks = [];
+      s.split(/[\n\r]+/).forEach(function (line, li) {
+        line.split(/[,\/;|·+&]+/).forEach(function (tok) { tok = tok.trim(); if (tok) toks.push({ raw: tok, line: li }); });
       });
-      if (!res.items.length && !res.unknown.length) res.state = '무사고';
-      else ignored.forEach(function (t) { res.notes.push("'" + t + "' — 다른 부위가 함께 적혀 있어 무시"); });
+      var rd = toks.map(function (t) { return picks[t.raw] ? { text: t.raw, picked: picks[t.raw] } : readTok(t.raw, lex); });
+
+      // 상태 물려받기 — 같은 조각의 뒤 묶음 → 앞의 머리 상태('[교환] 본넷, 앞펜더') → 같은 줄 뒤 조각('본넷, 휀다 교환')
+      var carry = null;
+      rd.forEach(function (t, k) {
+        if (t.picked || t.nod) return;
+        if (t.header) { carry = t.header; return; }
+        t.groups.forEach(function (g, gi) {
+          g.status = topStatus(g);
+          if (g.part && !g.status) {
+            var nx = t.groups.slice(gi + 1).filter(function (x) { return x.sts.length; })[0];
+            if (nx) { g.status = topStatus(nx); g.inh = 'next'; }
+            else if (carry) { g.status = carry; g.inh = 'carry'; }
+            else {
+              for (var k2 = k + 1; k2 < rd.length && toks[k2].line === toks[k].line; k2++) {
+                var t2 = rd[k2];
+                if (!t2.groups || t2.header) break;
+                var h = t2.groups.filter(function (x) { return x.sts.length && (x.part || x.out) && !x.stFirst; })[0];
+                if (h) { g.status = topStatus(h); g.inh = 'later'; break; }
+                if (t2.groups.some(function (x) { return x.sts.length; })) break;
+              }
+            }
+          }
+          if (g.stFirst && g.status) carry = g.status;
+        });
+        t.carry = carry;
+      });
+
+      rd.forEach(function (t, k) {
+        var row = { text: t.text, kind: 'ok', items: [], label: '', guess: t.guess || [], inh: null, cands: [], why: '' };
+        res.tokens.push(row);
+        if (t.picked) { row.kind = 'picked'; row.items = t.picked; row.label = summary(t.picked); res.items = res.items.concat(t.picked); return; }
+        if (t.nod) { row.kind = 'clean'; ignored.push(t.text); return; }
+        if (t.header) { row.kind = 'header'; row.label = '다음 부위들의 상태: ' + t.header; return; }
+        var bad = t.skipped.length ? '못 읽은 글자' : t.amb ? '비슷한 낱말이 여럿' : '', outs = [], paint = false;
+        t.groups.forEach(function (g) {
+          g.seq.forEach(function (s) { if (s.e.w === '경미') res.notes.push("'" + t.text + "' — '경미'는 손상으로 계산"); });
+          if (g.out) { outs.push(g.out.e.w); return; }
+          if (!g.part) {
+            if (g.mods.length) bad = bad || '부위 없음';
+            else if (g.paint) paint = true;
+            return;
+          }
+          if (g.paint && !g.sts.length && !g.status) { paint = true; return; }   // 도색만 → 계산 제외(Q206)
+          if (!g.status) { bad = bad || '상태 없음'; return; }
+          if (g.part.e.part === '필러 패널' && !g.part.e.pillar && g.sts.length === 1 && g.sts[0].e.sym && (g.status === '흠집' || g.status === '부식') &&
+              !g.mods.some(function (m) { return m.e.dir; })) { bad = bad || 'A·C 가 필러 위치인지 상태인지 모름'; return; }
+          var r = resolve(g, g.status, t.p.count);
+          if (r.err) { bad = bad || r.err; return; }
+          row.items = row.items.concat(r.items);
+          if (g.inh) row.inh = g.inh;
+          if (r.dropped) row.guess = row.guess.concat([{ from: '좌우', to: '좌우 구분 없는 부위라 뺌', cost: 0 }]);   // '후드 좌' · '코너패널(좌)'
+        });
+        if (bad) {
+          row.kind = 'unknown'; row.why = bad;
+          row.cands = candidates(t, lex, t.carry);
+          res.unknown.push(t.text);
+          row.label = row.items.length ? summary(row.items) : '';
+          row.items = [];                                        // 못 읽은 조각은 고를 때까지 반영하지 않는다(읽은 일부만 넣으면 헷갈림)
+          return;
+        }
+        if (!row.items.length) {
+          if (outs.length) { row.kind = 'outside'; row.label = outs.join(' · '); res.outside.push(t.text); return; }
+          if (paint) { row.kind = 'paint'; row.label = '도색만'; res.paint.push(t.text); return; }
+          row.kind = 'ignore'; return;
+        }
+        if (outs.length) res.outside.push(t.text);
+        if (paint) res.paint.push(t.text);
+        row.kind = row.guess.length || row.inh === 'later' ? 'guess' : 'ok';
+        row.label = summary(row.items);
+        if (row.kind === 'guess' && t.segs.some(function (s2) { return s2.cost > 0; })) {
+          row.cands = candidates(t, lex, t.carry).filter(function (x) { return x.label !== row.label; });
+        }
+        res.items = res.items.concat(row.items);
+      });
+      var at = {}, kept = [];                                     // 37곳 중 같은 자리를 두 번 적었으면 더 심한 상태 하나만('좌앞휀다 판, 휜더 좌 교환')
+      res.items.forEach(function (it) {
+        var key = it.part + '|' + (it.side || '') + '|' + (it.pillar || '');
+        if (!POS_KEY[key]) { kept.push(it); return; }
+        if (at[key] == null) { at[key] = kept.length; kept.push(it); return; }
+        var old = kept[at[key]], worse = SEVERITY.indexOf(it.status) < SEVERITY.indexOf(old.status) ? it : old;
+        res.notes.push("'" + itemLabel(it) + "' 두 번 적음 — 더 심한 상태(" + worse.status + ')로 계산');
+        kept[at[key]] = worse;
+      });
+      res.items = kept;
+      if (!res.items.length && !res.unknown.length) {             // 무사고 = 이상 없음 · 범퍼 같은 기록부 밖 · 도색만을 적은 경우. 상태 머리만 쓴 글은 아직 미상
+        res.state = res.tokens.some(function (r) { return r.kind === 'clean' || r.kind === 'outside' || r.kind === 'paint'; }) ? '무사고' : '미상';
+      } else ignored.forEach(function (t) { res.notes.push("'" + t + "' — 다른 부위가 함께 적혀 있어 무시"); });
       res.outside.forEach(function (t) { res.notes.push("'" + t + "' — 성능점검 대상이 아니라 시세 계산에서 뺌(경매 평가에서는 감점될 수 있음)"); });
+      res.paint.forEach(function (t) { res.notes.push("'" + t + "' — 도색만(기록부에 안 적히는 항목)이라 시세 계산에서 뺌"); });
+      res.tokens.forEach(function (r) {
+        if (r.kind === 'guess') res.notes.push("'" + r.text + "' → " + r.label + ' (짐작' + (r.guess.length ? ': ' + r.guess.map(function (g) { return g.from + '→' + g.to; }).join(', ') : ': 상태는 뒤 조각에서') + ')');
+      });
       return res;
     }
 
