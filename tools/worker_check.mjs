@@ -89,6 +89,8 @@ r = await worker.fetch(new Request('https://x.test/api/rates', { method: 'POST' 
 ok(r.status === 405, 'POST → 405', r.status);
 r = await worker.fetch(new Request('https://x.test/api/other'), env);
 ok(r.status === 404, '없는 /api 주소 → 404', r.status);
+r = await worker.fetch(new Request('https://x.test/downloads/listings_compact.csv'), env);
+ok(r.status === 404 && /닫혀/.test(await r.text()), '내려받기 파일 주소 → 404(데이터 탭 닫음, 11-05)', r.status);
 r = await worker.fetch(new Request('https://x.test/v2/index.html'), env);
 ok(r.status === 200 && (await r.text()).indexOf('<html') >= 0, '그 밖의 주소 → 정적 자산', r.status);
 r = await call(env, 'PUT', { password: '팀비번-2026', rev: 3, by: '가'.repeat(10), cells, models: Array.from({ length: 501 }, (_, i) => ({ '제조사': 'A', '모델': 'M' + i, '비율': 10 })) });

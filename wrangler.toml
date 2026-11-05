@@ -2,12 +2,13 @@ name = "carisma-r"                       # 2026-11-03 대시보드에서 Worker 
 main = "worker/index.js"
 compatibility_date = "2025-01-01"
 
-# web/ 폴더를 정적 자산으로 서빙하고, /api/* 만 Worker(worker/index.js)가 먼저 받는다 — 환산 비율 팀 공용 저장소(기획안 D6)
+# web/ 폴더를 정적 자산으로 서빙하고, /api/* 는 Worker(worker/index.js)가 먼저 받는다 — 환산 비율 팀 공용 저장소(기획안 D6)
+# /downloads/* 도 Worker가 먼저 받아 막는다 — 데이터 탭을 닫음(2026-11-05 사용자 요청)
 [assets]
 directory = "./web"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
-run_worker_first = ["/api/*"]
+run_worker_first = ["/api/*", "/downloads/*"]
 
 # 환산 비율 팀 수정 저장소(KV "encar-rates"). 수정 비밀번호는 비밀값 RATES_PASSWORD(wrangler secret put — 저장소에 넣지 않음)
 [[kv_namespaces]]

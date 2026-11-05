@@ -2061,9 +2061,10 @@
     } else compute();
   }
 
-  // ───── 화면 고르기: #/pulse = 마켓 펄스(pulse.js) · #/market = 시장 시황(market.js) · #/data = 데이터(data.js) · 그 밖 = 시세 산정(#/report 옛 주소 → 모델 요약) ─────
-  var PAGES = { pulse: '#/pulse', report: '#/report', market: '#/market', data: '#/data', admin: '#/admin' }, PAGE0 = null;
+  // ───── 화면 고르기: #/pulse = 마켓 펄스(pulse.js) · #/market = 시장 시황(market.js) · 그 밖 = 시세 산정(#/report 옛 주소 → 모델 요약) ─────
+  var PAGES = { pulse: '#/pulse', report: '#/report', market: '#/market', admin: '#/admin' }, PAGE0 = null;
   function route() {
+    if (location.hash.indexOf('#/data') === 0) history.replaceState(null, '', '#/price');   // 데이터 탭은 닫음(2026-11-05 사용자 요청) — 옛 주소 · 즐겨찾기는 시세 산정으로
     var h0 = location.hash, page = 'price';
     Object.keys(PAGES).forEach(function (k) { if (h0.indexOf(PAGES[k]) === 0) page = k; });
     if (page !== 'report') {                                 // 다른 화면으로 넘어오면 맨 위부터(마켓 펄스 아래쪽 링크로 모델 요약에 와도 중간에 서지 않게)
@@ -2081,7 +2082,7 @@
     if (fc) fc.hidden = page !== 'price';
     var na = $('navAdmin');
     if (na) na.classList.toggle('on', page === 'admin');
-    [['navPrice', 'price'], ['navPulse', 'pulse'], ['navMarket', 'market'], ['navData', 'data']].forEach(function (n) {
+    [['navPrice', 'price'], ['navPulse', 'pulse'], ['navMarket', 'market']].forEach(function (n) {
       var a = $(n[0]);
       if (a) a.classList.toggle('on', page === n[1]);
       if (a && page === n[1]) {                               // 휴대폰 폭에서 탭 줄이 넘치면 지금 탭이 보이게 가로로만 민다
@@ -2103,11 +2104,6 @@
     if (page === 'admin') {                                  // 관리자 대시보드(기획 v2.28 · 5.11.3) — 이용 통계, 비밀번호
       if (!AV) AV = V2Admin.create({ esc: esc, bindTips: bindTips, fileSafe: fileSafe, audit: function () { return X.audit; } });   // 시세 점검 요약(v2.33)
       AV.show($('adminView'));
-      return Promise.resolve();
-    }
-    if (page === 'data') {
-      if (!DV) DV = V2Data.create({ X: X, esc: esc, getJSON: getJSON, root: ROOT });
-      DV.show($('dataView'));
       return Promise.resolve();
     }
     if (market) {

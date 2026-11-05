@@ -25,7 +25,7 @@ for (const page of ['index.html', 'v2/index.html']) {
   ok(!missing.length, `${page}이 부르는 파일 ${refs.length}개가 모두 있음`, missing.join(', '));
 }
 const html = fs.readFileSync(path.join(WEB, 'index.html'), 'utf8'), v2html = fs.readFileSync(path.join(V2, 'index.html'), 'utf8');
-for (const f of ['app.js', 'batch.js', 'rates.js', 'market.js', 'pulse.js', 'curve.js', 'data.js']) ok(html.includes(`src="v2/${f}"`) && v2html.includes(`src="${f}"`), `${f}를 부름(기본 주소·/v2/)`);
+for (const f of ['app.js', 'batch.js', 'rates.js', 'market.js', 'pulse.js', 'curve.js']) ok(html.includes(`src="v2/${f}"`) && v2html.includes(`src="${f}"`), `${f}를 부름(기본 주소·/v2/)`);
 ok(html.includes('location.replace(TO[m[1]])') && !/old\.html/.test(html + v2html) && !html.includes('noindex'),
   '기본 주소: 이전 사이트 주소(#/overview 등)는 같은 일을 하는 지금 화면으로, 이전 사이트 링크 없음');
 ok(/<title>카리스마R/.test(html) && /카리스마R/.test(v2html) && html.includes('CARISMA · RETAIL'), '사이트 이름 카리스마R(CARISMA · RETAIL)');
@@ -103,6 +103,10 @@ ok(head.startsWith('제조사,모델,세부모델'), 'CSV가 CP949(엑셀용)로
 const big = fs.readdirSync(path.join(WEB, 'downloads')).concat(fs.readdirSync(DATA).map(f => '../data/' + f))
   .filter(f => { const p = path.join(WEB, 'downloads', f); return fs.statSync(p).isFile() && fs.statSync(p).size > 25 * 1048576; });
 ok(!big.length, '배포 파일 25MiB 한도 안', big.join(', '));
+// 데이터 탭은 닫음(2026-11-05 사용자 요청) — 탭 링크 · 화면 코드가 없고, /downloads/* 는 Worker가 먼저 받아 막는다
+const shells = ['index.html', path.join('v2', 'index.html')].map(f => fs.readFileSync(path.join(WEB, f), 'utf8'));
+ok(shells.every(h => !/href="#\/data"/.test(h) && !/data\.js"/.test(h)) && /run_worker_first\s*=\s*\[[^\]]*"\/downloads\/\*"/.test(fs.readFileSync(path.join(ROOT, 'wrangler.toml'), 'utf8')),
+  '데이터 탭 닫힘 — 탭 링크 · 화면 코드 없음, 내려받기 주소는 Worker가 막음');
 
 section('출처 이름(기획 v2.25)');
 // 공개 폴더(web/)의 화면·코드·데이터·내려받기에 출처 사이트 이름이 없어야 한다 — 비교 매물의 원문 매물 링크 주소만 예외(사용자 결정 11-03)

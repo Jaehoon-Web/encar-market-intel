@@ -474,6 +474,8 @@ export default {
       return stats(request, env, url);
     }
     if (url.pathname.startsWith('/api/')) return json({ ok: false, error: '없는 주소입니다' }, 404);
+    if (url.pathname.startsWith('/downloads/'))                  // 데이터 탭을 닫음(2026-11-05 사용자 요청) — 파일 주소로도 못 받게(wrangler.toml run_worker_first)
+      return new Response('내려받기는 닫혀 있습니다.', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } });
     return env.ASSETS.fetch(request);
   },
   async scheduled(controller, env, ctx) {
