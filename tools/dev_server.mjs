@@ -2,6 +2,7 @@
 //   node tools/dev_server.mjs [포트=8792]
 // 환산 비율 저장소(KV)는 encar_output/dev_kv.json 파일로 흉내 낸다(저장소에 올리지 않음). 수정 비밀번호는 환경 변수
 // RATES_PASSWORD, 없으면 'dev'(관리자 비밀번호 ADMIN_PASSWORD도 같음). 이용 통계(D1)는 같은 폴더의 dev_stats.sqlite(Node 내장 SQLite)로 흉내 낸다.
+// 회원 기능(로그인 기획)의 비밀값은 환경 변수 AUTH_PEPPER, 없으면 로컬 전용 시험 값 · 잠금(AUTH_ENFORCE)은 없으면 켬('1') — 회원 표는 dev_stats.sqlite 에 생긴다.
 // 실제 배포(Cloudflare)와 같은 Worker 코드를 그대로 돌리므로 화면에서 저장 흐름까지 시험할 수 있다.
 import http from 'node:http';
 import fs from 'node:fs';
@@ -35,7 +36,8 @@ const ASSETS = {
   }
 };
 fs.mkdirSync(path.dirname(KV_FILE), { recursive: true });
-const env = { RATES, ASSETS, RATES_PASSWORD: process.env.RATES_PASSWORD || 'dev', ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'dev', STATS: d1(path.join(path.dirname(KV_FILE), 'dev_stats.sqlite')) };
+const env = { RATES, ASSETS, RATES_PASSWORD: process.env.RATES_PASSWORD || 'dev', ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'dev', STATS: d1(path.join(path.dirname(KV_FILE), 'dev_stats.sqlite')),
+  AUTH_PEPPER: process.env.AUTH_PEPPER === 'none' ? '' : process.env.AUTH_PEPPER || 'local-dev-pepper-not-for-production', AUTH_ENFORCE: process.env.AUTH_ENFORCE || '1' };   // AUTH_PEPPER=none → 회원 기능 준비 전(배포 첫걸음) 흉내
 
 http.createServer(async (req, res) => {
   try {
@@ -43,7 +45,7 @@ http.createServer(async (req, res) => {
     for await (const c of req) chunks.push(c);
     const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
     const headers = {};
-    ['content-type', 'content-length', 'origin', 'authorization'].forEach(h => { if (req.headers[h]) headers[h] = req.headers[h]; });
+    ['content-type', 'content-length', 'origin', 'authorization', 'cookie', 'x-cr-a', 'if-none-match'].forEach(h => { if (req.headers[h]) headers[h] = req.headers[h]; });
     const request = new Request('http://' + req.headers.host + req.url, { method: req.method, headers, body: hasBody ? Buffer.concat(chunks) : undefined });
     const response = await worker.fetch(request, env);
     const out = Object.fromEntries(response.headers);

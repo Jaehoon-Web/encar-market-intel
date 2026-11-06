@@ -15,6 +15,14 @@
   var FUELS = ['가솔린', '디젤', 'LPG', '하이브리드', '전기', '수소', '기타'];
 
   function create(ctx) {
+    function me() { var A = root.V2Auth; return A && A.canEdit() ? A.user() : null; }   // '설정 수정' 권한이 있는 회원(로그인 기획 Q272) — 공용 비밀번호 없이 저장
+    function whoHtml(byId, pwId, by, pwHint) {
+      var u = me();
+      if (u) return '<p class="v2-help v2-rme"><b>' + esc(u.name) + '</b>(로그인한 계정)으로 저장합니다 — 공용 비밀번호는 필요 없습니다</p>' +
+        '<input type="hidden" id="' + byId + '" value="' + esc(u.name) + '"><input type="hidden" id="' + pwId + '" value="">';
+      return '<label class="v2-f"><span class="v2-l">이름</span><input class="v2-in" id="' + byId + '" autocomplete="name" value="' + esc(by) + '" placeholder="예: 홍길동"></label>' +
+        '<label class="v2-f"><span class="v2-l">수정 비밀번호<em>' + pwHint + '</em></span><input class="v2-in" id="' + pwId + '" type="password" autocomplete="current-password"></label>';
+    }
     var X = ctx.X, R = X.rates, esc = ctx.esc, el = null;
     var S = { store: false, writable: false, team: null, edit: null, msg: '', err: false, busy: false, loaded: false };
     var MODELS = [], byLabel = {};
@@ -55,9 +63,7 @@
       h += '</div></div>';
       if (S.msg) h += '<div class="notebox ' + (S.err ? 'v2-bad' : '') + '">' + esc(S.msg) + '</div>';
       if (S.edit) {
-        h += '<div class="card"><div class="card-title">수정하는 사람</div><div class="v2-rform">' +
-          '<label class="v2-f"><span class="v2-l">이름</span><input class="v2-in" id="rBy" autocomplete="name" value="' + esc(S.edit.by) + '" placeholder="예: 권재훈"></label>' +
-          '<label class="v2-f"><span class="v2-l">수정 비밀번호<em>팀 관리 비밀번호</em></span><input class="v2-in" id="rPw" type="password" autocomplete="current-password"></label>' +
+        h += '<div class="card"><div class="card-title">수정하는 사람</div><div class="v2-rform">' + whoHtml('rBy', 'rPw', S.edit.by, '팀 관리 비밀번호 · 전환 기간') +
           '<label class="v2-f v2-rnote"><span class="v2-l">무엇을 왜 고쳤나<em>선택 — 변경 기록에 남음</em></span><input class="v2-in" id="rNote" autocomplete="off" value="' + esc(S.edit.note) + '" placeholder="예: 9~10월 낙찰 결과 반영"></label></div></div>';
       }
       return h;
@@ -161,10 +167,9 @@
         (CD.busy ? ' disabled' : '') + '>' + (CD.busy ? '저장 중…' : '저장') + '</button>';
       else h += '<button type="button" class="v2-btn primary" data-r="cdEdit"' + (CD.store && CD.writable ? '' : ' disabled title="저장소 연결 후 수정할 수 있습니다"') + '>수정하기</button>';
       h += '</span></div>';
-      h += '<p class="v2-help">' + (t ? '팀 수정 ' + t.rev + '판 · ' + esc(RatesStore.kst(t.updated_at)) + ' ' + esc(t.updated_by) : '팀이 고친 것 없음(초기값)') + '</p>';
+      h += '<p class="v2-help">' + (t ? '팀 수정 ' + t.rev + '판 · ' + esc(RatesStore.kst(t.updated_at)) + ' ' + esc(t.updated_by || '') : '팀이 고친 것 없음(초기값)') + '</p>';
       if (CD.msg) h += '<div class="notebox ' + (CD.err ? 'v2-bad' : '') + '">' + esc(CD.msg) + '</div>';
-      if (CD.edit) h += '<div class="v2-rform"><label class="v2-f"><span class="v2-l">이름</span><input class="v2-in" id="cdBy" autocomplete="name" value="' + esc(CD.edit.by) + '"></label>' +
-        '<label class="v2-f"><span class="v2-l">수정 비밀번호<em>환산 비율과 같은 비밀번호</em></span><input class="v2-in" id="cdPw" type="password" autocomplete="current-password"></label>' +
+      if (CD.edit) h += '<div class="v2-rform">' + whoHtml('cdBy', 'cdPw', CD.edit.by, '환산 비율과 같은 비밀번호 · 전환 기간') +
         '<label class="v2-f v2-rnote"><span class="v2-l">무엇을 왜 고쳤나<em>선택</em></span><input class="v2-in" id="cdNote" autocomplete="off" value="' + esc(CD.edit.note) + '"></label></div>';
       h += '<div class="v2-two-col"><div><div class="v2-sub">교환 · 판금 — 1곳당 감가(%)</div><div class="v2-tablewrap"><table class="t v2-rtbl v2-ctbl"><thead><tr><th>부위</th><th>교환</th><th>판금</th></tr></thead><tbody>';
       C.rows.forEach(function (r, k) {
@@ -237,8 +242,8 @@
     function cdSave() {
       cdRead();
       var e = CD.edit;
-      if (!e.by.trim() || !e.password) { CD.msg = '이름과 수정 비밀번호를 넣어 주세요'; CD.err = true; render(); return; }
-      remember('by', e.by.trim());
+      if (!me() && (!e.by.trim() || !e.password)) { CD.msg = '이름과 수정 비밀번호를 넣어 주세요'; CD.err = true; render(); return; }
+      if (!me()) remember('by', e.by.trim());
       CD.busy = true;
       render();
       RatesStore.save('/api/cond', { password: e.password, rev: CD.team ? CD.team.rev : 0, by: e.by.trim(), note: e.note,
@@ -292,7 +297,7 @@
         models: ((S.team && S.team.models) || []).map(function (m) { return Object.assign({}, m); }) };
       S.msg = '';
       render();
-      var f = $(S.edit.by ? 'rPw' : 'rBy');
+      var f = $(me() ? 'rNote' : S.edit.by ? 'rPw' : 'rBy');
       if (f) f.focus();
     }
     function readForm() {                                    // 입력칸 → S.edit (다시 그리기 전에)
@@ -318,13 +323,13 @@
     function save() {
       readForm();
       var e = S.edit;
-      if (!e.by.trim()) { S.msg = '이름을 넣어 주세요'; S.err = true; render(); return; }
-      if (!e.password) { S.msg = '수정 비밀번호를 넣어 주세요'; S.err = true; render(); return; }
+      if (!me() && !e.by.trim()) { S.msg = '이름을 넣어 주세요'; S.err = true; render(); return; }
+      if (!me() && !e.password) { S.msg = '수정 비밀번호를 넣어 주세요'; S.err = true; render(); return; }
       var bad = [];
       e.cells.forEach(function (r) { r.forEach(function (v) { if (v != null && !(v >= 0 && v <= 60)) bad.push(v); }); });
       e.models.forEach(function (m) { if (m['비율'] == null || !(m['비율'] >= 0 && m['비율'] <= 60)) bad.push(m['모델']); });
       if (bad.length) { S.msg = '비율은 0~60(%) 사이 숫자로 넣어 주세요: ' + bad.slice(0, 3).join(', '); S.err = true; render(); return; }
-      remember('by', e.by.trim());
+      if (!me()) remember('by', e.by.trim());
       S.busy = true;
       render();
       RatesStore.save(API, { password: e.password, rev: S.team ? S.team.rev : 0, by: e.by.trim(), note: e.note, cells: e.cells, models: e.models })

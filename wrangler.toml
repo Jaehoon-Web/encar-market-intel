@@ -8,7 +8,8 @@ compatibility_date = "2025-01-01"
 directory = "./web"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
-run_worker_first = ["/api/*", "/downloads/*"]
+run_worker_first = ["/api/*", "/downloads/*", "/data/pulse.json", "/data/comps/*"]
+# 위 둘: 마켓 펄스 자료는 회원만, 비교 매물은 로그인하지 않으면 1시간 한도 — AUTH_ENFORCE=1일 때(로그인 기획 4장)
 
 # 환산 비율 팀 수정 저장소(KV "encar-rates"). 수정 비밀번호는 비밀값 RATES_PASSWORD(wrangler secret put — 저장소에 넣지 않음)
 [[kv_namespaces]]
@@ -20,6 +21,11 @@ id = "560f410dafd740fba1e8a624fe428f3e"
 binding = "STATS"
 database_name = "carisma-r-stats"
 database_id = "7e65736e-0f53-4330-8efb-922938ccebb5"
+
+# 회원 잠금 켜기(로그인 기획 8장): "0" = 회원 기능은 되지만 화면 잠금은 꺼 둠(배포 첫걸음), "1" = 회원 전용 화면 잠금.
+# 회원 기능에는 비밀값 AUTH_PEPPER(긴 무작위 글자)가 필요하다 — 사용자가 Cloudflare 화면에서 직접 넣는다(없으면 회원 기능은 '준비 중').
+[vars]
+AUTH_ENFORCE = "0"
 
 # 매일 03:00(한국 = 18:00 UTC) 이용 통계 하루 요약 · 1년 지난 기록 지우기(worker/index.js scheduled)
 [triggers]

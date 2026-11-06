@@ -39,9 +39,11 @@
       <a class="nav-tab on" href="#/price" id="navPrice">시세 산정</a>
       <a class="nav-tab" href="#/pulse" id="navPulse">마켓 펄스</a>
       <a class="nav-tab" href="#/market" id="navMarket">시장 시황</a>
+      <a class="nav-tab" href="#/data" id="navData">데이터</a>
     </nav>
     <div class="ml-auto flex items-center gap-3 shrink-0">
       <span class="eyebrow hidden md:block" id="asOf">—</span>
+      <div class="auth-box" id="authBox"></div>
     </div>
   </div>
   <a href="#/admin" id="navAdmin" class="adm-link">관리자</a>   <!-- 관리자 대시보드(기획 v2.28 Q164) — 모두에게 작게, 숫자는 비밀번호가 있어야 -->
@@ -56,7 +58,7 @@
 <footer class="mt-16 py-10 text-center" style="border-top:1px solid var(--line);">
   <div class="eyebrow mb-2">CARISMA · RETAIL · 시세 산정 (기본 주소와 같은 화면)</div>
   <div class="text-[11px]" style="color:var(--tx-4);">추정 시세는 온라인 소매 호가 기준입니다. <span id="footConv">환산가는 팀 환산 비율(도·소매 갭 요약치)을 적용한 값입니다.</span></div>
-  <div class="text-[11px] mt-1" style="color:var(--tx-4);">서비스 개선을 위해 이용 통계를 익명으로 모읍니다(이름·IP는 남기지 않습니다). <a href="#/admin" class="adm-flink">관리자</a></div>
+  <div class="text-[11px] mt-1" style="color:var(--tx-4);">서비스 개선을 위해 이용 통계를 익명으로 모읍니다. 회원 정보(메일·이름)는 회원 관리에만 쓰고, 남용을 막으려고 접속 주소를 암호화해 1시간 동안만 셉니다. <a href="#/admin" class="adm-flink">관리자</a></div>
 </footer>
 
 <div class="v2-tip" id="tip" hidden></div>
@@ -68,11 +70,14 @@
 <script src="../lib/xlsx_writer.js"></script>
 <script src="../lib/name_match.js"></script>
 <script src="../lib/rates_store.js"></script>
+<script src="auth.js"></script>
 <script src="batch.js"></script>
 <script src="rates.js"></script>
 <script src="market.js"></script>
 <script src="pulse.js"></script>
 <script src="curve.js"></script>
+<script src="data.js"></script>
+<script src="members.js"></script>
 <script src="admin.js"></script>
 <script src="app.js"></script>
 </body>

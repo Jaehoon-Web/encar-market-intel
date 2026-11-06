@@ -108,7 +108,12 @@
   function today() { var d = new Date(); return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()); }
   function mean(a) { return a.length ? a.reduce(function (s, v) { return s + v; }, 0) / a.length : null; }
   function getJSON(p) {
-    return fetch(DATA + p).then(function (r) { if (!r.ok) throw new Error(p + ' ' + r.status); return r.json(); });
+    var comps = /^comps\/g/.test(p) && window.V2Auth;        // 로그인하지 않은 비교 매물 한도는 브라우저마다 센다(로그인 기획 5.4)
+    return fetch(DATA + p, comps ? { headers: { 'x-cr-a': V2Auth.anon() } } : undefined).then(function (r) {
+      if (r.status === 429) return r.json().catch(function () { return {}; }).then(function (j) { var e = new Error(j.error || '잠시 뒤 다시 해 주세요'); e.code = 'limit'; throw e; });
+      if (!r.ok) throw new Error(p + ' ' + r.status);
+      return r.json();
+    });
   }
   function kmNum(s) { return V2Batch.kmOf(s); }            // "4.2만" · "42,000" · "6만키로" → 42000 (묶음 산정과 같은 읽기)
   function manNum(s) {                                      // 만원 단위: "30" · "30만" · "30만원"
@@ -661,11 +666,15 @@
     }
     return h;
   }
-  function delForm(x) {
+  function termWho() {                                       // 팀 사전 저장 칸 — '설정 수정' 권한이 있는 회원이면 이름 · 공용 비밀번호 없이(로그인 기획 Q272)
+    var u = window.V2Auth && V2Auth.canEdit() ? V2Auth.user() : null;
+    if (u) return '<span class="rd-me">' + esc(u.name) + '(로그인)으로</span><input type="hidden" id="termBy" value="' + esc(u.name) + '"><input type="hidden" id="termPw" value="">';
     var by = ''; try { by = localStorage.getItem('v2.rates.by') || ''; } catch (e) { /* 없어도 된다 */ }
-    return '<span class="rd-save"><b>사전에서 지울 표기: \'' + esc(x.t) + '\'</b>' +
-      '<input class="v2-in" id="termBy" autocomplete="name" placeholder="이름" value="' + esc(by) + '">' +
-      '<input class="v2-in" id="termPw" type="password" autocomplete="current-password" placeholder="수정 비밀번호" value="' + esc(TERM_PW) + '">' +
+    return '<input class="v2-in" id="termBy" autocomplete="name" placeholder="이름" value="' + esc(by) + '">' +
+      '<input class="v2-in" id="termPw" type="password" autocomplete="current-password" placeholder="수정 비밀번호" value="' + esc(TERM_PW) + '">';
+  }
+  function delForm(x) {
+    return '<span class="rd-save"><b>사전에서 지울 표기: \'' + esc(x.t) + '\'</b>' + termWho() +
       '<button type="button" class="v2-btn primary" data-act="condTermDelGo">지우기</button><button type="button" class="v2-link" data-act="condSaveClose">닫기</button><em id="termMsg"></em></span>';
   }
   function guessTxt(t) {
@@ -708,10 +717,7 @@
   }
   function termForm(save) {                                  // 팀 표기 사전에 저장 — 환산 비율과 같은 비밀번호(인터뷰 Q209)
     var what = save.kind === 'part' ? save.part + (save.side ? '(' + save.side + ')' : '') + (save.pillar ? '(' + save.pillar + ')' : '') : save.status;
-    var by = ''; try { by = localStorage.getItem('v2.rates.by') || ''; } catch (e) { /* 이름 기억 못 해도 저장은 된다 */ }
-    return '<span class="rd-save"><b>\'' + esc(save.t) + '\' = ' + esc(what) + '</b> 다음부터 팀 모두가 이렇게 읽습니다' +
-      '<input class="v2-in" id="termBy" autocomplete="name" placeholder="이름" value="' + esc(by) + '">' +
-      '<input class="v2-in" id="termPw" type="password" autocomplete="current-password" placeholder="수정 비밀번호" value="' + esc(TERM_PW) + '">' +
+    return '<span class="rd-save"><b>\'' + esc(save.t) + '\' = ' + esc(what) + '</b> 다음부터 팀 모두가 이렇게 읽습니다' + termWho() +
       '<button type="button" class="v2-btn primary" data-act="condSave">저장</button><button type="button" class="v2-link" data-act="condSaveClose">닫기</button>' +
       '<em id="termMsg"></em></span>';
   }
@@ -751,7 +757,7 @@
       if (!by) { $('termMsg').textContent = '이름을 넣어 주세요'; $('termBy').focus(); return; }
       $('termMsg').textContent = '저장하는 중…';
       RatesStore.save('/api/terms', { password: pw2, by: by, add: [pk.save] }).then(function (team) {
-        try { localStorage.setItem('v2.rates.by', by); } catch (e) { /* 이름 기억 못 해도 된다 */ }
+        if (pw2) try { localStorage.setItem('v2.rates.by', by); } catch (e) { /* 이름 기억 못 해도 된다 */ }
         TERM_PW = pw2; TERMS.team = team;
         pk.saved = true;
         delete VIEW.condPicks[key];                          // 이제 사전으로 읽힌다
@@ -2042,9 +2048,17 @@
     document.querySelectorAll('button[data-seg="mode"]').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-v') === v); });
   }
   function applyMode() {                                     // 묶음 산정·환산 비율은 입력·결과 대신 각자의 화면
-    var m = VIEW.mode;
+    var m = VIEW.mode, must = m !== 'one' && window.V2Auth && V2Auth.mustChange(), lk = must || m !== 'one' && window.V2Auth && V2Auth.locked(m);
     if (window.CT) CT.screen('price.' + m);                  // 이용 통계(기획 v2.28) — 지금 화면
     pageHead();
+    navLocks();
+    $('modeLock').hidden = !lk;
+    if (lk) {                                                // 회원 전용(로그인 기획 Q277) — 자물쇠 안내만
+      $('grid').hidden = true; $('batch').hidden = true; $('ratesView').hidden = true;
+      markMode(m);
+      $('modeLock').innerHTML = must ? V2Auth.mustHtml() : V2Auth.lockHtml(m);
+      return;
+    }
     $('grid').hidden = m === 'batch' || m === 'rates';
     $('batch').hidden = m !== 'batch';
     $('ratesView').hidden = m !== 'rates';
@@ -2063,12 +2077,15 @@
     } else compute();
   }
 
-  // ───── 화면 고르기: #/pulse = 마켓 펄스(pulse.js) · #/market = 시장 시황(market.js) · 그 밖 = 시세 산정(#/report 옛 주소 → 모델 요약) ─────
-  var PAGES = { pulse: '#/pulse', report: '#/report', market: '#/market', admin: '#/admin' }, PAGE0 = null;
+  // ───── 화면 고르기: #/pulse = 마켓 펄스(pulse.js) · #/market = 시장 시황(market.js) · #/data = 데이터(data.js, 회원만) · #/login · #/signup · #/account(auth.js) · 그 밖 = 시세 산정(#/report 옛 주소 → 모델 요약) ─────
+  var PAGES = { pulse: '#/pulse', report: '#/report', market: '#/market', data: '#/data', admin: '#/admin', login: '#/login', signup: '#/signup', account: '#/account' }, PAGE0 = null;
   function route() {
-    if (location.hash.indexOf('#/data') === 0) history.replaceState(null, '', '#/price');   // 데이터 탭은 닫음(2026-11-05 사용자 요청) — 옛 주소 · 즐겨찾기는 시세 산정으로
     var h0 = location.hash, page = 'price';
     Object.keys(PAGES).forEach(function (k) { if (h0.indexOf(PAGES[k]) === 0) page = k; });
+    if (window.V2Auth && V2Auth.mustChange() && !/^(price|account|login|signup)$/.test(page)) {   // 임시 비밀번호로 들어왔으면 새 비밀번호부터(로그인 기획 3.2)
+      location.replace('#/account?next=' + encodeURIComponent(h0));
+      return Promise.resolve();
+    }
     if (page !== 'report') {                                 // 다른 화면으로 넘어오면 맨 위부터(마켓 펄스 아래쪽 링크로 모델 요약에 와도 중간에 서지 않게)
       if (PAGE0 && PAGE0 !== page) window.scrollTo(0, 0);
       PAGE0 = page;
@@ -2080,11 +2097,16 @@
     $('dataView').hidden = page !== 'data';
     $('adminView').hidden = page !== 'admin';
     $('pulseView').hidden = page !== 'pulse';
+    var authPage = page === 'login' || page === 'signup' || page === 'account', lockPage = !!(window.V2Auth && V2Auth.locked(page));
+    $('authView').hidden = !authPage;
+    $('lockView').hidden = !lockPage;
+    if (lockPage) { $('marketView').hidden = true; $('dataView').hidden = true; $('pulseView').hidden = true; }
+    if (window.V2Auth) { V2Auth.header($('authBox')); navLocks(); }
     var fc = $('footConv');                                  // 아래 '환산가는 …' 안내는 시세 산정에서만(마켓 펄스·시장 시황은 외부에도 보여 주는 화면)
     if (fc) fc.hidden = page !== 'price';
     var na = $('navAdmin');
     if (na) na.classList.toggle('on', page === 'admin');
-    [['navPrice', 'price'], ['navPulse', 'pulse'], ['navMarket', 'market']].forEach(function (n) {
+    [['navPrice', 'price'], ['navPulse', 'pulse'], ['navMarket', 'market'], ['navData', 'data']].forEach(function (n) {
       var a = $(n[0]);
       if (a) a.classList.toggle('on', page === n[1]);
       if (a && page === n[1]) {                               // 휴대폰 폭에서 탭 줄이 넘치면 지금 탭이 보이게 가로로만 민다
@@ -2093,6 +2115,8 @@
       }
     });
     if (page !== 'price' && page !== 'report' && window.CT) CT.screen(page);   // 이용 통계(기획 v2.28) — 시세 산정은 applyMode 가 알린다
+    if (authPage) { V2Auth.show(page, $('authView'), qs()); return Promise.resolve(); }   // 로그인 · 가입 신청 · 내 정보(로그인 기획 3장)
+    if (lockPage) { $('lockView').innerHTML = V2Auth.lockHtml(page); return Promise.resolve(); }   // 회원 전용(Q277)
     if (page === 'pulse') {
       if (!PV) PV = V2Pulse.create(subCtx('#/pulse', 'navPulse'));
       PV.show($('pulseView'), qs());
@@ -2104,8 +2128,13 @@
       return route();
     }
     if (page === 'admin') {                                  // 관리자 대시보드(기획 v2.28 · 5.11.3) — 이용 통계, 비밀번호
-      if (!AV) AV = V2Admin.create({ esc: esc, bindTips: bindTips, fileSafe: fileSafe, audit: function () { return X.audit; } });   // 시세 점검 요약(v2.33)
+      if (!AV) AV = V2Admin.create({ esc: esc, bindTips: bindTips, fileSafe: fileSafe, audit: function () { return X.audit; }, auth: window.V2Auth });   // 시세 점검 요약(v2.33) · 관리자 회원(로그인 기획)
       AV.show($('adminView'));
+      return Promise.resolve();
+    }
+    if (page === 'data') {                                   // 데이터 — 회원에게 요약 파일만(로그인 기획 Q288)
+      if (!DV) DV = V2Data.create({ X: X, esc: esc, getJSON: getJSON, root: ROOT });
+      DV.show($('dataView'));
       return Promise.resolve();
     }
     if (market) {
@@ -2189,9 +2218,33 @@
     el.addEventListener('focusout', function () { tip.hidden = true; });
   }
 
+  function lockMark(el, on) {                                // 잠긴 탭 · 단추 옆 자물쇠(로그인 기획 Q277) — 화면 낭독기에는 '마켓 펄스(회원 전용)'
+    var s = el.querySelector('.v2-lock');
+    if (on && !s) el.insertAdjacentHTML('beforeend', '<span class="v2-lock" aria-hidden="true">🔒</span>');
+    if (!on && s) s.parentNode.removeChild(s);
+    var name = el.textContent.replace('🔒', '').trim();
+    if (on) { el.setAttribute('aria-label', name + '(회원 전용)'); el.setAttribute('title', '로그인하면 볼 수 있습니다'); }
+    else if (el.hasAttribute('aria-label') && /\(회원 전용\)$/.test(el.getAttribute('aria-label'))) { el.removeAttribute('aria-label'); el.removeAttribute('title'); }
+  }
+  function navLocks() {
+    var a = window.V2Auth;
+    [['navPulse', 'pulse'], ['navMarket', 'market'], ['navData', 'data']].forEach(function (n) { var el = $(n[0]); if (el) lockMark(el, !!(a && a.locked(n[1]))); });
+    document.querySelectorAll('button[data-seg="mode"]').forEach(function (b) { lockMark(b, !!(a && a.locked(b.getAttribute('data-v')))); });
+  }
+  var AUTH0 = null;
+  function authChanged() {                                   // 로그인 · 로그아웃 → 머리 메뉴 · 자물쇠, 잠김이 바뀌면 지금 화면을 다시
+    var a = window.V2Auth;
+    if (!a) return;
+    a.header($('authBox'));
+    navLocks();
+    var key = (a.member() ? 'm' : '-') + (a.state().enforce ? 'e' : '') + (a.admin() ? 'a' : '');
+    if (AUTH0 !== null && AUTH0 !== key) route().catch(fail);
+    AUTH0 = key;
+  }
   function layout() {
     $('app').innerHTML = '<div id="priceView"><div class="v2-phead"><div class="v2-ptl"><h1 class="v2-h1" id="pTitle">시세 산정</h1><div class="v2-psub" id="pSub"></div></div>' +
       '<div class="v2-mode">' + seg('mode', [['one', '한 대 산정'], ['model', '모델 요약'], ['batch', '묶음 산정'], ['rates', '⚙ 환산 비율']], VIEW.mode, '산정 방식') + '</div></div>' +
+      '<div id="modeLock" hidden></div>' +
       '<div class="v2-grid" id="grid"><section class="v2-cond" id="inp" aria-label="대상 차 조건"></section>' +
       '<div class="v2-rescol"><nav class="v2-snav" id="snav" aria-label="결과 목차" hidden></nav>' +
       '<div class="v2-main"><div class="v2-condbar" id="condbar" hidden></div><section class="v2-result" id="res" aria-live="polite"></section></div></div></div>' +
@@ -2201,7 +2254,9 @@
       '<section class="v2-batch v2-pulse" id="pulseView" aria-label="마켓 펄스" hidden></section>' +
       '<section class="v2-batch v2-mk" id="marketView" aria-label="시장 시황" hidden></section>' +
       '<section class="v2-batch" id="dataView" aria-label="데이터" hidden></section>' +
-      '<section class="v2-batch adm" id="adminView" aria-label="관리자" hidden></section>';
+      '<section class="v2-batch adm" id="adminView" aria-label="관리자" hidden></section>' +
+      '<section class="v2-batch" id="authView" aria-label="로그인 · 가입 · 내 정보" hidden></section>' +
+      '<section class="v2-batch" id="lockView" aria-label="회원 전용" hidden></section>';
     var inp = $('inp'), res = $('res'), tip = $('tip');
     inp.addEventListener('change', function (e) {
       var t = e.target, k = t.getAttribute('data-k');
@@ -2253,7 +2308,10 @@
       if (act === 'xlsx') { exportOne(); return; }
       if (act === 'sheet') { sheetOpen(); return; }
       if (b.hasAttribute('data-dmt')) { toggleDamage(b); return; }
-      if (act === 'toBatch') { addToBatch(b); return; }
+      if (act === 'toBatch') {
+        if (window.V2Auth && V2Auth.locked('batch')) { V2Auth.notice('묶음 산정은 회원 전용입니다 — 로그인하면 이 차를 묶음에 넣을 수 있습니다.'); return; }
+        addToBatch(b); return;
+      }
       if (act === 'openBatch') { VIEW.mode = 'batch'; toHash(); applyMode(); window.scrollTo(0, 0); return; }
       if (act === 'xlsxModel') { exportModel(); return; }
       var cell = b.getAttribute('data-cell'), gname = b.getAttribute('data-grade');
@@ -2361,6 +2419,7 @@
   }
 
   function fail(err) {
+    if (err && err.code === 'limit' && window.V2Auth) { V2Auth.notice(err.message); return; }   // 로그인하지 않은 한도(1시간 새 모델 30개) — 화면은 그대로
     console.error(err);
     if (window.CT) CT.err('load', err && err.message || err);
     $('app').innerHTML = '<div class="alert">데이터를 불러오지 못했습니다: ' + esc(err && err.message || err) + '</div>';
@@ -2369,7 +2428,8 @@
   function boot() {
     Promise.all(['comps/index.json', 'adj_coef.json', 'conversion_rates.json', 'inspection_model.json', 'market_index.json'].map(getJSON)
       .concat([RatesStore.load('/api/rates'), RatesStore.load('/api/terms'), RatesStore.load('/api/cond')])   // 환산 비율 팀 수정 · 기록부 팀 표기 사전 · 감가 표 팀 수정
-      .concat(['cond_market.json', 'audit.json'].map(function (f) { return getJSON(f).catch(function () { return null; }); })))   // 감가 옆 시장 근거 · 주간 점검(v2.33)
+      .concat(['cond_market.json', 'audit.json'].map(function (f) { return getJSON(f).catch(function () { return null; }); }))   // 감가 옆 시장 근거 · 주간 점검(v2.33)
+      .concat([window.V2Auth ? V2Auth.init() : null]))      // 로그인 상태(로그인 기획) — 실패해도 로그인 안 한 것으로
       .then(function (a) {
         X.idx = a[0]; X.coef = a[1]; X.rates = a[2]; X.model = a[3]; X.mi = a[4]; X.store = a[5]; TERMS = a[6]; X.condStore = a[7]; X.condMarket = a[8]; X.audit = a[9];
         CTB = CondTable.create(X.model).apply(X.condStore.team);   // 기록부 감가 · 수리비 표(기획 v2.32)
@@ -2384,6 +2444,7 @@
         ISC = InspectionScore.create(X.model);
         S = fromHash();
         layout();
+        if (window.V2Auth) { V2Auth.onChange(authChanged); authChanged(); }
         marketLine();
         if (window.CT) CT.ev('perf', 'ready', Math.round(performance.now()));   // 이용 통계: 기본 데이터를 받아 화면을 그리기까지(ms)
         X.mmWait = getJSON('market_models.json').then(function (j) {   // 세부모델 시장 숫자(시세 추세·판매 속도·지표 줄) — 늦게 와도 되므로 따로

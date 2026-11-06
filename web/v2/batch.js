@@ -510,8 +510,10 @@
         var by = ''; try { by = localStorage.getItem('v2.rates.by') || ''; } catch (e) { /* 없어도 된다 */ }
         h += '<div class="bt-tsave"><b>고른 표기 ' + TS.list.length + '개를 팀 사전에 넣으면</b> 다음부터 팀 모두가 자동으로 읽습니다: ' +
           esc(TS.list.map(function (x) { return "'" + x.t + "' = " + (x.kind === 'part' ? x.part + (x.side ? '(' + x.side + ')' : '') + (x.pillar ? '(' + x.pillar + ')' : '') : x.status); }).join(' · ')) +
-          '<span class="bt-tform"><input class="v2-in" id="bTermBy" autocomplete="name" placeholder="이름" value="' + esc(by) + '">' +
-          '<input class="v2-in" id="bTermPw" type="password" autocomplete="current-password" placeholder="수정 비밀번호" value="' + esc(ctx.terms.pw()) + '">' +
+          '<span class="bt-tform">' + (window.V2Auth && V2Auth.canEdit() ? '<span class="bt-me">' + esc(V2Auth.user().name) + '(로그인)으로</span>' +   // 설정 수정 권한이 있는 회원(로그인 기획 Q272)
+            '<input type="hidden" id="bTermBy" value="' + esc(V2Auth.user().name) + '"><input type="hidden" id="bTermPw" value="">'
+            : '<input class="v2-in" id="bTermBy" autocomplete="name" placeholder="이름" value="' + esc(by) + '">' +
+            '<input class="v2-in" id="bTermPw" type="password" autocomplete="current-password" placeholder="수정 비밀번호" value="' + esc(ctx.terms.pw()) + '">') +
           '<button type="button" class="v2-btn primary" data-b="termSave">팀 사전에 저장</button><button type="button" class="v2-link" data-b="termSkip">안 넣음</button>' +
           '<em id="bTermMsg">' + esc(TS.msg) + '</em></span></div>';
       } else if (TS.msg) h += '<p class="v2-note bt-tdone">' + esc(TS.msg) + '</p>';

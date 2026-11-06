@@ -6,10 +6,12 @@
  *   01 일자별(막대 + 표, Q162) 02 화면·기능 03 많이 조회한 모델 04 이탈(단계 흐름 · 결과 깊이 · 마지막 화면 · 입력하다 포기, Q154)
  *   05 경로·처음 화면·기기(Q163·Q158) 06 오류·속도(Q173)
  * 사람은 익명 번호뿐이다(Q151). 방문자 수는 날마다의 익명 번호를 합쳐 겹침을 뺀다.
+ * 로그인 기획(Q273 · Q285): 관리자 회원은 비밀번호 없이 들어오고(쿠키), 관리자 비밀번호 출입증도 전환 기간 동안 그대로 쓴다.
+ *   맨 위 [회원 관리 | 이용 통계] — 회원 관리는 members.js(V2Members).
  */
 (function (root) {
   'use strict';
-  var TOKEN = 'cr_admin', RANGE = 'cr_admin_days';
+  var TOKEN = 'cr_admin', RANGE = 'cr_admin_days', TAB = 'cr_admin_tab';
   var SCR = { 'price.one': '시세 산정 · 한 대', 'price.model': '모델 요약', 'price.batch': '묶음 산정', 'price.rates': '환산 비율', pulse: '마켓 펄스', market: '시장 시황', data: '데이터' };
   var SEC = { price: '시세', basis: '산정 근거', market: '동급 대비', speed: '판매·추세', ladder: '가격 사다리', comps: '비교 매물', model: '판매 현황', matrix: '시세표',
     grades: '등급별', trend: '시세 추세', top: '맨 위(조건)', batch: '묶음 산정' };
@@ -30,10 +32,31 @@
   var ERR = { js: '화면 오류', promise: '처리 오류', load: '데이터 못 불러옴' };
 
   function create(ctx) {
-    var esc = ctx.esc, el = null, data = null, busy = false, msg = '';
+    var esc = ctx.esc, el = null, data = null, busy = false, msg = '', MEM = null;
     function get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
     function put(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* 저장 못 해도 화면은 그대로 */ } }
     function range() { var d = +get(RANGE); return d === 30 || d === 90 ? d : 7; }
+    function sessAdmin() { return !!(ctx.auth && ctx.auth.admin()); }      // 관리자 회원(쿠키)
+    function inside() { return !!get(TOKEN) || sessAdmin(); }
+    function authHeaders() { return get(TOKEN) ? { authorization: 'Bearer ' + get(TOKEN) } : {}; }
+    function tab() {                                          // 승인 대기가 있으면 회원 관리부터
+      var st = ctx.auth && ctx.auth.state(), t = get(TAB);
+      if (st && st.pending) return 'users';
+      return t === 'users' || t === 'stats' ? t : 'stats';
+    }
+    function tabs() {
+      var st = ctx.auth && ctx.auth.state(), n = st ? (st.pending || 0) + (st.resets || 0) : 0, t = tab();
+      return '<div class="segmented adm-tabs" role="group" aria-label="관리자 화면">' +
+        '<button type="button" data-adm="tab" data-v="users" class="' + (t === 'users' ? 'on' : '') + '">회원 관리' + (n ? ' <span class="auth-badge">' + n + '</span>' : '') + '</button>' +
+        '<button type="button" data-adm="tab" data-v="stats" class="' + (t === 'stats' ? 'on' : '') + '">이용 통계</button></div>';
+    }
+    function usersView() {
+      el.innerHTML = '<div class="v2-phead"><div class="v2-ptl"><h1 class="v2-h1">관리자</h1><div class="v2-psub">회원 관리 · 가입 승인 · 권한' +
+        (get(TOKEN) && !sessAdmin() ? '<small>관리자 비밀번호로 들어옴(전환 기간)</small>' : '') + '</div></div><div class="adm-tools">' + tabs() +
+        (get(TOKEN) ? '<button type="button" class="v2-link" data-adm="logout">비밀번호 출입증 지우기</button>' : '') + '</div></div><div id="admMembers"></div>';
+      if (!MEM) MEM = root.V2Members.create({ esc: esc, headers: authHeaders });
+      MEM.show(el.querySelector('#admMembers'));
+    }
     function n0(v) { return Math.round(v || 0).toLocaleString('ko-KR'); }
     function pc(a, b) { return b ? Math.round(a / b * 100) + '%' : '—'; }
     function dur(sec) {                                        // 보는 시간: 1시간 2분 · 3분 12초 · 45초
@@ -96,7 +119,8 @@
         '<input class="v2-in" type="password" id="admPw" autocomplete="current-password" placeholder="비밀번호" aria-label="관리자 비밀번호">' +
         '<button type="submit" class="v2-btn primary">들어가기</button></form>' +
         (msg ? '<p class="adm-msg">' + esc(msg) + '</p>' : '') +
-        '<p class="adm-note">맞으면 이 브라우저에 30일 동안 들어올 수 있는 출입증을 둡니다(비밀번호는 저장하지 않음).</p></div>';
+        '<p class="adm-note">맞으면 이 브라우저에 30일 동안 들어올 수 있는 출입증을 둡니다(비밀번호는 저장하지 않음).</p>' +
+        '<p class="adm-note">관리자 회원이면 <a href="#/login?next=' + encodeURIComponent('#/admin') + '">로그인</a>만 하면 비밀번호 없이 들어옵니다(관리자 비밀번호는 전환 기간 동안만).</p></div>';
     }
     function tile(label, v, prev, fmt, sub, bad) {             // bad: 늘면 나쁜 숫자(오류) — 색을 거꾸로
       var d = v - prev, cls = (bad ? -d : d) > 0 ? 'up' : (bad ? -d : d) < 0 ? 'dn' : '';
@@ -196,15 +220,16 @@
 
     function render() {
       if (!el) return;
-      if (!get(TOKEN)) { el.innerHTML = loginHtml(); var pw = el.querySelector('#admPw'); if (pw) pw.focus(); return; }
+      if (!inside()) { el.innerHTML = loginHtml(); var pw = el.querySelector('#admPw'); if (pw) pw.focus(); return; }
+      if (tab() === 'users') { usersView(); return; }
       var head = '<div class="v2-phead"><div class="v2-ptl"><h1 class="v2-h1">관리자</h1><div class="v2-psub">이용 통계 · 익명 번호 기준(이름·IP 없음)' +
         (data ? '<small>' + esc(new Date(data.now + 9 * 3600e3).toISOString().slice(0, 16).replace('T', ' ')) + ' 기준 · 오늘은 진행 중</small>' : '') + '</div></div>' +
-        '<div class="adm-tools"><div class="segmented" role="group" aria-label="기간">' + [7, 30, 90].map(function (d) {
+        '<div class="adm-tools">' + tabs() + '<div class="segmented" role="group" aria-label="기간">' + [7, 30, 90].map(function (d) {
           return '<button type="button" data-adm="range" data-v="' + d + '" class="' + (range() === d ? 'on' : '') + '">' + d + '일</button>';
         }).join('') + '</div><button type="button" class="v2-btn" data-adm="xlsx"' + (data && data.store ? '' : ' disabled') + '>엑셀 ↓</button>' +
         '<button type="button" class="v2-btn" data-adm="reload">새로 고침</button>' +
         '<label class="v2-toggle" title="켜 두면 이 브라우저의 방문은 통계에 넣지 않습니다"><input type="checkbox" data-adm="notrack"' + (get('cr_notrack') === '1' ? ' checked' : '') +
-        '><span class="trk" aria-hidden="true"></span>이 브라우저 제외</label><button type="button" class="v2-link" data-adm="logout">로그아웃</button></div></div>';
+        '><span class="trk" aria-hidden="true"></span>이 브라우저 제외</label>' + (get(TOKEN) ? '<button type="button" class="v2-link" data-adm="logout">비밀번호 출입증 지우기</button>' : '') + '</div></div>';
       if (!data) { el.innerHTML = head + '<div class="card"><div class="card-title">' + (busy ? '불러오는 중…' : esc(msg || '불러오지 못했습니다')) + '</div></div>'; return; }
       if (!data.store) { el.innerHTML = head + '<div class="card"><div class="card-title">이용 통계 저장소가 아직 연결되지 않았습니다</div></div>'; return; }
       var days = data.days, today = data.today, T = merge(days), di = days.length - 1;
@@ -248,11 +273,11 @@
 
     function load() {
       busy = true; msg = ''; render();
-      return fetch('/api/admin/stats?days=' + range(), { headers: { authorization: 'Bearer ' + get(TOKEN) }, cache: 'no-store' })
+      return fetch('/api/admin/stats?days=' + range(), { headers: authHeaders(), cache: 'no-store', credentials: 'same-origin' })
         .then(function (r) { return r.json().then(function (j) { return { status: r.status, j: j }; }); })
         .then(function (x) {
           busy = false;
-          if (x.status === 401) { put(TOKEN, null); data = null; msg = x.j.error || '다시 로그인해 주세요'; render(); return; }
+          if (x.status === 401) { if (get(TOKEN)) put(TOKEN, null); data = null; msg = x.j.error || '다시 로그인해 주세요'; render(); return; }
           if (!x.j.ok) { data = null; msg = x.j.error || '불러오지 못했습니다'; render(); return; }
           data = x.j; render();
         }).catch(function (e) { busy = false; data = null; msg = '불러오지 못했습니다: ' + (e && e.message || e); render(); });
@@ -261,7 +286,7 @@
       msg = '확인 중…'; render();
       fetch('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: pw }) })
         .then(function (r) { return r.json(); })
-        .then(function (j) { if (j.ok) { put(TOKEN, j.token); msg = ''; load(); } else { msg = j.error || '들어가지 못했습니다'; render(); } })
+        .then(function (j) { if (j.ok) { put(TOKEN, j.token); msg = ''; if (tab() === 'stats') load(); else render(); } else { msg = j.error || '들어가지 못했습니다'; render(); } })
         .catch(function (e) { msg = '들어가지 못했습니다: ' + (e && e.message || e); render(); });
     }
     function xlsx() {                                          // 엑셀 한 파일(Q167): 일자별 · 화면 · 기능 · 모델 · 단계 흐름 · 결과 깊이 · 마지막 화면 · 입력하다 포기 · 경로 · 처음 화면 · 오류
@@ -292,7 +317,8 @@
       var b = e.target.closest('[data-adm]');
       if (!b || b.tagName === 'INPUT') return;
       var a = b.getAttribute('data-adm');
-      if (a === 'range') { put(RANGE, b.getAttribute('data-v')); load(); }
+      if (a === 'tab') { put(TAB, b.getAttribute('data-v')); if (b.getAttribute('data-v') === 'stats') load(); else render(); }
+      else if (a === 'range') { put(RANGE, b.getAttribute('data-v')); load(); }
       else if (a === 'reload') load();
       else if (a === 'xlsx') xlsx();
       else if (a === 'logout') { put(TOKEN, null); data = null; msg = ''; render(); }
@@ -314,7 +340,7 @@
           el.addEventListener('change', onChange);
           el.addEventListener('submit', onSubmit);
         }
-        if (get(TOKEN)) load(); else render();
+        if (inside() && tab() === 'stats') load(); else render();
       },
       _merge: merge, _actName: actName                          // 점검 도구용
     };

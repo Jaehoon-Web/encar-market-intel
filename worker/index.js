@@ -12,7 +12,10 @@
  *   POST /api/ev            본문 { u, s, d, e: [[시각, 종류, 화면, 이름, 값], …] } → 204   이용 통계(web/v2/track.js)
  *   POST /api/admin/login   본문 { password } → { ok, token, exp }   관리자 30일 출입증(web/v2/admin.js)
  *   GET  /api/admin/stats?days=7|30|90   머리글 Authorization: Bearer 출입증 → { ok, today, days: [하루 요약…] }
- *   매일 03:00(한국) 예약 작업 → 전날 하루 요약을 만들고 1년 지난 기록을 지운다
+ *   매일 03:00(한국) 예약 작업 → 전날 하루 요약을 만들고 1년 지난 기록을 지운다 · 회원 정리(90일 미접속 정지 등, auth.js)
+ *   /api/auth/* · /api/users/* → auth.js(회원 · 로그인 · 관리, 기획 PLAN_로그인_회원관리_기획안.md)
+ *   자료 문(wrangler.toml run_worker_first): /downloads/* 는 회원에게 요약 파일만, /data/pulse.json 은 회원만(AUTH_ENFORCE=1일 때),
+ *     /data/comps/* 는 로그인하지 않으면 1시간 한도(AUTH_ENFORCE=1일 때). 팀 설정 GET은 로그인하지 않으면 수정자 · 메모 · 기록을 뺀다.
  *
  * 초기값(경매 갭 분석 요약치)은 정적 파일 /data/conversion_rates.json 이고, 여기에는 팀이 고친 것만 둔다.
  *   cells  = 기준표(호가대 × 차령)와 같은 꼴의 2차원 배열. 숫자면 그 칸을 팀 값으로, null 이면 초기값 그대로
@@ -22,6 +25,7 @@
  * 그 밖의 주소는 정적 자산으로 넘긴다. 비밀번호가 틀리면 1초 쉬고 401(무차별 대입 방지, KV에는 쓰지 않는다).
  */
 import { summarize } from './summary.js';
+import * as Auth from './auth.js';
 
 const KEY = 'team';
 const KEEP_DAYS = 180;
@@ -110,28 +114,46 @@ function build(cur, body, now, L) {
   return { rev, updated_at: now, updated_by: by, cells: C, models: M, log };
 }
 
-async function get(url, env) {
+function forPublic(team) {                                    // 로그인하지 않은 사람에게는 값만 — 수정자 · 메모 · 기록은 회원만(로그인 기획 4장)
+  if (!team) return team;
+  const t = Object.assign({}, team);
+  delete t.updated_by; delete t.log;
+  if (Array.isArray(t.models)) t.models = t.models.map(m => { const o = Object.assign({}, m); delete o['수정자']; delete o['메모']; return o; });
+  if (Array.isArray(t.items)) t.items = t.items.map(x => { const o = Object.assign({}, x); delete o.by; return o; });
+  return t;
+}
+const writable = env => !!env.RATES_PASSWORD || Auth.authReady(env);   // 공용 비밀번호(전환 기간) 또는 '설정 수정' 권한이 있는 회원
+async function teamFor(env, request, team) {                 // 회원 저장소(D1) 오류여도 값은 준다(한 대 산정은 계속) — 이름은 빼고
+  if (!team) return team;
+  let member = null;
+  try { member = await Auth.memberOf(env, request); } catch (e) { member = null; }
+  return member ? team : forPublic(team);
+}
+
+async function get(url, env, request) {
   if (!env.RATES) return json({ ok: true, store: false, writable: false, team: null });
   const want = url.searchParams.get('rev');
   if (want != null) {
     const cur = await env.RATES.get(KEY, 'json');
     const t = cur && String(cur.rev) === want ? cur : await env.RATES.get(KEY + ':' + Number(want), 'json');
-    return t ? json({ ok: true, team: t }) : json({ ok: false, error: want + '판이 없습니다' }, 404);
+    return t ? json({ ok: true, team: await teamFor(env, request, t) }) : json({ ok: false, error: want + '판이 없습니다' }, 404);
   }
   const team = await env.RATES.get(KEY, 'json');
-  return json({ ok: true, store: true, writable: !!env.RATES_PASSWORD, team });
+  return json({ ok: true, store: true, writable: writable(env), team: await teamFor(env, request, team) });
 }
 
 async function put(request, env) {
   if (!env.RATES) return json({ ok: false, error: '저장소(KV)가 아직 연결되지 않았습니다' }, 503);
-  if (!env.RATES_PASSWORD) return json({ ok: false, error: '수정 비밀번호가 아직 설정되지 않았습니다' }, 503);
+  const ed = await Auth.editorOf(env, request);                // '설정 수정' 권한이 있는 회원은 비밀번호 없이(Q272), 아니면 공용 비밀번호(전환 기간, Q273)
+  if (!env.RATES_PASSWORD && !ed) return json({ ok: false, error: '수정 비밀번호가 아직 설정되지 않았습니다' }, 503);
   if (Number(request.headers.get('content-length') || 0) > MAX_BODY) return json({ ok: false, error: '보낸 내용이 너무 큽니다' }, 413);
   const text = await request.text();
   if (text.length > MAX_BODY) return json({ ok: false, error: '보낸 내용이 너무 큽니다' }, 413);
   let body;
   try { body = JSON.parse(text); } catch (e) { return json({ ok: false, error: '내용을 읽을 수 없습니다' }, 400); }
   if (!body || typeof body !== 'object') return json({ ok: false, error: '내용을 읽을 수 없습니다' }, 400);
-  if (!(await samePassword(body.password == null ? '' : body.password, env.RATES_PASSWORD))) {
+  if (ed) body.by = ed.name;
+  else if (!(await samePassword(body.password == null ? '' : body.password, env.RATES_PASSWORD))) {
     await sleep(1000);
     return json({ ok: false, error: '비밀번호가 맞지 않습니다' }, 401);
   }
@@ -147,6 +169,7 @@ async function put(request, env) {
   }
   if (cur) await env.RATES.put(KEY + ':' + cur.rev, JSON.stringify(cur), { expirationTtl: KEEP_DAYS * 86400 });
   await env.RATES.put(KEY, JSON.stringify(next));
+  await Auth.auditEdit(env, ed, '환산 비율 ' + next.rev + '판');
   return json({ ok: true, team: next });
 }
 
@@ -235,13 +258,15 @@ function buildCond(cur, body, base, now) {
 }
 async function condPut(request, env) {
   if (!env.RATES) return json({ ok: false, error: '저장소(KV)가 아직 연결되지 않았습니다' }, 503);
-  if (!env.RATES_PASSWORD) return json({ ok: false, error: '수정 비밀번호가 아직 설정되지 않았습니다' }, 503);
+  const ed = await Auth.editorOf(env, request);
+  if (!env.RATES_PASSWORD && !ed) return json({ ok: false, error: '수정 비밀번호가 아직 설정되지 않았습니다' }, 503);
   const text = await request.text();
   if (text.length > MAX_BODY) return json({ ok: false, error: '보낸 내용이 너무 큽니다' }, 413);
   let body;
   try { body = JSON.parse(text); } catch (e) { return json({ ok: false, error: '내용을 읽을 수 없습니다' }, 400); }
   if (!body || typeof body !== 'object') return json({ ok: false, error: '내용을 읽을 수 없습니다' }, 400);
-  if (!(await samePassword(body.password == null ? '' : body.password, env.RATES_PASSWORD))) {
+  if (ed) body.by = ed.name;
+  else if (!(await samePassword(body.password == null ? '' : body.password, env.RATES_PASSWORD))) {
     await sleep(1000);
     return json({ ok: false, error: '비밀번호가 맞지 않습니다' }, 401);
   }
@@ -255,6 +280,7 @@ async function condPut(request, env) {
   }
   if (cur) await env.RATES.put(COND + ':' + cur.rev, JSON.stringify(cur), { expirationTtl: KEEP_DAYS * 86400 });
   await env.RATES.put(COND, JSON.stringify(next));
+  await Auth.auditEdit(env, ed, '감가 표 ' + next.rev + '판');
   return json({ ok: true, team: next });
 }
 
@@ -290,13 +316,15 @@ function termOf(x, N, by, now) {
 }
 async function termsPut(request, env) {
   if (!env.RATES) return json({ ok: false, error: '저장소(KV)가 아직 연결되지 않았습니다' }, 503);
-  if (!env.RATES_PASSWORD) return json({ ok: false, error: '수정 비밀번호가 아직 설정되지 않았습니다' }, 503);
+  const ed = await Auth.editorOf(env, request);
+  if (!env.RATES_PASSWORD && !ed) return json({ ok: false, error: '수정 비밀번호가 아직 설정되지 않았습니다' }, 503);
   const text = await request.text();
   if (text.length > MAX_BODY) return json({ ok: false, error: '보낸 내용이 너무 큽니다' }, 413);
   let body;
   try { body = JSON.parse(text); } catch (e) { return json({ ok: false, error: '내용을 읽을 수 없습니다' }, 400); }
   if (!body || typeof body !== 'object') return json({ ok: false, error: '내용을 읽을 수 없습니다' }, 400);
-  if (!(await samePassword(body.password == null ? '' : body.password, env.RATES_PASSWORD))) {
+  if (ed) body.by = ed.name;
+  else if (!(await samePassword(body.password == null ? '' : body.password, env.RATES_PASSWORD))) {
     await sleep(1000);
     return json({ ok: false, error: '비밀번호가 맞지 않습니다' }, 401);
   }
@@ -317,6 +345,7 @@ async function termsPut(request, env) {
   if (items.length > MAX_TERMS) return json({ ok: false, error: '사전은 ' + MAX_TERMS + '개까지입니다' }, 400);   // 판이 꼬이지 않게 덮어쓰지 않고 더하기·지우기만 받는다
   const next = { rev: cur.rev + 1, updated_at: now, updated_by: by, items };
   await env.RATES.put(TERMS, JSON.stringify(next));
+  await Auth.auditEdit(env, ed, '팀 사전 ' + next.rev + '판');
   return json({ ok: true, team: next });
 }
 
@@ -409,8 +438,12 @@ async function rollup(db, d) {                               // 지난 날의 �
   await db.prepare('INSERT OR REPLACE INTO day_sum (day, data, made) VALUES (?1, ?2, ?3)').bind(d, JSON.stringify(sum), Date.now()).run();
   return sum;
 }
+async function adminOk(request, env) {                       // 관리자 회원의 세션, 또는 전환 기간 동안 관리자 비밀번호 출입증(Q273)
+  const u = await Auth.memberOf(env, request);
+  return (u && u.role === 'admin') || admitted(request, env);
+}
 async function stats(request, env, url) {
-  if (!(await admitted(request, env))) return json({ ok: false, error: adminPw(env) ? '다시 로그인해 주세요' : '관리자 비밀번호가 아직 설정되지 않았습니다' }, 401);
+  if (!(await adminOk(request, env))) return json({ ok: false, error: adminPw(env) || Auth.authReady(env) ? '다시 로그인해 주세요' : '관리자 비밀번호가 아직 설정되지 않았습니다' }, 401);
   const now = Date.now(), today = kstDay(now);
   if (!env.STATS) return json({ ok: true, store: false, today, now, days: [] });
   const n = [7, 30, 90].indexOf(+url.searchParams.get('days')) >= 0 ? +url.searchParams.get('days') : 7, list = [];
@@ -435,20 +468,53 @@ async function nightly(env) {                                // 매일 03:00(한
   }
   await env.STATS.prepare('DELETE FROM ev WHERE day < ?1').bind(kstDay(now - KEEP_EV_DAYS * 86400e3)).run();
   await env.STATS.prepare('DELETE FROM day_sum WHERE day < ?1').bind(kstDay(now - KEEP_SUM_DAYS * 86400e3)).run();
+  await Auth.nightlyAuth(env);                                 // 회원 정리(auth.js)
+}
+
+// ───── 자료 문(로그인 기획 4장) — wrangler.toml run_worker_first 로 Worker가 먼저 받는 정적 파일 ─────
+const DL_OK = new Set(['market_index.csv', 'market_models.csv', 'residual_curves.csv', 'model_price_summary.csv', 'manufacturer_summary.csv',
+  'region_summary.csv', 'trend_snapshots.csv']);               // 회원에게 요약 파일만 — 매물 단위 원자료(listings_compact.csv · history_accumulated.zip)는 아무에게도(Q288)
+const textRes = (t, status) => new Response(t, { status, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } });
+async function gate(request, env, url) {
+  const p = url.pathname;
+  if (p.startsWith('/downloads/')) {
+    if (!(await Auth.memberOf(env, request))) return textRes('로그인한 회원만 내려받을 수 있습니다.', 401);
+    return DL_OK.has(decodeURIComponent(p.slice('/downloads/'.length))) ? env.ASSETS.fetch(request) : textRes('내려받기는 닫혀 있습니다.', 404);
+  }
+  if (p === '/data/pulse.json') {
+    if (Auth.enforce(env) && !(await Auth.memberOf(env, request))) return json({ ok: false, code: 'login', error: '로그인한 회원만 볼 수 있습니다' }, 401);
+    return env.ASSETS.fetch(request);
+  }
+  if (p.startsWith('/data/comps/') && p !== '/data/comps/index.json') {
+    const res = await env.ASSETS.fetch(request);
+    let over = false;
+    try { over = res.status === 200 && Auth.enforce(env) && Auth.authReady(env) && !(await Auth.memberOf(env, request)) && !(await Auth.anonQuota(env, request)); }
+    catch (e) { over = false; }                                // 회원 저장소(D1) 오류면 막지 않는다 — 공개 화면(한 대 산정)은 계속
+    return over ? json({ ok: false, code: 'limit', error: '로그인하지 않고 쓸 수 있는 한도(1시간에 새 모델 30개)를 넘었습니다 — 로그인하면 제한 없이 쓸 수 있습니다' }, 429) : res;
+  }
+  return null;
 }
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    try {
+      const a = await Auth.route(request, env, url, admitted);
+      if (a) return a;
+      const g = await gate(request, env, url);
+      if (g) return g;
+    } catch (e) {
+      return json({ ok: false, error: '처리하지 못했습니다 — 잠시 뒤 다시 해 주세요' }, 500);
+    }
     if (url.pathname === '/api/rates') {
-      if (request.method === 'GET') return get(url, env);
+      if (request.method === 'GET') return get(url, env, request);
       if (request.method === 'PUT') return put(request, env);
       return json({ ok: false, error: 'GET 또는 PUT만 됩니다' }, 405);
     }
     if (url.pathname === '/api/cond') {
       if (request.method === 'GET') {
         if (!env.RATES) return json({ ok: true, store: false, writable: false, team: null });
-        return json({ ok: true, store: true, writable: !!env.RATES_PASSWORD, team: await env.RATES.get(COND, 'json') });
+        return json({ ok: true, store: true, writable: writable(env), team: await teamFor(env, request, await env.RATES.get(COND, 'json')) });
       }
       if (request.method === 'PUT') return condPut(request, env);
       return json({ ok: false, error: 'GET 또는 PUT만 됩니다' }, 405);
@@ -456,7 +522,7 @@ export default {
     if (url.pathname === '/api/terms') {
       if (request.method === 'GET') {
         if (!env.RATES) return json({ ok: true, store: false, writable: false, team: null });
-        return json({ ok: true, store: true, writable: !!env.RATES_PASSWORD, team: await env.RATES.get(TERMS, 'json') });
+        return json({ ok: true, store: true, writable: writable(env), team: await teamFor(env, request, await env.RATES.get(TERMS, 'json')) });
       }
       if (request.method === 'PUT') return termsPut(request, env);
       return json({ ok: false, error: 'GET 또는 PUT만 됩니다' }, 405);

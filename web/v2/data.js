@@ -5,6 +5,7 @@
  * 수집 현황은 market_index.json 의 crawls(목록 관측일·간격·목록/상세 대수·메모)를 그대로 보여 준다.
  *
  *   var D = V2Data.create(ctx);   D.show(el);
+ * 회원에게 요약 파일만 보인다 — 매물 단위 원자료(현재 매물 · 누적 이력)는 목록에서 빼고 Worker도 주지 않는다(로그인 기획 Q288).
  */
 (function (root) {
   'use strict';
@@ -20,6 +21,8 @@
     ['trend_snapshots.csv', '수집 회차별 시장 집계 — 목록·상세 대수, 평균·중앙가, 유입·소진, 연료 비중'],
     ['history_accumulated.zip', '누적 이력 — 모든 수집 회차의 매물 기록(판매완료 포함, 가격 변동 추적용, zip 압축)']
   ];
+  var RAW = ['listings_compact.csv', 'history_accumulated.zip'];   // 매물 단위 원자료 — 내려받기에서 뺌(Q288)
+  FILES = FILES.filter(function (f) { return RAW.indexOf(f[0]) < 0; });
   var TERMS = [
     ['차 이름', [
       ['모델·세부모델·등급·세부등급', '경매장 4단계 표기(대표모델명·세부모델명·대표등급명·세부등급명)를 쓴다. 등급 = 연료·배기량·구동 같은 동력계, 세부등급 = 트림. 온라인 매물은 모델마다 등급 칸을 다르게 적어서(트림만 적거나 동력계와 트림을 한 칸에) 매물마다 경매 이름으로 맞췄다. 매물 원래 이름은 비교 매물 표·엑셀에 같이 남긴다.'],
@@ -89,7 +92,8 @@
           '<td class="num" data-size="' + esc(f[0]) + '">' + kb(sizes[f[0]]) + '</td>' +
           '<td><a class="v2-btn" href="' + DL + encodeURIComponent(f[0]) + '" download>내려받기</a></td></tr>';
       });
-      return h + '</tbody></table></div><p class="v2-help">시세 산정·모델 요약·묶음 산정·차종 비교 화면의 [엑셀 내려받기]는 그 화면에서 보는 조건 그대로 만든다.</p></div>';
+      return h + '</tbody></table></div><p class="v2-help">시세 산정·모델 요약·묶음 산정·차종 비교 화면의 [엑셀 내려받기]는 그 화면에서 보는 조건 그대로 만든다. ' +
+        '매물 단위 원자료(현재 매물 · 누적 이력)는 내부 업무용이라 내려받기에서 뺐다.</p></div>';
     }
 
     function crawls() {

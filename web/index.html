@@ -9,7 +9,7 @@
   // 이전 사이트 즐겨찾기(#/overview 등)는 같은 일을 하는 지금 화면으로 — 이전 사이트는 2026-11-03에 지웠다
   // 사이트를 연 채로 즐겨찾기를 누르면 페이지가 다시 읽히지 않으므로 해시가 바뀔 때도 본다
   (function () {
-    var TO = { overview: '#/market', inventory: '#/market', trend: '#/market', insights: '#/market', lookup: '#/price', model: '#/price', download: '#/price' };   // 데이터 탭은 닫음(11-05)
+    var TO = { overview: '#/market', inventory: '#/market', trend: '#/market', insights: '#/market', lookup: '#/price', model: '#/price', download: '#/data' };
     function toNew() { var m = /^#\/(overview|inventory|lookup|model|trend|insights|download)\b/.exec(location.hash); if (m) location.replace(TO[m[1]]); }
     toNew();
     addEventListener('hashchange', toNew);
@@ -48,9 +48,11 @@
       <a class="nav-tab on" href="#/price" id="navPrice">시세 산정</a>
       <a class="nav-tab" href="#/pulse" id="navPulse">마켓 펄스</a>
       <a class="nav-tab" href="#/market" id="navMarket">시장 시황</a>
+      <a class="nav-tab" href="#/data" id="navData">데이터</a>
     </nav>
     <div class="ml-auto flex items-center gap-3 shrink-0">
       <span class="eyebrow hidden md:block" id="asOf">—</span>
+      <div class="auth-box" id="authBox"></div>   <!-- 로그인 · 내 메뉴(로그인 기획, v2/auth.js) -->
     </div>
   </div>
   <a href="#/admin" id="navAdmin" class="adm-link">관리자</a>   <!-- 관리자 대시보드(기획 v2.28 Q164) — 모두에게 작게, 숫자는 비밀번호가 있어야 -->
@@ -65,7 +67,7 @@
 <footer class="mt-16 py-10 text-center" style="border-top:1px solid var(--line);">
   <div class="eyebrow mb-2">CARISMA · RETAIL · 중고차 소매 시세 산정 · 마켓 펄스 · 시장 시황</div>
   <div class="text-[11px]" style="color:var(--tx-4);">추정 시세는 온라인 소매 호가 기준입니다. <span id="footConv">환산가는 팀 환산 비율(도·소매 갭 요약치)을 적용한 값입니다.</span></div>
-  <div class="text-[11px] mt-1" style="color:var(--tx-4);">서비스 개선을 위해 이용 통계를 익명으로 모읍니다(이름·IP는 남기지 않습니다). <a href="#/admin" class="adm-flink">관리자</a></div>
+  <div class="text-[11px] mt-1" style="color:var(--tx-4);">서비스 개선을 위해 이용 통계를 익명으로 모읍니다. 회원 정보(메일·이름)는 회원 관리에만 쓰고, 남용을 막으려고 접속 주소를 암호화해 1시간 동안만 셉니다. <a href="#/admin" class="adm-flink">관리자</a></div>
 </footer>
 
 <div class="v2-tip" id="tip" hidden></div>
@@ -78,11 +80,14 @@
 <script src="lib/xlsx_writer.js"></script>
 <script src="lib/name_match.js"></script>
 <script src="lib/rates_store.js"></script>
+<script src="v2/auth.js"></script>   <!-- 로그인 · 가입 · 잠금(로그인 기획) — app.js보다 먼저 -->
 <script src="v2/batch.js"></script>
 <script src="v2/rates.js"></script>
 <script src="v2/market.js"></script>
 <script src="v2/pulse.js"></script>
 <script src="v2/curve.js"></script>
+<script src="v2/data.js"></script>
+<script src="v2/members.js"></script>
 <script src="v2/admin.js"></script>
 <script src="v2/app.js"></script>
 <!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "897cb30d18b04fd692372d916c4b9b35"}'></script><!-- End Cloudflare Web Analytics -->
