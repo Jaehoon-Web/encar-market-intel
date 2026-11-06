@@ -8,6 +8,7 @@
  *   k번째 곳 배수(order): 감가가 큰 곳부터 — 늘지 않는 배수라 곳을 더하거나 판금을 교환으로 바꿔도 값이 오르지 않는다
  *   수리비(수리필요): 부위별 표준 수리비(만원) — 기록부 밖 부위(범퍼 · 램프 …)도. 수입은 배수
  *   미상: min(비교 매물 평균 감가, 가장 가벼운 사고 감가) — 교환 · 판금을 넣으면 미상보다 같거나 낮다(Q215)
+ *   경매 기준 감가(환산가, v2.33): 사고 단계 × 곳수 표 — 기록부가 나빠지면(곳 추가 · 판금→교환) 덜 깎이지 않게 읽는다(auctionD, 리뷰 D4-1)
  * 표는 /data/inspection_model.json 의 cond(inspection_score.py 가 내보냄) + 팀이 ⚙에서 고친 것(/api/cond).
  * 시세 엔진(price_engine.js · price_engine.py)이 비교 매물마다 같은 계산을 하므로, 계산 순서를 바꾸면 파이썬도 같이 바꾼다.
  *
@@ -153,16 +154,37 @@
       return V[V.length - 1];
     }
     // 환산가용 경매 기준 사고 감가(0~1, 기획 v2.33) — 사고 단계 × 곳수 기본값 × 차값 배수 × 연식 배수. 표가 없으면 null
+    //   기록부가 나빠지면(곳을 더하거나 판금을 교환으로) 덜 깎이지 않게 읽는다(리뷰 D4-1, 11-06): 외판1 → 외판2 → 골격 단계마다
+    //   그 단계까지의 곳만 세어(판금으로 읽을 때는 그 단계의 교환도 판금으로 보고) 읽은 값 중 가장 많이 깎는 값.
+    //   표의 줄끼리 크기 순서가 어긋나도(외판2·판금이 외판1·판금보다 덜 깎는 칸 등) 손상을 더한 기록부가 덜 깎이지 않는다.
+    //   교환 · 판금이 있으면 상태 미상보다 덜 깎지 않는 것은 시세 엔진(estimateCar)이 맞춘다
+    function auctionCell(lab, n, price, age) {
+      var A = T.auction, i = A.classes.indexOf(lab);
+      if (i < 0) return null;
+      var g = lab.indexOf('골격') === 0 ? '골격' : '외판', base = A.count[i][Math.min(n, 6) - 1];
+      var mb = interp(A.band.anchors, A.band[g], price, true), ma = interp(A.age.anchors, A.age[g], age, false);
+      return 1 - Math.exp(Math.log(1 + base / 100) * mb * ma);
+    }
     function auctionD(items, price, age) {
       var A = T.auction;
       if (!A) return null;
       var c = classOf(items);
       if (!c.label) return 0;
-      var i = A.classes.indexOf(c.label);
-      if (i < 0) return null;
-      var g = c.label.indexOf('골격') === 0 ? '골격' : '외판', base = A.count[i][Math.min(c.n, 6) - 1];
-      var mb = interp(A.band.anchors, A.band[g], price, true), ma = interp(A.age.anchors, A.age[g], age, false);
-      return 1 - Math.exp(Math.log(1 + base / 100) * mb * ma);
+      if (A.classes.indexOf(c.label) < 0) return null;
+      var cnt = {}, below = 0, best = 0;
+      (items || []).forEach(function (it) {
+        var s = STATUS3[it.status], inf = info(it.part);
+        if ((s === '교환' || s === '판금') && inf) cnt[inf.rank + '|' + s] = (cnt[inf.rank + '|' + s] || 0) + 1;
+      });
+      ['외판1', '외판2', '골격'].forEach(function (rk) {
+        var x = cnt[rk + '|교환'] || 0, n = below + x + (cnt[rk + '|판금'] || 0);
+        if (n > below) ['판금', '교환'].forEach(function (s) {
+          var d = s === '교환' && !x ? null : auctionCell(rk + '·' + s, n, price, age);
+          if (d != null && d > best) best = d;
+        });
+        below = n;
+      });
+      return best;
     }
 
     function lightAt(price) {                                 // 그 차값에서 가장 가벼운 사고 한 곳 — 미상은 이보다 덜 깎지 않는다(Q215)

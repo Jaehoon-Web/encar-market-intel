@@ -259,6 +259,34 @@ ok(R && R.price > 500 && R.price < 6000 && R.n >= 5 && ['A', 'B', 'C'].includes(
   ok([300, 800, 1500, 3000, 6000].every(p => CT.lightAt(p) > 0 && CT.lightAt(p) <= CT.hist([{ part: '사이드실 패널', side: '좌', status: '판금' }], p).D + 1e-12),
     '가장 가벼운 사고(미상의 하한)는 어떤 한 곳 사고보다 같거나 작음(차값마다)');
 }
+{                                                            // 환산가도 기록부가 나쁠수록 같거나 낮게(리뷰 D4-1, 11-06) — 곳 추가 · 판금→교환 · 교환·판금 ≤ 미상
+  const model = read(path.join(DATA, 'inspection_model.json')), parts = Object.keys(model.parts);
+  const car = { '모델': res.best.model, '등급': gr.grade, '세부등급': gr.trim, '등록연월': 202006, '주행km': 60000, '색상계열': null, '렌트': false, '연료': '가솔린' };
+  const check = (E, GG, label) => {
+    const at = items => E.estimateCar(GG, Object.assign({}, car, { '상태': items == null ? null : { items } }), { sold: true }).converted;
+    const u = at(null);
+    let seed = 13, add = 0, upg = 0, unk = 0;
+    const rnd = n => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+    const one = () => ({ part: parts[rnd(parts.length)], side: rnd(2) ? '좌' : '우', status: rnd(2) ? '교환' : '판금' });
+    for (let k = 0; k < 400; k++) {
+      const a = Array.from({ length: 1 + rnd(5) }, one), ca = at(a), j = a.findIndex(x => x.status === '판금');
+      if (at(a.concat([one()])) > ca + 1e-6) add++;
+      if (j >= 0 && at(a.map((x, i) => i === j ? Object.assign({}, x, { status: '교환' }) : x)) > ca + 1e-6) upg++;
+      if (ca > u + 1e-6) unk++;
+    }
+    ok(!add && !upg && !unk, `환산가 단조${label}: 곳을 더하거나 판금→교환이면 오르지 않고 교환·판금이 있으면 미상보다 높지 않음(무작위 400건 · 어긋남 ${add}·${upg}·${unk})`);
+    return at;
+  };
+  const at = check(eng, G, '');
+  const f4 = ['좌', '우'].flatMap(s => [{ part: '프론트 휀더', side: s, status: '판금' }, { part: '프론트 도어', side: s, status: '판금' }]), q = { part: '쿼터 패널', side: '좌', status: '판금' };
+  const c4 = at(f4), c5 = at(f4.concat([q])), fw = at([f4[0]]), fx = at([Object.assign({}, f4[0], { status: '교환' })]), qu = at([q]), un = at(null);
+  ok(c5 <= c4 + 1e-6 && fx <= fw + 1e-6 && qu <= un + 1e-6,
+    `환산가 예시 — 휀더·도어 판금 4곳 ${Math.round(c4)} ≥ +쿼터 판금 ${Math.round(c5)} · 휀더 판금 ${Math.round(fw)} ≥ 교환 ${Math.round(fx)} · 미상 ${Math.round(un)} ≥ 쿼터 판금 ${Math.round(qu)}`);
+  // 팀이 ⚙에서 경매 표 줄을 거꾸로(무거운 단계가 덜 깎이게) 저장해도 읽는 방식이 지킨다
+  const CT2 = CTB.create(model).apply({ auction: { count: CTB.create(model).apply(null).table.auction.count.slice().reverse() } });
+  const eng2 = PE.create({ config: idx.engine, coef, rates, cond: CT2 });
+  check(eng2, eng2.group(read(path.join(DATA, 'comps', res.best.file))), '(경매 표 줄을 거꾸로 저장해도)');
+}
 const before = eng.conversionRate(1500, 4, '현대', '더 뉴 그랜저 IG', '가솔린');
 RS.apply(rates, { rev: 1, cells: rates.rates.map(r => r.map(() => null)), models: [{ '제조사': '현대', '모델': '더 뉴 그랜저 IG', '연료': '', '비율': 33.3 }] });
 const after = eng.conversionRate(1500, 4, '현대', '더 뉴 그랜저 IG', '가솔린');

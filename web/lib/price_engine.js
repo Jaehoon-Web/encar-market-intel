@@ -20,6 +20,8 @@
  *
  * 결과: est·lo·hi(만원, 범위 25~75%) · base(무사고 시세) · D(이력 감가 0~1) · condLines(감가 내역) · n(비교 매물) · out(이상치)
  *       · step·stepName · grade(A·B·C) · est0(상태 미상일 때 = base) · Dbar(상태 미상: 비교 매물 평균 감가)
+ *       · Du(이 차가 상태 미상이면 쓸 감가 — 교환 · 판금이 있는 기록부의 환산가가 미상보다 높지 않게, 리뷰 D4-1)
+ *       · estimateCar 는 더해서 convD(환산가 사고 감가) · rate · converted(환산가) · repair…
  *       · comps(비교 매물: row·adj(보정가)·sim(유사도 0~100)·outlier·sold·age·dwell) · basis(보정 근거, 만원) · coefLevel(모델·차급·시장)
  * 파일 행은 매물이 바뀌지 않으면 그대로다. 매주 바뀌는 값(now_ym·now_date·시점 보정 배수 tf)은 파일 머리말에 있다.
  */
@@ -188,10 +190,11 @@
         sw += w[k]; sd += w[k] * G.D[sel[k]];
       }
       var b0 = Math.exp(wq(lk, wk, 0.5)), lo0 = Math.exp(wq(lk, wk, 0.25)), hi0 = Math.exp(wq(lk, wk, 0.75));   // 무사고 시세 · 범위
-      var Dt = 0, lines = [], Dbar = sd / sw;
+      var Dt = 0, lines = [], Dbar = sd / sw, Du = 0;
       if (CT && o.adjust) {
+        Du = Math.min(Dbar, CT.lightAt(b0));                                 // 미상 = 비교 매물 평균 상태, 단 그 차값의 가장 가벼운 사고보다는 높게(Q215)
         if (known) { var h = CT.hist(t.items, b0); Dt = h.D; lines = h.lines; }
-        else Dt = Math.min(Dbar, CT.lightAt(b0));                             // 미상 = 비교 매물 평균 상태, 단 그 차값의 가장 가벼운 사고보다는 높게(Q215)
+        else Dt = Du;
       }
       var est = b0 * (1 - Dt), lo = lo0 * (1 - Dt), hi = hi0 * (1 - Dt);
       var n = lk.length, tight = hi / est - 1 <= A_WIDTH && 1 - lo / est <= A_WIDTH;
@@ -200,7 +203,7 @@
         var kk = RANGE_K[grade][!known ? 2 : (Dt > 0 ? 1 : 0)];
         lo = est * Math.pow(lo / est, kk); hi = est * Math.pow(hi / est, kk);
       }
-      var r = { est: est, lo: lo, hi: hi, base: b0, D: Dt, condLines: lines, n: n, out: m - n, step: step, stepName: STEPS[step - 1][0],
+      var r = { est: est, lo: lo, hi: hi, base: b0, D: Dt, Du: Du, condLines: lines, n: n, out: m - n, step: step, stepName: STEPS[step - 1][0],
         grade: grade, coefLevel: G.cf.level };
       if (!known) { r.est0 = b0; r.Dbar = Dbar; }                          // 무사고 기준 값 · 비교 매물 평균 감가
       for (k = 0; k < m; k++) {                                              // 보정가 = 무사고 값 × (1 − 내 차 감가) · 상태 보정 근거
@@ -287,6 +290,7 @@
       r.repairShare = CT ? CT.repairShare() : 100;
       r.repairConv = man0 + rp.sum * r.repairShare / 100;                  // 환산가: 직접 입력은 다, 수리필요 표준 수리비는 반영 몫만(Q261)
       var da = CT && st ? CT.auctionD(st.items || [], r.base, yrs) : null;
+      if (da != null && CT.classOf(st.items || []).label && r.Du > da) da = r.Du;   // 교환 · 판금이 있으면 상태 미상보다 덜 깎지 않는다(리뷰 D4-1)
       r.convD = da == null ? r.D : da;                                       // 환산가의 사고 감가: 경매 기준(기록부를 넣었을 때), 미상은 소매와 같게(v2.33)
       r.rate = cv.rate; r.rateSource = cv.source; r.converted = r.base * (1 - r.convD) * (1 - cv.rate / 100) - r.repairConv;
       return r;

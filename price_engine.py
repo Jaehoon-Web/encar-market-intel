@@ -194,14 +194,9 @@ class Cond:
                 return V[k] + t * (V[k + 1] - V[k])
         return V[-1]
 
-    def auction_d(self, items, price, age):
-        """환산가용 경매 기준 사고 감가(0~1, 기획 v2.33 Q236 Q239 Q242) — 사고 단계 × 곳수 기본값 × 차값 배수 × 연식 배수. 표가 없으면 None"""
-        A = self.T.get("auction")
-        if not A:
-            return None
-        lab, n = self.class_of(items)
-        if not lab:
-            return 0.0
+    def auction_cell(self, lab, n, price, age):
+        """경매 기준 표의 한 칸(사고 단계 lab · 곳수 n) × 차값 배수 × 연식 배수 → 감가(0~1). 단계가 표에 없으면 None"""
+        A = self.T["auction"]
         if lab not in A["classes"]:
             return None
         g = "골격" if lab.startswith("골격") else "외판"
@@ -209,6 +204,35 @@ class Cond:
         mb = self.interp(A["band"]["anchors"], A["band"][g], price, True)
         ma = self.interp(A["age"]["anchors"], A["age"][g], age, False)
         return 1 - math.exp(math.log(1 + base / 100) * mb * ma)
+
+    def auction_d(self, items, price, age):
+        """환산가용 경매 기준 사고 감가(0~1, 기획 v2.33 Q236 Q239 Q242) — 사고 단계 × 곳수 기본값 × 차값 배수 × 연식 배수. 표가 없으면 None
+        기록부가 나빠지면(곳 추가 · 판금→교환) 덜 깎이지 않게 읽는다(리뷰 D4-1): 외판1 → 외판2 → 골격 단계마다 그 단계까지의 곳만 세어
+        (판금으로 읽을 때는 그 단계의 교환도 판금으로 보고) 읽은 값 중 가장 많이 깎는 값 — cond_table.js auctionD 와 같은 계산"""
+        A = self.T.get("auction")
+        if not A:
+            return None
+        lab, _ = self.class_of(items)
+        if not lab:
+            return 0.0
+        if lab not in A["classes"]:
+            return None
+        cnt = {}
+        for it in items:
+            s, inf = STATUS3.get(it["status"]), self.info(it["part"])
+            if s in ("교환", "판금") and inf:
+                cnt[inf["rank"] + "|" + s] = cnt.get(inf["rank"] + "|" + s, 0) + 1
+        below, best = 0, 0.0
+        for rk in ("외판1", "외판2", "골격"):
+            x = cnt.get(rk + "|교환", 0)
+            n = below + x + cnt.get(rk + "|판금", 0)
+            if n > below:
+                for s in ("판금", "교환"):
+                    d = None if s == "교환" and not x else self.auction_cell(rk + "·" + s, n, price, age)
+                    if d is not None and d > best:
+                        best = d
+            below = n
+        return best
 
     def light_at(self, price):
         """그 차값에서 가장 가벼운 사고 한 곳의 감가 — 미상은 이보다 덜 깎지 않는다(교환 · 판금 입력 ≤ 미상, Q215)"""
@@ -441,17 +465,18 @@ def estimate_one(G, t, opts=None, detail=False):
     for j in np.flatnonzero(keep):                                                   # 사이트와 같은 순서로 더함
         sw += w[j]
         sd += w[j] * G.D[idx[j]]
-    Dbar, Dt = sd / sw, 0.0
+    Dbar, Dt, Du = sd / sw, 0.0, 0.0
     if o["adjust"]:
-        Dt = COND.hist(t["items"], b0) if known else min(Dbar, COND.light_at(b0))   # 미상 = 평균 상태, 단 그 차값의 가장 가벼운 사고보다 높게
+        Du = min(Dbar, COND.light_at(b0))                                            # 미상 = 평균 상태, 단 그 차값의 가장 가벼운 사고보다 높게
+        Dt = COND.hist(t["items"], b0) if known else Du
     est, lo, hi = b0 * (1 - Dt), lo0 * (1 - Dt), hi0 * (1 - Dt)
     n = int(keep.sum())
     tight = hi / est - 1 <= A_WIDTH and 1 - lo / est <= A_WIDTH
     grade = "A" if n >= GOOD_COMPS and step <= A_STEP and tight else ("B" if step <= B_STEP else "C")
     k = RANGE_K[grade][2 if not known else (1 if Dt > 0 else 0)]                     # 범위를 실제 호가의 50%가 들게(신뢰도는 넓히기 전 범위로)
     lo, hi = est * (lo / est) ** k, est * (hi / est) ** k
-    r = {"est": est, "lo": lo, "hi": hi, "base": b0, "D": Dt, "n": n, "out": int((~keep).sum()), "step": step, "step_name": STEPS[step - 1][0],
-         "grade": grade}
+    r = {"est": est, "lo": lo, "hi": hi, "base": b0, "D": Dt, "Du": Du, "n": n, "out": int((~keep).sum()), "step": step, "step_name": STEPS[step - 1][0],
+         "grade": grade}                                                             # Du: 이 차가 상태 미상이면 쓸 감가(환산가가 미상보다 높지 않게)
     if not known:
         r["est0"], r["Dbar"] = b0, Dbar
     if detail:
@@ -539,7 +564,9 @@ def estimate_car(groups, R, car, opts=None):
     fix = float(car.get("수리비") or 0) + auto
     conv_fix = float(car.get("수리비") or 0) + auto * COND.repair_share() / 100           # 환산가: 직접 입력은 다, 수리필요 표준 수리비는 반영 몫만(Q261)
     da = COND.auction_d(st.get("items") or [], r["base"], yrs) if st is not None else None
-    conv_d = r["D"] if da is None else da                                            # 환산가의 사고 감가: 경매 기준(기록부를 넣었을 때), 미상은 소매와 같게
+    if da is not None and COND.class_of(st.get("items") or [])[0] and r["Du"] > da:
+        da = r["Du"]                                                                 # 교환 · 판금이 있으면 상태 미상보다 덜 깎지 않는다(리뷰 D4-1)
+    conv_d = r["D"] if da is None else da                                           # 환산가의 사고 감가: 경매 기준(기록부를 넣었을 때), 미상은 소매와 같게
     r.update({"repairAuto": auto, "수리비": fix, "시세": r["est"] - fix, "범위": (r["lo"] - fix, r["hi"] - fix),
               "환산비율": rate, "환산출처": src, "환산감가": conv_d, "환산수리비": conv_fix,
               "환산가": r["base"] * (1 - conv_d) * (1 - rate / 100) - conv_fix})
