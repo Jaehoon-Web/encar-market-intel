@@ -158,6 +158,17 @@ for (const f of ['batch.js', 'rates.js', 'market.js', 'pulse.js', 'curve.js', 'd
   try { require(path.join(V2, f)); } catch (err) { e = err; }
   ok(!e, `${f} 읽힘`, e && e.message);
 }
+for (const f of ['app.js', 'track.js', 'admin.js']) {          // 화면을 그리는 파일은 여기서 실행할 수 없어 문법만 본다(리뷰 11-05)
+  let e = null;
+  try { new (require('node:vm').Script)(fs.readFileSync(path.join(V2, f), 'utf8'), { filename: f }); } catch (err) { e = err; }
+  ok(!e, `${f} 문법`, e && e.message);
+}
+{                                                            // 주소(해시) 값은 남이 만든 링크일 수 있다 — 연·월은 숫자만 받는다(공유 링크로 스크립트가 들어가던 결함, 11-05)
+  const app = fs.readFileSync(path.join(V2, 'app.js'), 'utf8');
+  ok(app.includes(String.raw`if (!/^\d{4}$/.test(s.y)) s.y = '';`) && app.includes(String.raw`if (!/^(?:[1-9]|1[0-2])$/.test(s.m)) s.m = '';`) &&
+     app.includes('function regText() { return esc('),
+    '주소의 연·월은 숫자만 받고 화면에는 esc로 넣음');
+}
 const isc = IS.create(read(path.join(DATA, 'inspection_model.json')));
 const cond = isc.parseText('좌프론트휀더 X, 본넷 W');
 ok(cond.items.length === 2 && !cond.unknown.length, '성능 표기 읽기(좌프론트휀더 X, 본넷 W)', JSON.stringify(cond));

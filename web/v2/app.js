@@ -89,7 +89,7 @@
     return !S.y || !r ? 1 : y >= r[0] && y <= r[1] ? 2 : y >= r[0] - 1 && y <= r[1] + 1 ? 1 : 0;
   }
   function fits(name) { return fitScore(name) > 0; }
-  function regText() { return S.m ? S.y + '-' + pad(S.m) : S.y + '년(월 미상 · 6월로 계산)'; }
+  function regText() { return esc(S.m ? S.y + '-' + pad(S.m) : S.y + '년(월 미상 · 6월로 계산)'); }
   function yrOf(mk, grp, model) { var y = X.yr && X.yr[mk + '|' + grp + '|' + model]; return y ? ' (' + y + ')' : ''; }
   function byN(a, b) { return b.n - a.n; }
   function total(mk) { return mk.groups.reduce(function (s, g) { return s + g.n; }, 0); }
@@ -168,8 +168,8 @@
   }
   function legacyNote(a, b) {                                // 바꿔 연 사실을 차명 찾기 아래 안내 줄에
     if (!a && !b) return;
-    VIEW.nameMsg = '예전 이름 「' + [a && a.from, b && b.from].filter(Boolean).join(' · ') + '」을 경매 이름 「' +
-      [a && a.to, b && b.to].filter(Boolean).join(' · ') + '」으로 바꿔 열었습니다';
+    VIEW.nameMsg = '예전 이름 「' + esc([a && a.from, b && b.from].filter(Boolean).join(' · ')) + '」을 경매 이름 「' +
+      esc([a && a.to, b && b.to].filter(Boolean).join(' · ')) + '」으로 바꿔 열었습니다';
   }
   function encNames(mk, grp, model) {                        // 이 세부모델에 붙은 매물 원래 이름 [[매물 모델그룹, 매물 모델, 대수, 가까운 이름 대수, …], …]
     var m = X.idx.makers.find(function (x) { return x.name === mk; }), g = m && m.groups.find(function (x) { return x.name === grp; });
@@ -265,6 +265,8 @@
   function fromHash() {
     var h = location.hash, i = h.indexOf('?'), q = new URLSearchParams(i >= 0 ? h.slice(i + 1) : ''), s = blank();
     KEYS.forEach(function (k) { if (q.has(k)) s[k] = q.get(k); });
+    if (!/^\d{4}$/.test(s.y)) s.y = '';                       // 주소 값은 남이 만든 링크일 수 있다 — 연·월은 숫자만(화면 글에 그대로 들어가는 곳이 있어서)
+    if (!/^(?:[1-9]|1[0-2])$/.test(s.m)) s.m = '';
     s.rent = q.get('rent') === '1';
     s.cond = ['무사고', '입력'].indexOf(q.get('cond')) >= 0 ? q.get('cond') : '미상';
     s.items = itemsDecode(q.get('it'));
@@ -395,7 +397,7 @@
       '<div class="v2-cacts"><button type="button" class="v2-btn" data-act="share">링크 복사</button><button type="button" class="v2-btn" data-act="reset">초기화</button>' +
       (S.model ? '' : '<button type="button" class="v2-btn primary" data-act="example">예시로 채워 보기</button>') + '</div></div>';
 
-    var outYr = S.model && S.y && !fits(S.model) ? '<p class="v2-help v2-bad">등록 ' + S.y + '년은 이 세대' + yrOf(S.mk, S.grp, S.model) + ' 기간 밖입니다 — 다른 세대인지 확인하세요</p>' : '';
+    var outYr = S.model && S.y && !fits(S.model) ? '<p class="v2-help v2-bad">등록 ' + esc(S.y) + '년은 이 세대' + yrOf(S.mk, S.grp, S.model) + ' 기간 밖입니다 — 다른 세대인지 확인하세요</p>' : '';
     var path = '';
     if (S.model && S.grade && !VIEW.carOpen) {                // 다 골랐으면 한 줄 경로로(Q138·Q145) — 누르면 다시 다섯 칸
       path = '<button type="button" class="v2-path" data-act="carOpen" aria-label="차 다시 고르기"><span class="v2-l">차</span><span class="pv">' +
