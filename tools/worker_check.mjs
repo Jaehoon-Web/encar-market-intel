@@ -164,6 +164,18 @@ ok(r.status === 200 && r.body.team.rev === 3 && r.body.team.repair['환산반영
      t.auction.count.every(x => x === null) && t.log[0].what.some(w => /외판1 교환/.test(w)) && !t.log[0].what.some(w => /판금/.test(w)),
   '바뀐 칸만 저장 · 판금 빈칸은 초기값(외판1 판금 감가가 남음)', t);
 }
+{                                                            // 리뷰 U4-3: 감가 표도 예전 판을 읽는다(⚙ 이 판 보기 · 되돌리기)
+  const cget = q => worker.fetch(new Request('https://x.test/api/cond' + q), env).then(async x => ({ status: x.status, body: await x.json().catch(() => null) }));
+  r = await cget('?rev=1');
+  ok(r.status === 200 && r.body.team.rev === 1 && r.body.team.rows.find(x => x.key === '후드')['교환'] === -4, '감가 표 ?rev=1 → 1판', r.body);
+  r = await cget('?rev=4');
+  ok(r.status === 200 && r.body.team.rev === 4, '감가 표 ?rev=4 → 지금 판', r.status);
+  r = await cget('?rev=9');
+  ok(r.status === 404, '감가 표 없는 판 → 404', r.status);
+  r = await cget('');
+  ok(r.status === 200 && r.body.store && r.body.team.rev === 4, '감가 표 판 번호 없이 → 지금 판 그대로', r.body);
+  ok(env.RATES.m.get('cond:1') && env.RATES.m.get('cond:1').ttl === 180 * 86400, '감가 표 1판 보관(180일)');
+}
 
 console.log('[이용 통계 기록 /api/ev (기획 v2.28)]');
 const U = 'abcdefgh12345678', SI = 'session000000001';

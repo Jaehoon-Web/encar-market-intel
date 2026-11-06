@@ -20,13 +20,24 @@
   var ACT = { example: '예시로 채워 보기', findName: '차명 찾기', pickCand: '차명 후보 고르기', carOpen: '차 다시 고르기', toCond: '조건 바꾸기(붙는 조건 바)',
     recUnfold: '기록부 펼치기', recFold: '기록부 접기', parse: '기록부 텍스트 읽기', reset: '초기화', recent: '최근 산정 열기', recentClear: '최근 산정 지우기',
     toBatch: '묶음에 추가', openBatch: '묶음 산정으로', more: '비교 매물 전체 보기', exClear: '뺀 매물 되돌리기', clearExtra: '목록 밖 부위 지우기', damage: '기록부 부위 그림',
-    download: '데이터 탭 내려받기', outlink: '원문 매물 보기', 'ladder:cell': '시세표 칸(다시 산정)', 'ladder:grade': '등급 줄(다시 산정)', 'mbar:res': '아래 띠 → 결과', 'mbar:need': '아래 띠 → 남은 칸' };
+    download: '데이터 탭 내려받기', outlink: '원문 매물 보기', 'ladder:cell': '시세표 칸(다시 산정)', 'ladder:grade': '등급 줄(다시 산정)', 'mbar:res': '아래 띠 → 결과', 'mbar:need': '아래 띠 → 남은 칸',
+    // 기록부 글 읽기 · 팀 표기 사전(v2.31) · 그 밖 — 이름표가 없으면 관리자 화면에 내부 코드가 그대로 보인다(리뷰 U4-18, site_check가 막음)
+    condPick: '기록부 글: 후보 고르기', condAlt: '기록부 글: 다른 후보 보기', condUnpick: '기록부 글: 고른 것 되돌리기', condClean: '기록부 글: 무사고로 바꾸기',
+    condTerms: '팀 표기 사전 펼치기', condTermDel: '팀 표기 사전: 지우기', condTermDelGo: '팀 표기 사전: 지우기 확인',
+    condSaveOpen: '팀 표기 사전에 저장 열기', condSave: '팀 표기 사전에 저장', condSaveClose: '팀 표기 사전 창 닫기',
+    exLast: '마지막에 뺀 매물 되돌리기', retry: '오류 뒤 다시 시도' };
   var EXP = { xlsx: '엑셀 · 한 대', sheet: '한 장 요약', share: '링크 복사', xlsxModel: '엑셀 · 모델 요약', 'batch:xlsx': '엑셀 · 묶음', 'sheet:print': '한 장 요약 인쇄' };
   var SEG = { mode: ['탭', { one: '한 대 산정', model: '모델 요약', batch: '묶음 산정', rates: '환산 비율' }], sort: ['비교 매물 정렬', { sim: '유사도', adj: '보정가', price: '호가' }],
     posx: ['내 차 위치 가로축', { km: '주행', age: '차령' }], mgrade: ['시세표 등급', { one: '고른 등급', all: '전체 등급' }], cond: ['성능 상태', { '입력': '기록부 입력' }],
     color: ['색상', { '': '상관없음' }], sr: ['단순수리', { auto: '자동', yes: '있음', no: '없음' }], mech: ['기계 결함', { 0: '없음', 1: '경미', 2: '결함' }], fix: ['수리 필요', {}] };
-  var BATCH = { run: '산정하기', sample: '예시 목록 넣기', clear: '지우기', xlsx: '엑셀', sumSort: '요약 정렬', sumAll: '요약 전체 보기', only: '확인할 차만', header: '첫 줄 머리글',
-    tokFix: '표기 고침', tokSkip: '표기 무시', forget: '고친 표기 잊기' };
+  var BATCH = { run: '산정하기', sample: '예시 목록 넣기', clear: '지우기', xlsx: '엑셀', sumSort: '요약 정렬(예전)', sumAll: '요약 전체 보기(예전)', only: '확인할 차만', header: '첫 줄 머리글',
+    tokFix: '성능 표기: 고쳐 쓰기 적용', tokSkip: '성능 표기: 무시하고 계산', forget: '기억한 고침 모두 잊기',
+    inOpen: '입력 펼치기', inFold: '입력 접기', formCopy: '양식 복사', formXlsx: '양식 엑셀 내려받기',
+    tokPick: '성능 표기: 후보 고르기', tokClean: '성능 표기: 무사고로 보기', tokUnk: '성능 표기: 상태 미상으로',
+    vClean: '부위 없는 성능 글: 무사고로 보기', vUnk: '부위 없는 성능 글: 상태 미상 그대로', vFix: '부위 없는 성능 글: 고쳐 쓰기 적용',
+    gPick: '차명 후보 고르기', termSave: '팀 표기 사전에 저장', termSkip: '팀 표기 사전에 안 넣음', forgetOne: '기억한 고침 하나 지우기',
+    g: '모델 묶음 펼치기·접기', grp: '목록 보기(모델별·한 줄로)', sort: '목록 정렬', open: '줄 자세히 펼치기', ref: '기준 차 정하기·풀기',
+    cmp: '나란히 비교에 넣기·빼기', cmpClear: '나란히 비교 비우기', cmpSheet: '나란히 비교 → 한 장 요약', segFold: '차급별 요약 펼치기·접기' };
   var LAST = { '@view': '화면만 열고', '@result': '결과를 보고', '@pick': '차를 고르다', '@miss': '칸을 채우다', '@batch': '묶음 산정 뒤' };
   var FUNNEL = ['들어옴', '차 고름', '결과 나옴', '산정 근거까지 봄', '내보내기'];
   var ERR = { js: '화면 오류', promise: '처리 오류', load: '데이터 못 불러옴' };

@@ -5,7 +5,8 @@
  *   GET /api/rates?rev=N    → { ok, team }                    N판(되돌리기용, 180일 보관)
  *   PUT /api/rates          본문 { password, rev, by, note, cells, models } → { ok, team }   새 판 저장
  *   GET /api/cond           → { ok, store, writable, team }   기록부 감가 · 수리비 표 팀 수정(기획 v2.32 Q220 · Q222 — 환산 비율과 같은 비밀번호)
- *   PUT /api/cond           본문 { password, rev, by, note, rows: [{ key, 교환, 판금 }], once: { 사고, 골격 }, band: { 외판: [4], 골격: [4] }, order: [6],
+ *   GET /api/cond?rev=N     → { ok, team }                    N판(보기 · 되돌리기용, 180일 보관 — 리뷰 U4-3)
+ *   PUT /api/cond          본문 { password, rev, by, note, rows: [{ key, 교환, 판금 }], once: { 사고, 골격 }, band: { 외판: [4], 골격: [4] }, order: [6],
  *                                 auction: { count: [6 × 6], band: { 외판, 골격 }, age: { 외판, 골격 } }, repair: { …, outside: { … }, 수입배수 } }   (v2.33)
  *   GET /api/terms          → { ok, store, writable, team }   팀 표기 사전(기록부 글 읽기, 기획 v2.31 Q201·Q209 — 환산 비율과 같은 비밀번호)
  *   PUT /api/terms          본문 { password, by, add: [{ t, kind, part, side, pillar, status }], del: [t…] } → { ok, team }   더하기·지우기
@@ -130,15 +131,16 @@ async function teamFor(env, request, team) {                 // 회원 저장소
   return member ? team : forPublic(team);
 }
 
-async function get(url, env, request) {
+async function get(url, env, request, key) {                 // key: 환산 비율(KEY) · 감가 표(COND) — ?rev=N 이면 그 판(보기 · 되돌리기, 180일 보관 · 리뷰 U4-3)
+  key = key || KEY;
   if (!env.RATES) return json({ ok: true, store: false, writable: false, team: null });
   const want = url.searchParams.get('rev');
   if (want != null) {
-    const cur = await env.RATES.get(KEY, 'json');
-    const t = cur && String(cur.rev) === want ? cur : await env.RATES.get(KEY + ':' + Number(want), 'json');
+    const cur = await env.RATES.get(key, 'json');
+    const t = cur && String(cur.rev) === want ? cur : await env.RATES.get(key + ':' + Number(want), 'json');
     return t ? json({ ok: true, team: await teamFor(env, request, t) }) : json({ ok: false, error: want + '판이 없습니다' }, 404);
   }
-  const team = await env.RATES.get(KEY, 'json');
+  const team = await env.RATES.get(key, 'json');
   return json({ ok: true, store: true, writable: writable(env), team: await teamFor(env, request, team) });
 }
 
@@ -527,10 +529,7 @@ export default {
       return json({ ok: false, error: 'GET 또는 PUT만 됩니다' }, 405);
     }
     if (url.pathname === '/api/cond') {
-      if (request.method === 'GET') {
-        if (!env.RATES) return json({ ok: true, store: false, writable: false, team: null });
-        return json({ ok: true, store: true, writable: writable(env), team: await teamFor(env, request, await env.RATES.get(COND, 'json')) });
-      }
+      if (request.method === 'GET') return get(url, env, request, COND);
       if (request.method === 'PUT') return condPut(request, env);
       return json({ ok: false, error: 'GET 또는 PUT만 됩니다' }, 405);
     }

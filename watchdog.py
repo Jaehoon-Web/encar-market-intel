@@ -13,6 +13,9 @@ Windows 작업 스케줄러(EncarWatchdog)가 30분마다 pythonw 로 실행(창
        사람이 만든 커밋이 섞여 있으면 건드리지 않는다
   2) 직전 실행(logs/auto_*.log, lock 때문에 건너뛴 회차 로그는 제외)이 '완료'로 끝났나?
      → 완료면 재개 안 함 (네트워크 실패로 남은 소수 매물은 다음 주간 실행이 수집)
+     단, 마지막 목록(ids_all.json)이 STALE_DAYS(8)일 넘게 지났으면 이번 주 주간 실행이 아예 시작하지 못한 것
+     (작업 꺼짐 · 파이썬 경로 · 스크립트 문법 오류로 로그도 못 남김 · 수요일 내내 로그인 안 함 — 리뷰 D6-10)
+     → logs/WEEKLY_NOT_STARTED.txt 경고(진행 대시보드에 보임) + 주간 실행 시작(EncarWeeklyUpdate, 6시간에 한 번까지)
   3) 중단된 채 끝났으면 → stale lock 제거 후 EncarResumeOnce 작업(--resume) 실행
      단, 진척 없이 연속 MAX_NO_PROGRESS 회 재개했으면 멈추고 수동 확인을 기다림
      (진척 = 상세 완료 대수(details_done_ids.json)가 직전 자동 재개 때보다 늘었음.
@@ -39,6 +42,11 @@ DONE_IDS = os.path.join(OUT, "details_done_ids.json")
 RESUME_TASK = "EncarResumeOnce"
 MAX_NO_PROGRESS = 6        # 진척 없는 자동 재개 연속 한도 (약 6시간분)
 NO_WINDOW = 0x08000000     # CREATE_NO_WINDOW: pythonw 에서 콘솔 창 안 띄움
+IDS_ALL = os.path.join(OUT, "ids_all.json")
+WEEKLY_TASK = "EncarWeeklyUpdate"
+STALE_DAYS = 8             # 마지막 목록이 이만큼 지났으면 주간 실행이 시작하지 못한 것(수요일 → 다음 주 목요일)
+WEEKLY_RETRY_H = 6         # 주간 실행을 대신 시작한 뒤 다시 시작하기까지 기다리는 시간
+ALERT = os.path.join(LOGDIR, "WEEKLY_NOT_STARTED.txt")
 
 def log(m):
     line = "[%s] %s" % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), m)
@@ -112,6 +120,55 @@ def start_resume():
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
     return "직접 실행(auto_update.py --resume, 작업 %s 실행 실패 rc=%d)" % (RESUME_TASK, rc)
 
+def start_weekly():
+    """EncarWeeklyUpdate 예약 작업(주간 갱신 — 이어받기 아님)을 지금 실행. 작업이 꺼졌거나 없으면 직접 실행."""
+    rc = subprocess.call(["schtasks", "/Run", "/TN", WEEKLY_TASK],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=NO_WINDOW)
+    if rc == 0:
+        return "작업 스케줄러 %s" % WEEKLY_TASK
+    DETACHED, NEWGRP = 0x00000008, 0x00000200
+    py = os.path.join(os.path.dirname(sys.executable), "python.exe")
+    subprocess.Popen([py, "auto_update.py"], cwd=ROOT,
+                     creationflags=DETACHED | NEWGRP, close_fds=True,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+    return "직접 실행(auto_update.py, 작업 %s 실행 실패 rc=%d)" % (WEEKLY_TASK, rc)
+
+def weekly_stale(st, dry, tag):
+    """직전 실행은 '완료'인데 마지막 목록이 STALE_DAYS일 넘게 지났으면 주간 실행이 시작하지 못한 것(리뷰 D6-10)
+       → 경고 파일 + 주간 실행 시작(WEEKLY_RETRY_H시간에 한 번까지). 새 목록이 들어오면 경고를 지운다. 처리했으면 True"""
+    try:
+        seen = datetime.datetime.fromtimestamp(os.path.getmtime(IDS_ALL))
+    except OSError:
+        return False                                            # 목록 파일이 없으면 판단하지 않음(실행 중 지웠다가 받는 중일 수 있다)
+    age = (datetime.datetime.now() - seen).total_seconds() / 86400
+    if age < STALE_DAYS:
+        if os.path.exists(ALERT) and not dry:
+            os.remove(ALERT)
+            log("새 목록(%s)이 들어와 '주간 실행 시작 못 함' 경고를 지움" % seen.strftime("%Y-%m-%d"))
+        return False
+    msg = "마지막 목록 %s(%d일 전) — 이번 주 주간 실행이 시작되지 않았습니다" % (seen.strftime("%Y-%m-%d"), int(age))
+    last = st.get("weeklyAt")
+    if last:
+        try:
+            waited = (datetime.datetime.now() - datetime.datetime.fromisoformat(last)).total_seconds() / 3600
+        except ValueError:
+            waited = WEEKLY_RETRY_H
+        if waited < WEEKLY_RETRY_H:
+            log(tag + msg + " → %s에 주간 실행을 시작했으니 기다림" % last.replace("T", " "))
+            return True
+    if dry:
+        log(tag + msg + " → 주간 실행을 시작할 예정")
+        return True
+    with open(ALERT, "w", encoding="utf-8") as f:
+        f.write("[%s] %s.\n확인할 것: 작업 스케줄러 %s 사용 · 파이썬 경로 · auto_update.py 오류(logs/weekly_bat.log, 최근 logs/auto_*.log) · 수요일 로그인.\n"
+                "감시 작업이 주간 실행을 대신 시작합니다(%d시간에 한 번까지). 새 목록이 들어오면 이 파일은 저절로 지워집니다.\n"
+                % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), msg, WEEKLY_TASK, WEEKLY_RETRY_H))
+    how = start_weekly()
+    st["weeklyAt"] = datetime.datetime.now().isoformat(timespec="minutes")
+    save_state(st)
+    log(msg + " → 주간 실행 시작: %s" % how)
+    return True
+
 def push_retry(dry, tag):
     """안 올라간 '데이터 갱신' 커밋을 다시 push. 올릴 것이 없으면 로그도 남기지 않는다."""
     if dry:
@@ -138,7 +195,10 @@ def main():
         return
     if state == "completed":
         if st.get("attempts") and not dry:
-            save_state({"attempts": 0, "lastDone": -1})
+            st.update({"attempts": 0, "lastDone": -1})
+            save_state(st)
+        if weekly_stale(st, dry, tag):                          # 완료지만 오래된 목록 = 이번 주 실행이 시작 못 함(리뷰 D6-10)
+            return
         log(tag + "직전 실행(%s) 완료 → 재개 불필요" % name)
         return
 
@@ -159,7 +219,8 @@ def main():
         except OSError:
             pass
     how = start_resume()
-    save_state({"attempts": attempts + 1, "lastDone": done})
+    st.update({"attempts": attempts + 1, "lastDone": done})       # 주간 실행 시작 시각(weeklyAt)은 그대로 둔다
+    save_state(st)
     log("직전 실행(%s) 중단 감지 → --resume 재개 시작: %s (진척없는 연속 재개 %d/%d회)"
         % (name, how, attempts + 1, MAX_NO_PROGRESS))
 

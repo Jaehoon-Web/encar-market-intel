@@ -806,3 +806,8 @@ tr.mem-suspended td, tr.mem-rejected td { opacity: .78; }
 .v2-fixrow .bt-pkbad { flex-basis: 100%; font-size: 12px; }
 .v2-notes ul { margin: 4px 0 2px 16px; padding: 0; font-size: 13px; color: var(--tx-2); }
 .bt-mem li .v2-link { flex: none; white-space: nowrap; }
+
+/* ⚙ 변경 기록 — 이 판 보기 · 되돌리기(리뷰 U4-3) */
+.v2-log .v2-link { font-size: 12px; margin-left: 6px; white-space: nowrap; }
+.v2-log li.is-view { background: var(--bg-2); border-radius: 8px; padding-left: 8px; padding-right: 8px; }
+.v2-rview .v2-btn { margin: 8px 8px 0 0; padding: 6px 12px !important; font-size: 13px; }

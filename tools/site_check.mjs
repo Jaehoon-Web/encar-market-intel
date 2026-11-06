@@ -155,6 +155,17 @@ ok(mg.visitors === 2 && mg.sessions === 3 && mg.sec === 150 && mg.act['pulse|x']
   '관리자 화면: 여러 날 합치기(방문자는 익명 번호 겹침 빼고 2명, 빈 날·못 만든 날 건너뜀)', JSON.stringify([mg.visitors, mg.sessions, mg.sec]));
 ok(ADM._actName('price.one|nav:basis') === '목차 → 산정 근거' && ADM._actName('price.one|sort=price') === '비교 매물 정렬: 호가' && ADM._actName('price.batch|batch:run') === '묶음: 산정하기',
   '관리자 화면: 기능 이름을 읽기 쉬운 말로');
+{                                                            // 리뷰 U4-18: 화면의 모든 단추 코드(data-act · data-b)와 칸 · 섹션 · 조작 이름에 관리자 이름표가 있음 — 새 단추를 달면 여기서 걸린다
+  const codes = (attr) => { const s = new Set(); for (const f of fs.readdirSync(V2).filter(x => x.endsWith('.js'))) for (const m of fs.readFileSync(path.join(V2, f), 'utf8').matchAll(new RegExp(attr + '="([A-Za-z0-9_:.-]+)"', 'g'))) s.add(m[1]); return [...s]; };
+  const appSrc = fs.readFileSync(path.join(V2, 'app.js'), 'utf8'), ids = re => [...new Set([...appSrc.matchAll(re)].map(m => m[1]))];
+  const miss = [
+    ...codes('data-act').filter(c => ADM._actName('price.one|' + c) === c),
+    ...codes('data-b').filter(c => ADM._actName('price.batch|batch:' + c) === '묶음: ' + c).map(c => 'batch:' + c),
+    ...ids(/\bsec\('([a-zA-Z0-9]+)'/g).flatMap(id => ['nav', 'fold', 'info'].map(p => p + ':' + id)).filter(n => ADM._actName('price.one|' + n).endsWith(n.split(':')[1])),
+    ...ids(/\bseg\('([a-zA-Z]+)'/g).concat(ids(/\bchip\('([a-zA-Z]+)'/g)).filter(k => ADM._actName('price.one|' + k + '=x') === k + '=x').map(k => k + '='),
+    ...ids(/\bsel\('([a-zA-Z]+)'/g).concat(codes('data-k').filter(k => !/^[a-z]$|^k$/.test(k))).filter(k => ADM._actName('price.one|input:' + k) === '칸 바꿈: ' + k).map(k => 'input:' + k)];
+  ok(!miss.length, `관리자 이름표: 단추 코드 · 섹션 · 조작 · 칸 이름이 모두 한글 이름으로 보임(빠진 것 ${miss.length})`, miss.join(', '));
+}
 
 section('라이브러리 동작(실제 데이터)');
 const IS = require(path.join(WEB, 'lib', 'inspection_score.js')), PE = require(path.join(WEB, 'lib', 'price_engine.js')), CTB = require(path.join(WEB, 'lib', 'cond_table.js'));

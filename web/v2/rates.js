@@ -5,6 +5,8 @@
  * 고치기: [수정하기] → 이름·비밀번호 → 칸·모델 고치기 → [저장] = PUT /api/rates(worker/index.js). 저장소가 없으면 보기만 된다.
  * 저장하면 같은 비율 객체(X.rates)에 바로 합쳐서, 열려 있는 한 대 산정·묶음 산정도 새 비율로 계산한다.
  * 아래 '기록부 감가 · 수리비 표'(기획 v2.32 Q220 · Q222)는 따로 고치고 따로 저장한다 = PUT /api/cond(같은 비밀번호).
+ * 변경 기록 줄마다 [이 판 보기](그 판 값을 표에 보여 줌) · [이 판으로 되돌리기](그 판 값을 채운 수정 화면 → 저장하면 새 판) — GET ?rev=N(리뷰 U4-3).
+ * 그사이 다른 사람이 저장했으면(409) 입력은 그대로 두고 무엇이 바뀌었는지 알린다.
  *
  *   var V = V2Rates.create(ctx);   V.show(el);
  */
@@ -24,9 +26,9 @@
         '<label class="v2-f"><span class="v2-l">수정 비밀번호<em>' + pwHint + '</em></span><input class="v2-in" id="' + pwId + '" type="password" autocomplete="current-password"></label>';
     }
     var X = ctx.X, R = X.rates, esc = ctx.esc, el = null;
-    var S = { store: false, writable: false, team: null, edit: null, msg: '', err: false, busy: false, loaded: false };
+    var S = { store: false, writable: false, team: null, edit: null, view: null, msg: '', err: false, busy: false, loaded: false };   // view: 보고 있는 예전 판 { rev, team }
     var MODELS = [], byLabel = {};
-    var CD = { store: false, writable: false, team: null, edit: null, msg: '', err: false, busy: false };   // 기록부 감가 · 수리비 표 고치기
+    var CD = { store: false, writable: false, team: null, edit: null, view: null, msg: '', err: false, busy: false };   // 기록부 감가 · 수리비 표 고치기 · view { rev, team, C }
     var REP = [['외판', '외판 한 판'], ['루프 패널', '루프'], ['라디에이터 서포트', '라디에이터 서포트'], ['골격', '골격 부위']];
     var ONCE = [['사고', '사고 이력(한 번)'], ['골격', '골격(한 번)']];
     var GRP = ['외판', '골격'];
@@ -42,7 +44,28 @@
     function $(id) { return document.getElementById(id); }
     function remember(k, v) { try { if (v === undefined) return localStorage.getItem('v2.rates.' + k) || ''; localStorage.setItem('v2.rates.' + k, v); } catch (e) { return ''; } }
     function blankCells() { return R.rates.map(function (r) { return r.map(function () { return null; }); }); }
-    function teamCells() { return S.team && S.team.cells ? S.team.cells : blankCells(); }
+    function cellsOf(t) { return t && t.cells ? t.cells : blankCells(); }
+    function teamCells() { return cellsOf(S.team); }
+    function viewing() { return S.view && !S.edit ? S.view.team : null; }   // 예전 판을 보는 중이면 그 판(리뷰 U4-3)
+    function revBtns(kind, l, cur, viewRev) {               // 변경 기록 줄의 [이 판 보기] [이 판으로 되돌리기] — 지금 판 줄에는 '지금 판'만
+      if (!cur || l.rev === cur.rev) return ' <span class="v2-dim">· 지금 판</span>';
+      var St = kind === 'r' ? S : CD, w = St.store && St.writable && !St.edit;
+      return (viewRev === l.rev ? ' <span class="v2-dim">· 보는 중</span>' : ' <button type="button" class="v2-link" data-r="' + kind + 'View" data-rev="' + l.rev + '">이 판 보기</button>') +
+        (w ? ' <button type="button" class="v2-link" data-r="' + kind + 'Back" data-rev="' + l.rev + '">이 판으로 되돌리기</button>' : '');
+    }
+    function viewNote(kind, v) {                             // 예전 판을 보는 중 — 되돌리기 · 지금 판으로
+      var St = kind === 'r' ? S : CD;
+      return '<div class="notebox v2-rview"><b>' + v.rev + '판</b>(' + esc(RatesStore.kst(v.team.updated_at)) + (v.team.updated_by ? ' ' + esc(v.team.updated_by) : '') + ')을 보는 중입니다 — ' +
+        (kind === 'r' ? '아래 기준표 · 모델별 비율은 그 판 값입니다.' : '아래 표는 그 판 값입니다(그 판에서 팀이 고친 칸만 되살리고, 나머지 칸은 지금 초기값).') + '<br>' +
+        (St.store && St.writable ? '<button type="button" class="v2-btn" data-r="' + kind + 'Back" data-rev="' + v.rev + '">이 판으로 되돌리기</button>' : '') +
+        '<button type="button" class="v2-btn" data-r="' + kind + 'ViewClose">지금 판으로</button></div>';
+    }
+    function conflictMsg(t) {                                // 409 — 입력은 그대로 두고 그 판에서 바뀐 것을 알린다(리뷰 U4-3)
+      var l = t && t.log && t.log[0], what = l && l.what ? l.what : [];
+      return '그사이 ' + (t && t.updated_by ? t.updated_by + '님이' : '다른 사람이') + ' ' + (t ? t.rev : 0) + '판을 저장했습니다' +
+        (what.length ? '(' + what.slice(0, 4).join(' · ') + (what.length > 4 ? ' 외 ' + (what.length - 4) + '곳' : '') + ')' : '') +
+        '. 입력한 값은 그대로 두었습니다 — 다시 [저장]하면 이 입력으로 새 판이 되고(그 판에서 바뀐 것은 덮어씀), [취소]하면 새 판을 봅니다.';
+    }
     function f1(v) { return v == null ? '' : (Math.round(v * 10) / 10).toFixed(1); }
 
     // ───── 화면 ─────
@@ -62,6 +85,7 @@
       }
       h += '</div></div>';
       if (S.msg) h += '<div class="notebox ' + (S.err ? 'v2-bad' : '') + '">' + esc(S.msg) + '</div>';
+      if (viewing()) h += viewNote('r', S.view);
       if (S.edit) {
         h += '<div class="card"><div class="card-title">수정하는 사람</div><div class="v2-rform">' + whoHtml('rBy', 'rPw', S.edit.by, '팀 관리 비밀번호 · 전환 기간') +
           '<label class="v2-f v2-rnote"><span class="v2-l">무엇을 왜 고쳤나<em>선택 — 변경 기록에 남음</em></span><input class="v2-in" id="rNote" autocomplete="off" value="' + esc(S.edit.note) + '" placeholder="예: 9~10월 낙찰 결과 반영"></label></div></div>';
@@ -70,7 +94,7 @@
     }
 
     function tableCard() {
-      var cells = S.edit ? S.edit.cells : teamCells(), fill = R.filled_from_neighbor || [], cnt = R.counts || [];
+      var cells = S.edit ? S.edit.cells : viewing() ? cellsOf(viewing()) : teamCells(), fill = R.filled_from_neighbor || [], cnt = R.counts || [];
       var h = '<div class="card"><div class="card-title">호가대 × 차령 기준표 <span class="hint">환산 비율(%) = 온라인 소매 호가에서 뺄 비율 · 칸 아래는 초기값과 근거 대수</span></div>' +
         '<div class="v2-tablewrap"><table class="t v2-rtbl"><thead><tr><th>무사고 시세 \\ 차령</th>' + R.age_bands.map(function (b) { return '<th>' + esc(b.label) + '</th>'; }).join('') +
         '</tr></thead><tbody>';
@@ -94,7 +118,7 @@
     }
 
     function teamCard() {
-      var list = S.edit ? S.edit.models : (S.team && S.team.models) || [];
+      var src = viewing() || S.team, list = S.edit ? S.edit.models : (src && src.models) || [];
       var h = '<div class="card"><div class="card-title">팀 수정 — 모델별 비율 <span class="hint">기준표·모델 예외보다 먼저 씁니다 · 연료를 비우면 그 모델 전체</span></div>';
       if (list.length) {
         h += '<div class="v2-tablewrap"><table class="t v2-tbl v2-mtbl"><thead><tr><th>제조사</th><th>세부모델</th><th>연료</th><th class="num">비율(%)</th><th>메모</th>' +
@@ -138,20 +162,21 @@
       var log = (S.team && S.team.log) || [];
       var h = '<div class="card"><div class="card-title">변경 기록 <span class="hint">최근 100번 · 예전 판은 180일 보관</span></div>';
       if (!log.length) return h + '<p class="v2-kv">' + (S.store ? '아직 바뀐 것이 없습니다.' : '저장소 연결 후 쌓입니다.') + '</p></div>';
+      var vr = viewing() ? S.view.rev : null;
       h += '<ul class="v2-log">' + log.slice(0, 30).map(function (l) {
-        return '<li><b>' + l.rev + '판</b> <span class="v2-dim">' + esc(RatesStore.kst(l.at)) + ' · ' + esc(l.by) + '</span>' + (l.note ? ' — ' + esc(l.note) : '') +
-          '<br><span class="v2-dim">' + esc((l.what || []).join(' · ')) + '</span></li>';
+        return '<li' + (vr === l.rev ? ' class="is-view"' : '') + '><b>' + l.rev + '판</b> <span class="v2-dim">' + esc(RatesStore.kst(l.at)) + ' · ' + esc(l.by) + '</span>' +
+          (l.note ? ' — ' + esc(l.note) : '') + revBtns('r', l, S.team, vr) + '<br><span class="v2-dim">' + esc((l.what || []).join(' · ')) + '</span></li>';
       }).join('') + '</ul>';
       return h + '</div>';
     }
 
     // ───── 기록부 감가 · 수리비 표 ─────
-    function condCur() {                                     // 지금 쓰는 값(초기값 + 팀 수정)
-      var T = ctx.cond.CT().table;
+    function condFrom(T) {                                   // 합친 표 → 화면 · 수정용 값(복사본)
       return { rows: T.rows.map(function (r) { return { key: r.key, label: r.label, '교환': r['교환'], '판금': r['판금'] }; }), once: Object.assign({}, T.once),
         repair: JSON.parse(JSON.stringify(T.repair)), band: JSON.parse(JSON.stringify(T.band)), order: T.order.slice(),
         auction: T.auction ? JSON.parse(JSON.stringify(T.auction)) : null };
     }
+    function condCur() { return condFrom(ctx.cond.CT().table); }   // 지금 쓰는 값(초기값 + 팀 수정)
     function cdCell(name, val, base, unit, attr) {           // 보기 · 고치기 칸 하나(팀이 바꾼 칸 강조, 아래 작게 초기값)
       var team = base != null && val != null && Math.abs(val - base) > 1e-9, b = base == null ? '' : f1u(base, unit);
       if (CD.edit) return '<td class="' + (team ? 'is-team' : '') + '"><input class="v2-in v2-rin" ' + attr + ' inputmode="decimal" autocomplete="off" value="' + (val == null ? '' : val) +
@@ -160,7 +185,7 @@
     }
     function f1u(v, unit) { return unit === '%' ? (Math.round(v * 10) / 10).toFixed(1) + '%' : unit === '배' ? v + '배' : unit === '×' ? '×' + (+v).toFixed(2) : unit === 'p' ? Math.round(v) + '%' : Math.round(v) + '만'; }
     function condCard() {
-      var C = CD.edit || condCur(), base = ctx.cond.base, t = CD.team;
+      var cv = CD.view && !CD.edit ? CD.view : null, C = CD.edit || (cv ? cv.C : condCur()), base = ctx.cond.base, t = CD.team;
       var h = '<div class="card" id="condCard"><div class="card-title">기록부 감가 · 수리비 표 — 팀 공용 <span class="hint">교환 · 판금은 1곳당 % · 수리필요는 수리비(만원) · 초기값은 팔린 차 중심의 매물 호가 차이(' +
         esc(base.version) + ')</span><span class="v2-actions" style="margin:0 0 0 auto">';
       if (CD.edit) h += '<button type="button" class="v2-btn" data-r="cdCancel"' + (CD.busy ? ' disabled' : '') + '>취소</button><button type="button" class="v2-btn primary" data-r="cdSave"' +
@@ -169,6 +194,7 @@
       h += '</span></div>';
       h += '<p class="v2-help">' + (t ? '팀 수정 ' + t.rev + '판 · ' + esc(RatesStore.kst(t.updated_at)) + ' ' + esc(t.updated_by || '') : '팀이 고친 것 없음(초기값)') + '</p>';
       if (CD.msg) h += '<div class="notebox ' + (CD.err ? 'v2-bad' : '') + '">' + esc(CD.msg) + '</div>';
+      if (cv) h += viewNote('cd', cv);
       if (CD.edit) h += '<div class="v2-rform">' + whoHtml('cdBy', 'cdPw', CD.edit.by, '환산 비율과 같은 비밀번호 · 전환 기간') +
         '<label class="v2-f v2-rnote"><span class="v2-l">무엇을 왜 고쳤나<em>선택</em></span><input class="v2-in" id="cdNote" autocomplete="off" value="' + esc(CD.edit.note) + '"></label></div>';
       h += '<div class="v2-two-col"><div><div class="v2-sub">교환 · 판금 — 1곳당 감가(%)</div><div class="v2-tablewrap"><table class="t v2-rtbl v2-ctbl"><thead><tr><th>부위</th><th>교환</th><th>판금</th></tr></thead><tbody>';
@@ -219,10 +245,10 @@
           '읽을 때는 외판1 → 외판2 → 골격 단계마다 그 단계까지의 곳만 세어(판금으로 읽을 때는 그 단계 교환도 판금으로) 읽은 값 중 가장 많이 깎는 값을 쓰고, 교환·판금이 있으면 상태 미상보다 덜 깎지 않습니다 — 표의 줄 순서가 어긋나도 기록부가 나쁠수록 환산가가 같거나 낮습니다.</p></div>';
       }
       h += '</div>';
-      var log = (t && t.log) || [];
-      if (log.length) h += '<ul class="v2-log">' + log.slice(0, 10).map(function (l) {
-        return '<li><b>' + l.rev + '판</b> <span class="v2-dim">' + esc(RatesStore.kst(l.at)) + ' · ' + esc(l.by) + '</span>' + (l.note ? ' — ' + esc(l.note) : '') +
-          '<br><span class="v2-dim">' + esc((l.what || []).join(' · ')) + '</span></li>';
+      var log = (t && t.log) || [], vr = cv ? cv.rev : null;
+      if (log.length) h += '<div class="v2-sub">감가 표 변경 기록 <span class="v2-dim">최근 10번 · 예전 판은 180일 보관</span></div><ul class="v2-log">' + log.slice(0, 10).map(function (l) {
+        return '<li' + (vr === l.rev ? ' class="is-view"' : '') + '><b>' + l.rev + '판</b> <span class="v2-dim">' + esc(RatesStore.kst(l.at)) + ' · ' + esc(l.by) + '</span>' +
+          (l.note ? ' — ' + esc(l.note) : '') + revBtns('cd', l, t, vr) + '<br><span class="v2-dim">' + esc((l.what || []).join(' · ')) + '</span></li>';
       }).join('') + '</ul>';
       return h + '</div>';
     }
@@ -259,9 +285,34 @@
         })
         .catch(function (err) {
           CD.busy = false; CD.err = true; CD.msg = err.message;
-          if (err.status === 409) { CD.team = err.team; CD.edit = null; ctx.cond.apply(err.team); CD.msg += ' (지금 ' + (err.team ? err.team.rev : 0) + '판)'; }
+          if (err.status === 409) { CD.team = err.team; ctx.cond.apply(err.team); CD.msg = conflictMsg(err.team); }   // 입력은 그대로(리뷰 U4-3)
+          if (CD.edit && err.status === 401) CD.edit.password = '';
           render();
         });
+    }
+    function cdStart(C, note) {                              // 감가 표 고치기 — C: 채울 값(없으면 지금 값) · note: 되돌리기면 '3판으로 되돌림'
+      var c0 = C || condCur();
+      CD.edit = { by: remember('by'), password: '', note: note || '', rows: c0.rows, once: c0.once, repair: c0.repair, band: c0.band, order: c0.order, auction: c0.auction };
+      CD.view = null; CD.err = false;
+      CD.msg = note ? note + ' — 값을 확인하고 [저장]하면 새 판이 됩니다(저장 전에는 아무것도 바뀌지 않습니다).' : '';
+      render();
+    }
+    function openRev(kind, rev, back) {                      // 예전 판 보기 · 되돌리기(리뷰 U4-3) — 되돌리기는 그 판 값을 채운 수정 화면만 연다(저장해야 새 판)
+      var St = kind === 'r' ? S : CD, have = St.view && St.view.rev === rev ? Promise.resolve(St.view.team) : RatesStore.loadRev(kind === 'r' ? API : '/api/cond', rev);
+      St.msg = rev + '판을 불러오는 중…'; St.err = false;
+      render();
+      have.then(function (team) {
+        St.msg = '';
+        if (kind === 'r') {
+          if (back) { startEdit(team, rev + '판으로 되돌림'); return; }
+          S.view = { rev: rev, team: team };
+        } else {
+          var C = condFrom(ctx.cond.tableOf(team));
+          if (back) { cdStart(C, rev + '판으로 되돌림'); return; }
+          CD.view = { rev: rev, team: team, C: C };
+        }
+        render();
+      }).catch(function (err) { St.msg = err.message; St.err = true; render(); });
     }
 
     function tryCard() {
@@ -294,10 +345,12 @@
     }
 
     // ───── 고치기 ─────
-    function startEdit() {
-      S.edit = { by: remember('by'), password: '', note: '', cells: teamCells().map(function (r) { return r.slice(); }),
-        models: ((S.team && S.team.models) || []).map(function (m) { return Object.assign({}, m); }) };
-      S.msg = '';
+    function startEdit(from, note) {                         // from: 채울 판(되돌리기, 리뷰 U4-3) — 없으면 지금 판
+      var src = from || S.team;
+      S.edit = { by: remember('by'), password: '', note: note || '', cells: cellsOf(src).map(function (r) { return r.slice(); }),
+        models: ((src && src.models) || []).map(function (m) { return Object.assign({}, m); }) };
+      S.view = null; S.err = false;
+      S.msg = note ? note + ' — 값을 확인하고 [저장]하면 새 판이 됩니다(저장 전에는 아무것도 바뀌지 않습니다).' : '';
       render();
       var f = $(me() ? 'rNote' : S.edit.by ? 'rPw' : 'rBy');
       if (f) f.focus();
@@ -345,12 +398,12 @@
         })
         .catch(function (err) {
           S.busy = false; S.err = true;
-          if (err.status === 409) {                         // 다른 사람이 먼저 저장 — 새 판을 보여 주고 다시 고치게
-            S.team = err.team; S.edit = null;
+          if (err.status === 409) {                         // 다른 사람이 먼저 저장 — 입력은 그대로 두고 무엇이 바뀌었는지 알린다(리뷰 U4-3)
+            S.team = err.team;
             RatesStore.apply(R, err.team);
             if (ctx.store) ctx.store.team = err.team;
             ctx.changed();
-            S.msg = err.message + ' (지금 ' + (err.team ? err.team.rev : 0) + '판)';
+            S.msg = conflictMsg(err.team);
           } else S.msg = err.message;
           if (S.edit && err.status === 401) S.edit.password = '';
           render();
@@ -362,12 +415,16 @@
       if (!b || b.disabled) return;
       var a = b.getAttribute('data-r');
       if (a === 'edit') startEdit();
+      else if (a === 'rView' || a === 'rBack') openRev('r', +b.getAttribute('data-rev'), a === 'rBack');
+      else if (a === 'rViewClose') { S.view = null; S.msg = ''; render(); }
+      else if (a === 'cdView' || a === 'cdBack') openRev('cd', +b.getAttribute('data-rev'), a === 'cdBack');
+      else if (a === 'cdViewClose') { CD.view = null; CD.msg = ''; render(); }
       else if (a === 'cancel') { S.edit = null; S.msg = ''; render(); }
       else if (a === 'save') save();
       else if (a === 'add') addModel();
       else if (a === 'del') { readForm(); S.edit.models.splice(+b.getAttribute('data-k'), 1); render(); }
       else if (a === 'reload') reload();
-      else if (a === 'cdEdit') { var c0 = condCur(); CD.edit = { by: remember('by'), password: '', note: '', rows: c0.rows, once: c0.once, repair: c0.repair, band: c0.band, order: c0.order, auction: c0.auction }; CD.msg = ''; render(); }
+      else if (a === 'cdEdit') cdStart();
       else if (a === 'cdCancel') { CD.edit = null; CD.msg = ''; render(); }
       else if (a === 'cdSave') cdSave();
     }

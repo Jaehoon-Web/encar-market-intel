@@ -15,8 +15,11 @@ append_history.py — 매 크롤마다 '그 시점 스냅샷'을 이력으로 �
   - 시세/분석은 '현재 매물'(ids_all)만 → build_data가 담당
   - 이력/트렌드/누적다운로드는 여기서 누적
   - 같은 차의 주간 가격 변동 추적, 사라지면 '판매완료' 태깅(더는 시세에 안 들어감)
+  - 같은 목록(같은 크롤일)으로 다시 돌면(이어받기로 상세가 더 모임) 건너뛰지 않고, 그 크롤일을 처리하기 직전 상태
+    (vehicle_state.before.json · history_redo.json 의 파일 크기)로 되돌린 뒤 다시 계산한다(리뷰 D6-8). 되돌릴 기록이 없는
+    예전 크롤일은 그대로 건너뛴다
 """
-import os, sys, json, csv, datetime, argparse
+import os, sys, json, csv, shutil, datetime, argparse
 import pandas as pd
 import numpy as np
 
@@ -28,6 +31,8 @@ HIST = os.path.join(OUT, "history.csv")
 TREND = os.path.join(OUT, "trend_snapshots.csv")
 CLEANED = os.path.join(OUT, "encar_cleaned.csv")
 IDS_ALL = os.path.join(OUT, "ids_all.json")
+STATE_BAK = os.path.join(OUT, "vehicle_state.before.json")   # 마지막 크롤일을 처리하기 직전 상태
+REDO = os.path.join(OUT, "history_redo.json")                # {date, hist, trend} — 그 직전 history.csv · trend_snapshots.csv 크기(바이트)
 
 HIST_COLS = ["차량ID","크롤일","제조사","모델","등급","연식","주행","판매가","연료","상태"]
 TREND_COLS = ["크롤일","재고수","상세수","평균가","중앙가","신규유입","판매소진",
@@ -69,15 +74,42 @@ def main():
     state = {}
     if os.path.exists(STATE):
         state = json.load(open(STATE, encoding="utf-8"))
-    # 이미 이 크롤일 처리했으면 중복 방지
-    if os.path.exists(TREND):
-        done_dates = set(pd.read_csv(TREND, encoding="utf-8-sig", usecols=["크롤일"], dtype=str)["크롤일"])
-        if crawl_date in done_dates:
-            print(f"[history] {crawl_date} 이미 처리됨 → 건너뜀")
+    redo = None
+    if os.path.exists(REDO):
+        try:
+            redo = json.load(open(REDO, encoding="utf-8"))
+        except ValueError:
+            redo = None
+    if redo and redo.get("date") == crawl_date and os.path.exists(STATE_BAK):
+        # 같은 목록으로 다시 돎 → 직전 결과를 되돌리고 다시 계산(리뷰 D6-8: 11-04 덜 받은 첫 결과로 이력이 굳어 1,578대가 빠짐)
+        short = [p for p, s in ((HIST, redo.get("hist", 0)), (TREND, redo.get("trend", 0))) if s and (not os.path.exists(p) or os.path.getsize(p) < s)]
+        if short:                                                # 기록보다 짧으면(손으로 고쳤거나 다른 복원) 건드리지 않는다
+            print(f"[history] {crawl_date} 다시 계산 못 함 — {', '.join(os.path.basename(p) for p in short)}이(가) 처리 전 기록보다 짧음 → 건너뜀")
             return
-        if not args.date and done_dates and crawl_date < max(done_dates):
-            print(f"[history] 목록 관측일 {crawl_date}이 마지막 크롤일 {max(done_dates)}보다 이름(새 목록 없음) → 건너뜀")
-            return
+        state = json.load(open(STATE_BAK, encoding="utf-8"))
+        for path, size in ((HIST, redo.get("hist", 0)), (TREND, redo.get("trend", 0))):
+            if size and os.path.exists(path):
+                os.truncate(path, size)
+            elif os.path.exists(path):
+                os.remove(path)                                  # 처리 전에는 파일이 없었다
+        print(f"[history] {crawl_date} 다시 계산 — 같은 목록으로 다시 돌아 직전 결과(이력 · 추세 행 · 차량 상태)를 되돌림")
+    else:
+        # 이미 이 크롤일 처리했으면 중복 방지(되돌릴 기록이 없는 예전 크롤일)
+        if os.path.exists(TREND):
+            done_dates = set(pd.read_csv(TREND, encoding="utf-8-sig", usecols=["크롤일"], dtype=str)["크롤일"])
+            if crawl_date in done_dates:
+                print(f"[history] {crawl_date} 이미 처리됨(되돌릴 기록 없음) → 건너뜀")
+                return
+            if not args.date and done_dates and crawl_date < max(done_dates):
+                print(f"[history] 목록 관측일 {crawl_date}이 마지막 크롤일 {max(done_dates)}보다 이름(새 목록 없음) → 건너뜀")
+                return
+        # 새 크롤일 — 처리하기 직전 상태를 남긴다(같은 목록으로 다시 돌면 여기로 되돌림)
+        if os.path.exists(STATE):
+            shutil.copyfile(STATE, STATE_BAK)
+        else:
+            json.dump({}, open(STATE_BAK, "w", encoding="utf-8"))
+        json.dump({"date": crawl_date, "hist": os.path.getsize(HIST) if os.path.exists(HIST) else 0,
+                   "trend": os.path.getsize(TREND) if os.path.exists(TREND) else 0}, open(REDO, "w", encoding="utf-8"))
 
     new_rows = []          # history.csv 에 추가할 행
     new_cnt = 0

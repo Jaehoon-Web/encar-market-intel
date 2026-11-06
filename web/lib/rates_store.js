@@ -7,6 +7,7 @@
  *   RatesStore.load('/api/rates').then(function (s) { s.store; s.writable; s.team; });   // 실패해도 { store: false }
  *   RatesStore.apply(rates, team);   // rates(초기값 객체)에 팀 수정을 합친다 → PriceEngine 이 그대로 읽는다
  *   RatesStore.save('/api/rates', { password, rev, by, note, cells, models }) → Promise(새 team)  · 실패 시 Error(status·team)
+ *   RatesStore.loadRev('/api/rates' | '/api/cond', N) → Promise(N판 team) — ⚙ 이 판 보기 · 되돌리기(리뷰 U4-3), 없으면(180일 지남) Error
  */
 (function (root) {
   'use strict';
@@ -17,6 +18,15 @@
       if (!r.ok || ct.indexOf('application/json') < 0) return { store: false, writable: false, team: null };   // 정적 배포는 index.html 이 올 수 있다
       return r.json().then(function (j) { return { store: !!j.store, writable: !!j.writable, team: j.team || null }; });
     }).catch(function () { return { store: false, writable: false, team: null }; });
+  }
+
+  function loadRev(api, rev) {                               // 예전 판 하나 — 없거나 못 읽으면 오류(화면에 그대로 알림)
+    return fetch(api + '?rev=' + encodeURIComponent(rev), { cache: 'no-store' }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (r.ok && j.ok && j.team) return j.team;
+        throw new Error(r.status === 404 ? rev + '판이 없습니다(예전 판은 180일 보관)' : (j.error || rev + '판을 불러오지 못했습니다(' + r.status + ')'));
+      });
+    });
   }
 
   // 팀 수정 합치기: 모델별 비율(연료를 적은 규칙 먼저) · 팀이 고친 기준표 칸 · 판 정보
@@ -56,7 +66,7 @@
     return s;
   }
 
-  var api = { load: load, apply: apply, save: save, label: label, kst: kst };
+  var api = { load: load, loadRev: loadRev, apply: apply, save: save, label: label, kst: kst };
   root.RatesStore = api;
   if (typeof module === 'object' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

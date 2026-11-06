@@ -197,6 +197,17 @@ def status():
     else:
         overall = "진행 중"
 
+    alerts = []                                                 # 확인 필요(리뷰 D6-10): 주간 실행 시작 못 함 · 사이트 점검으로 배포 멈춤 · bat 실패(8일 안)
+    for name in ("WEEKLY_NOT_STARTED.txt", "DEPLOY_BLOCKED.txt"):
+        p = os.path.join(LOGDIR, name)
+        if os.path.exists(p):
+            alerts.append(" ".join(read_lines(p))[:600])
+    wb = os.path.join(LOGDIR, "weekly_bat.log")
+    if os.path.exists(wb) and time.time() - os.path.getmtime(wb) < 8 * 86400:
+        last = read_lines(wb)[-1:]
+        if last:
+            alerts.append("주간 실행 파일(weekly_update.bat): " + last[0][:300])
+
     return {
         "overall": overall, "mode": mode, "log": os.path.basename(path),
         "started": started.strftime("%m-%d %H:%M") if started else None,
@@ -204,7 +215,7 @@ def status():
         "lastWrite": mtime.strftime("%H:%M:%S"),
         "lastWriteAgoSec": int((dt.datetime.now() - mtime).total_seconds()),
         "procs": procs, "ids": ids[-1] if ids else None,
-        "steps": steps, "stage2": s2, "stage3": s3, "issues": issues,
+        "steps": steps, "stage2": s2, "stage3": s3, "issues": issues, "alerts": alerts,
         "siteDate": site_date(), "now": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
@@ -264,6 +275,7 @@ def render(s):
 <title>엔카 크롤 진행</title><style>{CSS}</style></head><body><div class="wrap">
 <h1>엔카 크롤링 진행 상황</h1>
 <div class="sub">30초마다 자동 새로고침 · {e(s['now'])} · 로그 {e(s['log'])}</div>
+{('<div class="card" style="border-color:var(--bad)"><h2 style="color:var(--bad)">확인 필요</h2><ul>' + "".join(f"<li>{e(a)}</li>" for a in s["alerts"]) + '</ul></div>') if s.get("alerts") else ""}
 <div class="card hero"><span class="badge" style="background:{OVERALL.get(s['overall'], 'var(--wait)')}">{e(s['overall'])}</span>
 <div class="kv"><div><span>실행 모드</span><b>{e(s['mode'])}</b></div>
 <div><span>시작 · 경과</span><b>{e(s['started'] or '-')} · {el // 60 if el else 0}시간 {el % 60 if el else 0}분</b></div>

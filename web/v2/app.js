@@ -2168,6 +2168,7 @@
       markMode('rates');
       if (!RV) RV = V2Rates.create({ X: X, ENG: ENG, esc: esc, man: man, store: X.store, changed: function () {},   // 한 대 산정은 돌아갈 때 다시 계산
         cond: { base: X.model.cond, store: X.condStore, CT: function () { return CTB; },                  // 기록부 감가 · 수리비 표(기획 v2.32)
+          tableOf: function (team) { return CondTable.create(X.model).apply(team).table; },            // 예전 판을 초기값에 합친 전체 표(⚙ 이 판 보기 · 되돌리기, 리뷰 U4-3)
           apply: function (team) {                         // 표가 바뀌면 비교 매물 감가도 다시(모델별로 계산해 둔 것을 비움)
             X.condStore.team = team; CTB.apply(team);
             Object.keys(GROUPS).forEach(function (f) { GROUPS[f].cache = {}; });

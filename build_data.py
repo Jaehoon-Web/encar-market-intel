@@ -558,11 +558,12 @@ def _n(v):
     return v
 def _i(v):
     return int(v) if pd.notna(v) else None
+OBS_FIX = {"2026-10-26": "2026-10-21"}   # 2026-10 회차는 목록 10/21 · 상세 완료 10/26 — 목록 날짜로(market_index.py 와 같음, 리뷰 U4-15)
 if os.path.exists(_trend_csv):
     ts = pd.read_csv(_trend_csv, encoding="utf-8-sig")
     for _, r in ts.iterrows():
         crawl_snaps.append({
-            "date": str(r["크롤일"]),
+            "date": OBS_FIX.get(str(r["크롤일"]), str(r["크롤일"])),
             "inventory": _i(r["재고수"]), "detailed": _i(r["상세수"]),
             "avgPrice": _n(r["평균가"]), "medPrice": _n(r["중앙가"]),
             "newIn": _i(r["신규유입"]), "soldOut": _i(r["판매소진"]),
@@ -660,17 +661,38 @@ dump("meta.json", meta)
 def to_excel_csv(df, name):
     df.to_csv(os.path.join(OUT_DL, name), index=False, encoding="cp949", errors="replace")
 
-# 다운로드 CSV 1: 모델 시세 요약
-rows = []
-for mk, mv in tree.items():
-    for md, nd in mv["models"].items():
-        rows.append({
-            "제조사": mk, "모델": md, "매물수": nd["count"],
-            "최저(P10)": nd["p10"], "P25": nd["p25"], "중앙값(P50)": nd["p50"],
-            "P75": nd["p75"], "최고(P90)": nd["p90"],
-            "중앙주행km": nd["medMileage"], "중앙연식": nd["medYear"], "평균잔존율": nd["avgResidual"],
-        })
-to_excel_csv(pd.DataFrame(rows).sort_values("매물수", ascending=False), "model_price_summary.csv")
+# 다운로드 CSV 1: 모델 시세 요약 — 사이트 · market_models.csv · residual_curves.csv 와 같은 이름(제조사 · 모델 · 세부모델 = 경매 4단계,
+#   리뷰 U4-15). 매물 원래 이름은 '매물_모델'(여러 개면 많은 순 3개). 이름표(prep/listings.parquet)가 없으면 예전처럼 매물 이름으로 묶는다.
+#   통계는 models.json 과 같은 규칙: 시세 표본(l2p) · 제조사 5대 · 세부모델 3대 이상 · 분위는 판매가.
+def model_summary():
+    d = l2p[["vehicle_id", "manufacturer", "model", "sale_price", "mileage", "form_year", "residual"]].copy()
+    d["모델"], d["세부모델"] = "", d["model"]
+    _lp = os.path.join(SRC, "prep", "listings.parquet")
+    if os.path.exists(_lp):
+        import pyarrow.parquet as _pq
+        if {"모델그룹", "모델"} <= set(_pq.read_schema(_lp).names):
+            nm = pd.read_parquet(_lp, columns=["모델그룹", "모델"])
+            nm.index = nm.index.astype(str)
+            k = d["vehicle_id"].astype(str)
+            d["세부모델"] = k.map(nm["모델"]).fillna(d["model"])
+            d["모델"] = k.map(nm["모델그룹"]).fillna("")
+    out = []
+    for mk, msub in d.groupby("manufacturer"):
+        if len(msub) < 5:
+            continue
+        for (grp, md), s in msub.groupby(["모델", "세부모델"]):
+            q = quantiles(s["sale_price"]) if len(s) >= 3 else None
+            if not q:
+                continue
+            vc = s["model"].value_counts()
+            out.append({"제조사": mk, "모델": grp, "세부모델": md, "매물수": int(len(s)),
+                        "최저(P10)": q["p10"], "P25": q["p25"], "중앙값(P50)": q["p50"], "P75": q["p75"], "최고(P90)": q["p90"],
+                        "중앙주행km": int(s["mileage"].dropna().median()) if s["mileage"].notna().any() else None,
+                        "중앙연식": int(s["form_year"].dropna().median()) if s["form_year"].notna().any() else None,
+                        "평균잔존율": round(float(s["residual"].dropna().mean()), 1) if s["residual"].notna().any() else None,
+                        "매물_모델": " · ".join(vc.index[:3]) + (f" 외 {len(vc) - 3}" if len(vc) > 3 else "")})
+    return pd.DataFrame(out).sort_values("매물수", ascending=False)
+to_excel_csv(model_summary(), "model_price_summary.csv")
 
 # 다운로드 CSV 2: 지역 요약
 to_excel_csv(pd.DataFrame(insights["region"]).rename(columns={
@@ -715,10 +737,13 @@ if os.path.exists(_hist):
     _old = os.path.join(OUT_DL, "history_accumulated.csv")   # 압축 전환 이전 산출물 제거
     if os.path.exists(_old):
         os.remove(_old)
-# 다운로드 CSV 6: 크롤일별 시장 추세 집계
+# 다운로드 CSV 6: 수집 회차별 시장 추세 집계 — 날짜는 market_index.csv 와 같은 '목록관측일'(리뷰 U4-15).
+#   2026-10 회차만 상세 수집이 끝난 10/26로 기록돼 있어 목록을 받은 10/21로 고쳐 낸다(market_index.py OBS_FIX 와 같음 · 원본은 그대로)
 _ts = os.path.join(SRC, "trend_snapshots.csv")
 if os.path.exists(_ts):
-    to_excel_csv(pd.read_csv(_ts, encoding="utf-8-sig"), "trend_snapshots.csv")
+    _t = pd.read_csv(_ts, encoding="utf-8-sig", dtype={"크롤일": str})
+    _t["크롤일"] = _t["크롤일"].replace(OBS_FIX)
+    to_excel_csv(_t.rename(columns={"크롤일": "목록관측일"}), "trend_snapshots.csv")
 
 for fn in os.listdir(OUT_DL):
     print(f"  [dl] {fn}  ({os.path.getsize(os.path.join(OUT_DL, fn))/1024:.0f} KB)")

@@ -70,6 +70,12 @@ NET_FAIL_PAUSE_RATIO = 0.5
 NET_FAIL_PAUSE_SEC   = 300
 # 위 상황이 이 횟수만큼 연속되면 2단계 중단(exit 3) → 이후 단계(이력·빌드·배포) 진행 안 함, --resume 으로 재개
 NET_FAIL_MAX_CONSEC  = 3
+# 2단계를 마쳤는데 네트워크 실패로 상세를 못 받은 차가 이번 회차 신규의 1%(최소 100대)를 넘으면 exit 4 → 이력 · 빌드 · 배포 전에
+# 감시 작업이 --resume 으로 다시 받게 한다(리뷰 D6-8: 11-04 2,483대를 남긴 채 이력이 굳음). 같은 목록에서 2번 멈춘 뒤에는
+# 남아도 진행(회사망 차단 등으로 그 주 갱신이 통째로 멈추지 않게) — 회차별 기록은 details_incomplete.json
+INCOMPLETE_RATE = 0.01
+INCOMPLETE_MIN = 100
+INCOMPLETE_MAX_STOPS = 2
 
 # ─────────────────────────────────────────────────────
 #  API 페이지네이션 실제 한계: ~10,000 unique/쿼리
@@ -975,6 +981,10 @@ async def stage2_collect_details(car_list: List[dict],
 
     pending = [c for c in car_list if c["id"] not in done_ids]
     log.info(f"상세 수집 대상: {len(pending):,}대  (완료: {len(done_ids):,}대)")
+    inc_path = OUTPUT_DIR / "details_incomplete.json"           # {stamp, new(이번 회차 처음 상세 대상 수), stops} — 같은 목록 이어받기에서도 처음 기준으로
+    inc = load_json(inc_path) or {}
+    if inc.get("stamp") != stamp:
+        inc = {"stamp": stamp, "new": len(pending), "stops": 0}
 
     sem = asyncio.Semaphore(CONCURRENCY_DETAIL)
 
@@ -1115,6 +1125,18 @@ async def stage2_collect_details(car_list: List[dict],
         log.info("상세 리다이렉트 도착지: " + ", ".join(f"{u} {n:,}" for u, n in landed.most_common(5)))
     if net_fail_total:
         log.warning(f"상세 네트워크 실패 {net_fail_total:,}대 → done 미기록, 다음 실행 때 재수집")
+    if not limit:                                               # 남은 차가 많으면 이력 · 배포 전에 다시 받기(리뷰 D6-8)
+        left_net = sum(1 for c in car_list if c["id"] not in done_ids)
+        bar = max(INCOMPLETE_MIN, int(inc["new"] * INCOMPLETE_RATE))
+        if left_net > bar and inc["stops"] < INCOMPLETE_MAX_STOPS:
+            inc["stops"] += 1
+            save_json(inc, inc_path)
+            log.error(f"상세를 못 받은 차 {left_net:,}대 — 이번 회차 신규 {inc['new']:,}대의 {left_net / max(1, inc['new']):.1%}(기준 {bar:,}대) "
+                      f"→ 이력 · 빌드 · 배포 전에 멈춤(exit 4), 감시 작업이 --resume 으로 다시 받음 ({inc['stops']}/{INCOMPLETE_MAX_STOPS}번째)")
+            raise SystemExit(4)
+        if left_net > bar:
+            log.warning(f"상세를 못 받은 차 {left_net:,}대가 남았지만 같은 목록에서 {INCOMPLETE_MAX_STOPS}번 멈춘 뒤라 진행(다음 주간 실행이 다시 받음)")
+        save_json(inc, inc_path)
     return list(existing.values())
 
 
