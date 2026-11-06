@@ -18,10 +18,18 @@
   function rand() { var s = ''; for (var i = 0; i < 16; i++) s += 'abcdefghijklmnopqrstuvwxyz0123456789'.charAt(Math.floor(Math.random() * 36)); return s; }
   function cut(v, n) { return String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, n); }
 
+  var seen = false;
   location.search.replace(/[?&](notrack|trackdev)=([01])/g, function (m, k, v) {   // 주소로 켜고 끄기(관리자 화면이 생기기 전에도)
     put(k === 'notrack' ? 'cr_notrack' : 'cr_trackdev', v === '1' ? '1' : null);
+    seen = true;
     return m;
   });
+  if (seen && window.history && history.replaceState) {      // 기억한 뒤 주소에서 지운다 — 주소를 복사해 보내도 받은 사람이 통계에서 빠지지 않게(리뷰 11-05)
+    var q = location.search, q0;
+    do { q0 = q; q = q.replace(/([?&])(notrack|trackdev)=[01](&|$)/, function (m, a, k, b) { return b ? a : ''; }); } while (q !== q0);
+    q = q.replace(/[?&]$/, '');
+    try { history.replaceState(history.state, '', location.pathname + q + location.hash); } catch (e) { /* 못 지워도 산정은 된다 */ }
+  }
   var local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
   var noop = function () {};
   var CT = { on: false, screen: noop, result: noop, pick: noop, depth: noop, miss: noop, ev: noop, err: noop };

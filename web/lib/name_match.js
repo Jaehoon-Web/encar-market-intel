@@ -24,8 +24,11 @@
   var MAKER_EXTRA = { '현대': ['현대자동차', 'HYUNDAI'], '기아': ['기아자동차', 'KIA'], '제네시스': ['GENESIS'],
     'KG모빌리티(쌍용)': ['쌍용', 'KGM', 'SSANGYONG'], '르노코리아(삼성)': ['르노삼성', '르노', 'RENAULT'],
     '쉐보레(GM대우)': ['쉐보레', 'GM대우', '대우', 'CHEVROLET'], '벤츠': ['메르세데스', 'MERCEDES', 'BENZ'], 'BMW': [], '아우디': ['AUDI'] };
-  var FUEL = [['PHEV', /PHEV|플러그인/], ['HEV', /HEV|하이브리드|HYBRID/], ['EV', /(^|[^A-Z])EV([^A-Z0-9]|$)|전기|일렉트릭/],
-    ['LPG', /LPG|LPI|LPLI|LPE/], ['디젤', /디젤|DIESEL|CRDI|VGT|TDI/], ['가솔린', /가솔린|GASOLINE|GDI|MPI|TSI|TFSI/], ['수소', /수소/]];
+  // 연료 단서 — '하브'(하이브리드 줄임)·HYB 도, '전기형'(초기형)은 전기차가 아님(리뷰 11-05: K8 하브 → 가솔린, 코나 전기형 → 일렉트릭으로 읽던 결함)
+  var FUEL = [['PHEV', /PHEV|플러그인/], ['HEV', /HEV|하이브리드|HYBRID|하브|HYB(?![A-Z])/], ['EV', /(^|[^A-Z])EV([^A-Z0-9]|$)|전기(?![형])|일렉트릭/],
+    ['LPG', /LPG|LPI|LPLI|LPE|엘피지/], ['디젤', /디젤|DIESEL|CRDI|VGT|TDI|경유/], ['가솔린', /가솔린|GASOLINE|GDI|MPI|TSI|TFSI|휘발유/], ['수소', /수소/]];
+  // 특수 등급(어린이보호차 · 캠핑카 · 장애인용 …)은 입력에 그 낱말이 있을 때만 — 스타렉스 12인승이 어린이보호차로 가던 결함(리뷰 11-05)
+  var SPECIAL = /어린이|보호차|캠핑|캠퍼|냉동|냉장|탑차|윙바디|장애인|휠체어|구급|앰뷸런스|교습|택시|영업용|덤프|크레인|청소차|소방|경찰|운구|장의/;
   var AWD = /4MATIC|4매틱|XDRIVE|X드라이브|콰트로|QUATTRO|HTRAC|에이치트랙|4MOTION|4모션|ALL4|4WD|AWD|4륜|사륜/;
   var TWD = /2WD|FWD|RWD|전륜|후륜|2륜/;
   var DRIVE_GLUE = /(4MATIC|XDRIVE|SDRIVE|QUATTRO|HTRAC|4MOTION|ALL4|4WD|AWD|2WD|FWD|RWD)/g;   // E220D4MATIC → E220D 4MATIC
@@ -238,7 +241,8 @@
       var phrase = function (s) { return up(s).replace(/[\s\-_.,·:;()\[\]\/]/g, ''); }, whole = phrase(text);
       var list = Object.keys(cnt).map(function (k) {
         var p = k.split('|'), g = F.grades[+p[0]], t = F.trims[+p[1]], r = scoreGT(g, t);
-        Object.keys(encOf[k] || {}).sort(function (a, b) { return encOf[k][b] - encOf[k][a]; }).slice(0, 3).forEach(function (ei) {
+        Object.keys(encOf[k] || {}).filter(function (ei) { return encOf[k][ei] >= Math.max(2, cnt[k] * 0.05); })   // 한두 대짜리 다른 표기는 빼고(리뷰 11-05: 모델3 롱레인지)
+          .sort(function (a, b) { return encOf[k][b] - encOf[k][a]; }).slice(0, 3).forEach(function (ei) {
           var e = String(F.enc[+ei] || '').split('|');                    // '매물 모델|매물 등급|매물 세부등급' — 엑셀이 매물 표기면 이것과 더 잘 맞는다
           if (e.length < 3) return;
           var x = scoreGT(e[1], e[2]);
@@ -267,6 +271,14 @@
         if (ph.length >= 3 && whole.indexOf(ph) >= 0) s += 0.5;               // 등급 이름이 적힌 그대로 들어 있으면(낱말 순서 · 팩2 ↔ 팩1)
         var tw = words(t), done = {}, glue = '|' + f.rest.join('|');        // glue = 등급 낱말에 안 맞고 남은 글(노블레스스페셜 의 스페셜)
         var pre = function (x, w) { return x === w || (x.length >= 2 && w.length >= 2 && (x.indexOf(w) === 0 || w.indexOf(x) === 0)); };
+        var gw = words(g + ' ' + t);                                          // 띄어 쓴 등급 이름을 붙여 쓴 입력(롱 레인지 ↔ 롱레인지, 리뷰 11-05)
+        for (var q = 0; q + 1 < gw.length; q++) {
+          var two = gw[q] + gw[q + 1];
+          if (!/[가-힣]/.test(two) || two.length < 3 || done[gw[q]] || whole.indexOf(two) < 0 || f.words.indexOf(gw[q]) >= 0) continue;
+          s += 2.5; ev++; done[gw[q]] = done[gw[q + 1]] = 1;
+          if (tw.indexOf(gw[q]) >= 0 || tw.indexOf(gw[q + 1]) >= 0) trimHit = true;
+        }
+        if (SPECIAL.test(up(g + ' ' + t)) && !SPECIAL.test(up(text))) s -= 3;   // 특수 등급은 입력에 그 낱말이 있을 때만
         f.words.forEach(function (w) {                                       // 앞부분만 써도 맞다(캘리 → 캘리그래피). 한 글자는 똑같을 때만
           var hit = cf.words.filter(function (x) { return pre(x, w); });
           if (!hit.length) { glue += '|' + w; return; }

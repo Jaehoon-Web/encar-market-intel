@@ -38,6 +38,8 @@ PX_FLAGS = ["더미가", "인수금의심", "가격이상", "핵심결측", "연
 PX_RATIO = (0.5, 2.0)                # 한 주 가격 이번 ÷ 지난이 이 밖이면 호가 오타·자리값으로 보고 뺀다(n_bad)
 PX_GAP_DIFF = 2                      # 같은 매물 가격 변화의 지난주 값: 이번·지난 구간 길이 차이가 2일 이하일 때만
 MOVER_ON, MOVER_N = 100, 5           # 주목할 모델: 판매중 100대 이상, 구분마다 5개
+MOVER_START = 50                     # 빨리 팔리는 · 쌓이는: 판매율 표본(구간 시작 판매중)도 50대 이상 · 새로 수집(new_cov)은 빼고(리뷰 11-05: 스파크 32대로 1위)
+REVISED_PCT = 3                      # 지난주 판매가 발표 뒤 이만큼(%) 넘게 다시 계산되면 알림(market_index.json published)
 FAST, SLOW = 1.15, 0.87              # 빨리 팔리는 · 쌓이는: 모델 판매율 ÷ 차급 판매율
 TREND_MIN_D, TREND_K = 0.5, 2.0      # 시세 오름·내림: |d| ≥ max(0.5, 2·se)
 SE_MED = 1.2533                      # 가운데 값의 흔들림 계수 — 점 하나의 se = 지수 × 1.2533 × σ ÷ √n
@@ -223,7 +225,7 @@ def movers(mm, prev, date, wk):
             continue
         base = {"maker": m["maker"], "group": m.get("group", ""), "model": m["model"], "seg": m["seg"], "origin": m["origin"], "on": m["on"]}
         sr = segs.get(f"{m['seg']}·{m['origin']}", {})
-        if speed_ok and m.get("rate_w") is not None and sr.get("rate_w"):
+        if speed_ok and m.get("rate_w") is not None and sr.get("rate_w") and m.get("n_start", 0) >= MOVER_START and not m.get("new_cov"):
             ratio = m["rate_w"] / sr["rate_w"]
             if ratio >= FAST:
                 L["fast"].append(dict(base, rate_w=m["rate_w"], seg_rate=sr["rate_w"], ratio=round(ratio, 2), _k=-ratio))
@@ -270,8 +272,9 @@ def fast_model(mm, prev, date, wk):
     segs, best = mm.get("segments", {}), None
     for m in mm["models"]:
         sr = segs.get(f"{m['seg']}·{m['origin']}", {})
-        r, rs = m.get("rate_w"), sr.get("rate_w")
-        if m.get("on", 0) < MOVER_ON or r is None or not rs or r / rs < FAST or not beats(r, m["on"], rs, sr.get("n_start"), 0):
+        r, rs, ns = m.get("rate_w"), sr.get("rate_w"), m.get("n_start") or 0
+        if (m.get("on", 0) < MOVER_ON or r is None or not rs or r / rs < FAST or ns < MOVER_START or m.get("new_cov")
+                or not beats(r, ns, rs, sr.get("n_start"), 0)):   # 흔들림은 판매율 표본(시작 판매중)으로
             continue
         if best is None or (r / rs, m["on"]) > (best["ratio"], best["on"]):
             best = dict(m, ratio=r / rs, seg_rate=rs)
@@ -506,6 +509,20 @@ def px_note(po, date, prev, pp, wk, pwk, days, pdays, has_px, has_pxp):
     return None
 
 
+def revised_note(mi, p, prev, wk):
+    """지난주 판매가 발표 뒤 다시 계산돼(재등록 매물 확인) 3% 넘게 바뀌었으면 알린다 — 지난주 대비는 다시 계산한 값과 비교하므로
+    지난주 발표와 방향이 달라 보일 수 있다(리뷰 11-05). 이번 주 판매는 잠정치(다음 주 재등록 확인으로 조금 줄 수 있음)"""
+    if not wk or not p:
+        return None
+    pub = ((mi.get("published") or {}).get(prev) or {}).get("전체|전체") or {}
+    v0, v1 = pub.get("sold_w"), p.get("sold_w")
+    head = "이번 주 판매는 잠정치입니다(다음 주에 다시 올라온 매물이 확인되면 조금 줄 수 있습니다)."
+    if v0 and v1 and abs(v1 / v0 - 1) >= REVISED_PCT / 100:
+        return (f"{md(prev)} 판매는 발표 때 주 {v0:,}대였으나 다시 올라온 매물이 확인돼 {v1:,}대로 다시 계산됐습니다 — "
+                f"지난주 대비는 다시 계산한 값과 비교합니다. " + head)
+    return head
+
+
 def notes_of(mi, G, po, date, prev, pp, days, pdays, wk, pwk):
     cr, a = mi["crawls"], mi["series"]["전체|전체"]
     e, p = point(a, date) or {}, (point(a, prev) or {}) if wk else {}
@@ -526,6 +543,7 @@ def notes_of(mi, G, po, date, prev, pp, days, pdays, wk, pwk):
     out += jn_notes(e, p, q, date, wk, pwk)
     out.append(pause_note(date, fut))
     out.append(px_note(po, date, prev, pp, wk, pwk, days, pdays, g0["px"] is not None, g0["px_prev"] is not None))
+    out.append(revised_note(mi, p, prev, wk))
     m = re.search(r"7월 범위 밖 ([\d,]+)대", cr[-1].get("note") or "")
     if m:
         both = len(cr) >= 2 and "7월 범위 밖" in (cr[-2].get("note") or "")

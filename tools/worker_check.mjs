@@ -155,6 +155,15 @@ r = await ccall(env, 'PUT', { password: '팀비번-2026', rev: 2, by: '김팀원
   auction: { band: { '외판': [0.5, 1, 1.2, 1.4] } }, repair: { '환산반영': 30.4 } });
 ok(r.status === 200 && r.body.team.rev === 3 && r.body.team.repair['환산반영'] === 30 && r.body.team.log[0].what.join() === '환산가 반영 비율 → 30%',
    '환산가에 빼는 수리비 몫 저장 → 3판(정수 · 변경 기록 한 줄, Q261)', r.body);
+{                                                            // 리뷰 11-05: 저장은 기본표와 다른 칸만(기본표를 다시 맞추면 나머지는 새 기본값) · 단계 판금 빈칸 = 초기값(감가가 사라지지 않게)
+  const t3 = r.body.team;
+  r = await ccall(env, 'PUT', Object.assign({ password: '팀비번-2026', rev: 3, by: '김팀원' }, t3, { rows: [{ key: '외판1', '교환': -2.5, '판금': null }] }));
+  const t = r.body && r.body.team, o1 = t && t.rows.find(x => x.key === '외판1');
+  ok(r.status === 200 && t.rev === 4 && o1 && o1['교환'] === -2.5 && !('판금' in o1) && t.rows.length === 1 && Object.keys(t.once).length === 0 &&
+     t.band['골격'] && !t.band['외판'] && t.repair['환산반영'] === 30 && Object.keys(t.repair).length === 2 && Object.keys(t.repair.outside).length === 0 &&
+     t.auction.count.every(x => x === null) && t.log[0].what.some(w => /외판1 교환/.test(w)) && !t.log[0].what.some(w => /판금/.test(w)),
+  '바뀐 칸만 저장 · 판금 빈칸은 초기값(외판1 판금 감가가 남음)', t);
+}
 
 console.log('[이용 통계 기록 /api/ev (기획 v2.28)]');
 const U = 'abcdefgh12345678', SI = 'session000000001';

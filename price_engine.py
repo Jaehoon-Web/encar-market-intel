@@ -37,6 +37,7 @@ DATA = os.path.join(ROOT, "web", "data")
 REPORT = os.path.join(PREP, "price_engine_report.txt")
 SITE = os.path.join(DATA, "comps")                               # 사이트용 비교 매물 파일 — 매주 auto_update가 web/data와 함께 커밋
 PARITY = os.path.join(PREP, "_engine_parity.json")
+DWELL_GAP_MAX = 16                                               # 판매를 알아챈 간격(마지막 관측 → 사라진 회차)이 이보다 길면 체류일을 비운다(market_index.GAP_MAX 와 같음)
 RUNNER = os.path.join(ROOT, "tools", "price_engine_parity.js")
 NAME_EXTRA = ["이름근거", "구동", "인승", "용도", "엔카_모델그룹", "엔카_모델", "엔카_등급", "엔카_세부등급"]
 NAME_Q = {"정확": 0, "가까운 이름": 1, "엔카 이름": 2}     # 차 이름 4단계(기획 v2.23)
@@ -707,6 +708,9 @@ def export(pool):
     now_ym = int(now_date[:4]) * 100 + int(now_date[5:7])
     base = pd.to_datetime(pd.Series(np.where(pool["sold"], pool["판매추정일"].astype(str), now_date), index=pool.index))
     start = base - pd.to_timedelta(pool["체류일"], unit="D")
+    # 판매를 16일 넘게 지나 알아챈 매물(수집 공백 뒤)은 판매일을 몰라 체류일을 비운다 — ds 가 없으면 사이트도 체류일을 빼고 센다(리뷰 11-05: 83일 공백으로 2~4배)
+    late = pool["sold"] & ((base - pd.to_datetime(seen, errors="coerce")).dt.days > DWELL_GAP_MAX)
+    start = start.where(~late)
     pool = pool.assign(grp=site_groups(pool),
                        om=np.where(pool["sold"], seen.str[:4].astype(int) * 100 + seen.str[5:7].astype(int), 0),
                        tk=np.where(pool["sold"], pool["origin"] + "|" + seen, ""),
@@ -716,7 +720,7 @@ def export(pool):
     segs = {}                                                                        # 모델 요약의 차급 평균(비교 매물 기준)
     for s, g in pool.groupby("seg"):
         on, so = g[~g["sold"]], g[g["sold"]]
-        dw = so["체류일"].median()
+        dw = so.loc[so["ds"] != "", "체류일"].median()                                 # 판매일을 아는 판매만
         segs[s] = {"onsale": int(len(on)), "sold": int(len(so)), "cut": round(float((on["첫가격"] > on["price"]).mean()), 4) if len(on) else None,
                    "dwell": None if dw != dw else int(round(dw))}
     labels = sorted(pool["사고라벨"].fillna("미상").unique())

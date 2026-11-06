@@ -35,6 +35,9 @@ IDS_ALL = os.path.join(SRC, "ids_all.json")
 LIST_COUNTS = os.path.join(PREP, "list_counts.csv")
 OUT_JSON = os.path.join(ROOT, "web", "data", "market_index.json")
 OUT_MODELS = os.path.join(ROOT, "web", "data", "market_models.json")   # 차종 비교(세부모델별 시장 숫자)
+GAP_MAX = 16                          # 판매를 알아챈 간격(마지막 관측 → 사라진 회차)이 이보다 길면 판매일을 몰라 체류일에서 뺀다(판매속도 구간 5~16일과 같은 상한)
+NEW_COV_DAYS = 28                     # 새로 수집 판정 · 인하 표본: 처음 본 지 4주
+N_START_MIN = 50                      # 빠름 · 느림 판정 · 주목할 모델에 쓰는 판매율 표본(구간 시작 판매중) 하한(리뷰 11-05: 스파크 32대로 '쌓이는 모델 1위')
 DL = os.path.join(ROOT, "web", "downloads")                             # 데이터 탭 내려받기(CSV)
 REPORT = os.path.join(PREP, "market_index_report.txt")
 COEF = os.path.join(ROOT, "web", "data", "adj_coef.json")
@@ -255,7 +258,8 @@ def stock(L, crawls, obs, total, LC, ivs, keys, jn):
                 v = float(total[c]) if key[1] == "전체" else part.get(("국산", key[1]), 0) + part.get(("수입", key[1]), 0)
             else:
                 v = part.get(key, 0.0)
-            tab[(key, c)] = (v, True, 0.0)
+            fx = jn_add(key) if o in jn else 0.0                                   # 전남광주가 빠진 회차는 추정에도 더한다(리뷰 11-05: 7/30 재고가 보정 없이 들어가 '강세'가 생김)
+            tab[(key, c)] = (v + fx, True, fx)
     base_dates = [c for c in crawls if BASE[0] <= obs[c].strftime("%Y-%m-%d") <= BASE[1]]
     out = {}
     for key in keys:
@@ -402,15 +406,23 @@ def model_stats(L, crawls, obs, ivs, d):
     on = L[(L["첫관측일"] <= c) & (L["마지막관측일"] >= c)].copy()
     on["ok"] = ~bad_price(on) & (on["현재가"] >= 100)
     on["cut"] = on["현재가"] < on["첫가격"]
+    # 인하는 첫 호가부터 본 매물(등록 7일 안에 처음 봄)이나 4주 넘게 본 매물로만 — 새로 수집한 제조사의 오래된 매물은 처음 본 값이 이미 내린 값이라 인하가 0에 가깝다(리뷰 11-05)
+    on["cut_ok"] = ((on["첫관측일"] - on["엔카등록일"]).dt.days <= 7) | ((c - on["첫관측일"]).dt.days >= NEW_COV_DAYS)
+    # 새로 수집: 판매중 대부분이 최근 4주 안에 처음 보였는데 등록은 그보다 오래 — 수집 범위가 넓어져 잡힌 매물(판매 · 인하 · 체류가 아직 없다)
+    on["newcov"] = ((c - on["첫관측일"]).dt.days < NEW_COV_DAYS) & ((on["첫관측일"] - on["엔카등록일"]).dt.days > 7)
     sold = L[(L["판매추정일"] > c - pd.Timedelta(days=90)) & (L["판매추정일"] <= c) & (L["상태"] != "재등록")]
-    dwell = sold.groupby(["제조사", "모델"])["체류일"].median()
+    # 체류일은 판매를 16일 안에 알아챈 매물로만 — 수집이 83일 비었던 뒤(10/26)에 알아챈 판매는 판매일을 모르는데 그 날로 잡혀 체류일이 2~4배 길어졌다(리뷰 11-05)
+    known = sold[(sold["판매추정일"] - sold["마지막관측일"]).dt.days <= GAP_MAX]
+    dwell = known.groupby(["제조사", "모델"])["체류일"].median()
+    n_dwell = known.groupby(["제조사", "모델"]).size()
     n_sold90 = sold.groupby(["제조사", "모델"]).size()
     iv = ivs[-1] if ivs and ivs[-1]["c"] == c else None
-    rate = None
+    rate = n_start = None
     if iv is not None:
         g = iv["st"].groupby(["제조사", "모델"])["sold"].agg(["size", "sum"])
         g = g[g["size"] >= 10]
         rate = (1 - (1 - g["sum"] / g["size"]) ** (7 / iv["days"])).rename("rate")
+        n_start = g["size"]                                                           # 판매율 표본(구간 시작 판매중) — 빠름·느림 판정은 이것이 넉넉할 때만
     d = d.assign(key=d["제조사"] + "|" + d["모델"])
     base = d[d["obs"].between(*BASE)].groupby("key")["dev"].agg(["median", "size"])
     now = d[d["첫관측일"] == c].groupby("key")["dev"].agg(["median", "size"])
@@ -422,13 +434,19 @@ def model_stats(L, crawls, obs, ivs, d):
     for (mk, m), g in on.groupby(["제조사", "모델"]):
         k = f"{mk}|{m}"
         okp = g.loc[g["ok"], "현재가"]
+        cg = g.loc[g["cut_ok"], "cut"]
         r = {"maker": mk, "group": grp.get((mk, m), ""), "model": m, "seg": g["seg"].mode().iat[0], "origin": g["origin"].mode().iat[0],
              "on": int(len(g)), "price": int(round(okp.median())) if len(okp) else None,
-             "cut": round(float(g["cut"].mean()), 3), "sold90": int(n_sold90.get((mk, m), 0))}
-        if (mk, m) in dwell.index and n_sold90.get((mk, m), 0) >= 5:
+             "cut": round(float(cg.mean()), 3) if len(cg) >= 10 else None, "sold90": int(n_sold90.get((mk, m), 0))}
+        ns = int(n_start[(mk, m)]) if n_start is not None and (mk, m) in n_start.index else 0
+        if len(g) >= 20 and g["newcov"].mean() >= 0.5 and ns < N_START_MIN:
+            r["new_cov"] = True                                                   # 새로 수집 + 지켜본 표본이 적음 — 판매 · 인하 · 체류는 몇 주 뒤부터(화면은 '새로 수집'으로)
+        if (mk, m) in dwell.index and n_dwell.get((mk, m), 0) >= 5:
             r["dwell"] = int(round(dwell[(mk, m)]))
+            r["dwell_n"] = int(n_dwell[(mk, m)])
         if rate is not None and (mk, m) in rate.index:
             r["rate_w"] = round(float(rate[(mk, m)]), 4)
+            r["n_start"] = int(n_start[(mk, m)])
             if r["rate_w"] > 0:
                 r["weeks"] = round(1 / r["rate_w"], 1)
         if k in pidx.index:
@@ -441,7 +459,7 @@ def model_stats(L, crawls, obs, ivs, d):
         for (s, o), r in g[g["size"] >= 30].iterrows():
             rw = 1 - (1 - r["sum"] / r["size"]) ** (7 / iv["days"])
             segs[f"{s}·{o}"] = {"rate_w": round(float(rw), 4), "weeks": round(1 / rw, 1) if rw > 0 else None, "n_start": int(r["size"])}
-    sd = sold.groupby(["seg", "origin"])["체류일"].agg(["median", "size"])
+    sd = known.groupby(["seg", "origin"])["체류일"].agg(["median", "size"])
     for (s, o), r in sd[sd["size"] >= 5].iterrows():
         segs.setdefault(f"{s}·{o}", {})["dwell"] = int(round(r["median"]))
     info = {"date": oc.strftime("%Y-%m-%d"), "models": len(rows), "segments": segs,
@@ -590,6 +608,35 @@ def report(series, log, LC, L, crawls, obs):
     return text
 
 
+PUB_KEYS = ["전체|전체", "국산|전체", "수입|전체"]
+PUB_FIELDS = ["sold_w", "판매속도", "시황", "on"]
+PUB_SEED = {"2026-10-28": {"전체|전체": {"sold_w": 15784, "판매속도": 121.1, "시황": 108.9, "on": 122087},   # 10/28 배포(1684b61) 때 발표한 값
+                           "국산|전체": {"sold_w": 10833, "판매속도": 127.6, "시황": 113.0, "on": 80265},
+                           "수입|전체": {"sold_w": 4951, "판매속도": 109.3, "시황": 100.8, "on": 41822}}}
+
+
+def published(series):
+    """회차마다 처음 발표한 값(마지막 회차의 판매 · 판매속도 · 시황 · 판매중) — 매주 전체를 다시 계산하므로 지난주 값이 바뀌면
+    마켓 펄스가 '발표 때 → 다시 계산' 을 알린다(리뷰 11-05). 이미 있는 날짜는 그대로 둔다(처음 발표한 값)"""
+    pub = json.loads(json.dumps(PUB_SEED))
+    try:
+        with open(OUT_JSON, encoding="utf-8") as f:
+            old = json.load(f)
+        for d, v in (old.get("published") or {}).items():
+            pub.setdefault(d, v)
+        for k in PUB_KEYS:                                                          # 지난 실행의 마지막 회차 = 그때 발표한 값
+            pts = (old.get("series") or {}).get(k) or []
+            if pts and pts[-1].get("date") not in pub or (pts and k not in pub.get(pts[-1].get("date"), {})):
+                pub.setdefault(pts[-1]["date"], {})[k] = {f: pts[-1][f] for f in PUB_FIELDS if pts[-1].get(f) is not None}
+    except (OSError, ValueError):
+        pass
+    for k in PUB_KEYS:                                                              # 이번 실행의 마지막 회차(처음이면 지금 값이 발표값)
+        pts = series.get(k) or []
+        if pts and k not in pub.get(pts[-1]["date"], {}):
+            pub.setdefault(pts[-1]["date"], {})[k] = {f: pts[-1][f] for f in PUB_FIELDS if pts[-1].get(f) is not None}
+    return {d: pub[d] for d in sorted(pub)[-26:]}                                   # 반년치만
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     t0 = datetime.datetime.now()
@@ -597,7 +644,8 @@ def main():
     with open(COEF, encoding="utf-8") as f:
         C = json.load(f)
     series, log, LC, (models, minfo), psig = build(L, crawls, obs, total, C)
-    out = {"version": datetime.date.today().isoformat(), "base_period": list(BASE),
+    pub = published(series)
+    out = {"version": datetime.date.today().isoformat(), "base_period": list(BASE), "published": pub,
            "note": "온라인 매물로 계산한 시황 지수(기획안 5.2.1). 기준기간 = 100. 날짜는 목록 관측일. 매주 전체를 다시 계산한다",
            "definitions": {
                "시세": "신규 매물(등록 7일 이내) 첫 호가를 기준기간의 같은 모델·등급·세부등급 신규 매물과 비교. 성능감가율·D3 계수(차령·주행·색상·렌트)로 조건을 맞춘 뒤 차이의 중앙값",
@@ -617,7 +665,10 @@ def main():
         f.write("\n")
     mout = {"version": out["version"], "date": minfo["date"], "speed_interval": minfo["speed_interval"],
             "note": "세부모델별 시장 숫자(기획안 5.2.4). on = 판매중 확인 · price = 중앙 호가 · cut = 첫 호가보다 내린 매물 비율 · "
-                    "sold90·dwell = 최근 90일 판매 대수·중위 체류일(5대 이상) · rate_w = 최근 판매속도 구간의 주간 판매율(시작 10대 이상) · "
+                    "sold90 = 최근 90일 판매 대수 · dwell = 그중 판매를 16일 안에 알아챈 매물의 중위 체류일(dwell_n = 대수, 5대 이상) · "
+                    "cut = 첫 호가부터 본(등록 7일 안에 처음 본) 매물이나 4주 넘게 본 매물 중 내린 비율(10대 이상) · "
+                    "new_cov = 판매중 절반 이상이 최근 4주 안에 새로 수집된 오래된 매물이고 판매율 표본(n_start)이 50대 미만(판매 · 인하 · 체류는 몇 주 뒤부터) · "
+                    "rate_w = 최근 판매속도 구간의 주간 판매율(시작 10대 이상, n_start = 시작 대수) · "
                     "weeks = 재고 소진 주수(1 ÷ 주간 판매율) · pidx = 신규 매물 시세(기준기간 = 100, 양쪽 10대 이상) · "
                     "segments = 차급·국산수입별 같은 정의의 rate_w·weeks(시작 30대 이상)·dwell · "
                     "ps = 세부모델 회차별 시세지수 [trend_dates 번호, 지수, 신규 대수](기준기간·회차 모두 10대 이상, 이틀 안 회차는 한 점) · "

@@ -72,7 +72,7 @@
     function tableCard() {
       var cells = S.edit ? S.edit.cells : teamCells(), fill = R.filled_from_neighbor || [], cnt = R.counts || [];
       var h = '<div class="card"><div class="card-title">호가대 × 차령 기준표 <span class="hint">환산 비율(%) = 온라인 소매 호가에서 뺄 비율 · 칸 아래는 초기값과 근거 대수</span></div>' +
-        '<div class="v2-tablewrap"><table class="t v2-rtbl"><thead><tr><th>추정 시세 \\ 차령</th>' + R.age_bands.map(function (b) { return '<th>' + esc(b.label) + '</th>'; }).join('') +
+        '<div class="v2-tablewrap"><table class="t v2-rtbl"><thead><tr><th>무사고 시세 \\ 차령</th>' + R.age_bands.map(function (b) { return '<th>' + esc(b.label) + '</th>'; }).join('') +
         '</tr></thead><tbody>';
       R.price_bands.forEach(function (p, i) {
         h += '<tr><td><b>' + esc(p.label) + '</b></td>';
@@ -265,7 +265,7 @@
 
     function tryCard() {
       return '<div class="card"><div class="card-title">시험 계산 <span class="hint">지금 비율로 환산가가 얼마나 나오는지</span></div><div class="v2-rtry">' +
-        '<label class="v2-f"><span class="v2-l">추정 시세(만원)</span><input class="v2-in" id="rTryPrice" inputmode="numeric" value="2000"></label>' +
+        '<label class="v2-f"><span class="v2-l">무사고 시세(만원)</span><input class="v2-in" id="rTryPrice" inputmode="numeric" value="2000"></label>' +
         '<label class="v2-f"><span class="v2-l">차령(년)<em>올해 − 연식</em></span><input class="v2-in" id="rTryAge" inputmode="numeric" value="4"></label>' +
         '<label class="v2-f"><span class="v2-l">세부모델<em>선택</em></span><input class="v2-in" id="rTryModel" list="rModelsTry" autocomplete="off" placeholder="모델별 비율·예외 확인"></label>' +
         '<label class="v2-f"><span class="v2-l">연료<em>선택</em></span><select class="filter-select" id="rTryFuel"><option value="">—</option>' + FUELS.map(function (f) { return '<option>' + f + '</option>'; }).join('') + '</select></label>' +
@@ -282,10 +282,11 @@
 
     function render() {
       if (!el) return;
+      if (el.firstChild) { readForm(); cdRead(); }            // 다시 그리기 전에 두 표의 입력을 상태로 옮긴다(리뷰 11-05: 다른 표 단추 한 번에 입력이 사라지던 결함)
       el.innerHTML = head() + tableCard() + teamCard() + '<div class="v2-two-col">' + tryCard() + exCard() + '</div>' + logCard() + (ctx.cond ? condCard() : '') +
         '<p class="v2-help">적용 순서: 한 대 산정에서 직접 넣은 비율 → 팀 수정(모델별) → 모델 예외(기준표 값 ± 가감) → 호가대×차령 기준표(팀이 고친 칸 우선). ' +
           '기준표는 칸 가운데(호가대 가운데 만원 · 차령 가운데 해) 사이를 이어서 읽습니다 — 예: 추정 1,900만·6년이면 1~2천·2~3천, 5~6년·7~9년 네 칸을 거리만큼 섞어 씁니다. ' +
-        '환산가 = 추정 시세 × (1 − 환산 비율) − 수리비(수리필요 표준 수리비는 위 감가 표의 \'환산가에 빼는 몫\'만큼).</p>';
+        '환산가 = 무사고 시세 × (1 − 경매 기준 사고 감가) × (1 − 환산 비율) − 수리비(직접 입력 전부 + 수리필요 표준 수리비는 위 감가 표의 \'환산가에 빼는 몫\'만큼). 상태 미상이면 사고 감가는 추정 시세와 같게.</p>';
       if (S.edit && $('rPw')) $('rPw').value = S.edit.password;   // 비밀번호는 화면 글(속성)에 남기지 않는다
       if (CD.edit && $('cdPw')) $('cdPw').value = CD.edit.password;
       tryCalc();
@@ -337,6 +338,7 @@
           S.busy = false; S.edit = null; S.team = team; S.err = false;
           S.msg = team.rev + '판으로 저장했습니다. 지금 열린 산정 화면에도 바로 적용됩니다(묶음 산정은 [산정하기]를 다시 누르면 반영).';
           RatesStore.apply(R, team);
+          if (ctx.store) ctx.store.team = team;            // 다른 화면에 갔다 와도 새 판으로(리뷰 11-05: 저장 전 판이 보여 다시 저장하면 409)
           ctx.changed();
           render();
         })
@@ -345,6 +347,7 @@
           if (err.status === 409) {                         // 다른 사람이 먼저 저장 — 새 판을 보여 주고 다시 고치게
             S.team = err.team; S.edit = null;
             RatesStore.apply(R, err.team);
+            if (ctx.store) ctx.store.team = err.team;
             ctx.changed();
             S.msg = err.message + ' (지금 ' + (err.team ? err.team.rev : 0) + '판)';
           } else S.msg = err.message;
@@ -375,6 +378,7 @@
       return RatesStore.load(API).then(function (s) {
         S.loaded = true; S.store = s.store; S.writable = s.writable; S.team = s.team;
         RatesStore.apply(R, s.team);
+        if (ctx.store) ctx.store.team = s.team;
         render();
       });
     }
@@ -388,7 +392,7 @@
         el.addEventListener('keydown', onKey);
       }
       S.loaded = !!ctx.store;
-      if (ctx.store) { S.store = ctx.store.store; S.writable = ctx.store.writable; S.team = ctx.store.team; }
+      if (ctx.store) { S.store = ctx.store.store; S.writable = ctx.store.writable; if (!S.team || (ctx.store.team && ctx.store.team.rev >= S.team.rev)) S.team = ctx.store.team; }   // 더 새 판을 덮지 않는다
       if (ctx.cond && ctx.cond.store) { CD.store = ctx.cond.store.store; CD.writable = ctx.cond.store.writable; CD.team = ctx.cond.store.team; }
       render();
     }

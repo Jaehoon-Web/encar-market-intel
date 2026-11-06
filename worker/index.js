@@ -197,15 +197,52 @@ function mulIn(v, lo, hi, name) {                              // 배수 — lo~
 function buildCond(cur, body, base, now) {
   const by = str(body.by, 30);
   if (!by) throw new Error('수정하는 사람 이름을 넣어 주세요');
+  const v = condValues(body, base), b0 = condValues({}, base);
+  let p = b0;
+  if (cur) { try { p = condValues(cur, base); } catch (e) { p = b0; } }           // 지난 판(바뀐 칸만 저장한 판 · 예전의 전체 표 모두)을 전체 표로
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b), what = [];
+  v.rows.forEach((x, i) => ['교환', '판금'].forEach(s => { if (p.rows[i][s] !== x[s]) what.push(x.key + ' ' + s + ' ' + p.rows[i][s] + ' → ' + x[s] + '%'); }));
+  Object.keys(v.once).forEach(k => { if (p.once[k] !== v.once[k]) what.push('한 번 ' + k + ' ' + p.once[k] + ' → ' + v.once[k] + '%'); });
+  ['외판', '골격'].forEach(g => { if (!same(p.band[g], v.band[g])) what.push('차값 배수 ' + g + ' ' + v.band[g].join(' · ')); });
+  if (!same(p.order, v.order)) what.push('곳 배수 ' + v.order.join(' · '));
+  if (v.auction) {
+    v.auction.count.forEach((row, i) => { if (!same(p.auction.count[i], row)) what.push('경매 감가 ' + base.auction.classes[i] + ' ' + row.join(' · ') + '%'); });
+    ['band', 'age'].forEach(k => ['외판', '골격'].forEach(g => { if (!same(p.auction[k][g], v.auction[k][g])) what.push('경매 ' + (k === 'band' ? '차값' : '연식') + ' 배수 ' + g + ' ' + v.auction[k][g].join(' · ')); }));
+  }
+  Object.keys(v.repair).forEach(k => {
+    if (k === 'outside') Object.keys(v.repair.outside).forEach(c => { if (p.repair.outside[c] !== v.repair.outside[c]) what.push('수리비 ' + c + ' → ' + v.repair.outside[c] + '만'); });
+    else if (p.repair[k] !== v.repair[k]) what.push(k === '환산반영' ? '환산가 반영 비율 → ' + v.repair[k] + '%' : '수리비 ' + k + ' → ' + v.repair[k] + (k === '수입배수' ? '배' : '만'));
+  });
+  if (!what.length) throw new Error('바뀐 것이 없습니다');
+  // 저장은 기본표와 다른 칸만 — 기본표를 분기마다 다시 맞춰도 팀이 고친 칸만 남고 나머지는 새 기본값을 따른다(리뷰 11-05: 한 번 저장하면 표 전체가 고정되던 결함)
+  const team = { rows: v.rows.map((x, i) => { const o = { key: x.key }; ['교환', '판금'].forEach(s => { if (x[s] !== b0.rows[i][s]) o[s] = x[s]; }); return o; })
+    .filter(o => Object.keys(o).length > 1), once: {}, band: {}, repair: { outside: {} } };
+  Object.keys(v.once).forEach(k => { if (v.once[k] !== b0.once[k]) team.once[k] = v.once[k]; });
+  ['외판', '골격'].forEach(g => { if (!same(v.band[g], b0.band[g])) team.band[g] = v.band[g]; });
+  if (!same(v.order, b0.order)) team.order = v.order;
+  if (v.auction) {
+    team.auction = { count: v.auction.count.map((row, i) => same(row, b0.auction.count[i]) ? null : row), band: {}, age: {} };
+    ['band', 'age'].forEach(k => ['외판', '골격'].forEach(g => { if (!same(v.auction[k][g], b0.auction[k][g])) team.auction[k][g] = v.auction[k][g]; }));
+  }
+  Object.keys(v.repair).forEach(k => {
+    if (k === 'outside') Object.keys(v.repair.outside).forEach(c => { if (v.repair.outside[c] !== b0.repair.outside[c]) team.repair.outside[c] = v.repair.outside[c]; });
+    else if (v.repair[k] !== b0.repair[k]) team.repair[k] = v.repair[k];
+  });
+  const rev = (cur ? cur.rev : 0) + 1, note = str(body.note, 200);
+  const log = [{ rev, at: now, by, note, what: what.slice(0, 40) }].concat((cur && cur.log) || []).slice(0, MAX_LOG);
+  return Object.assign({ rev, updated_at: now, updated_by: by, base: base.version || null, log }, team);
+}
+function condValues(body, base) {                              // 보낸 칸 + 기본표 → 검사 · 정리한 전체 표. 빈칸은 초기값(리뷰 11-05: 단계 판금을 비우면 그 감가가 사라지던 결함)
+  const has = (o, k) => !!o && k in o && o[k] !== null && o[k] !== undefined && o[k] !== '';
   const rows = base.rows.map(b => {
     const t = (Array.isArray(body.rows) ? body.rows : []).find(x => x && x.key === b.key) || {};
-    const ex = pctIn('교환' in t ? t['교환'] : b['교환'], -30, b.label + ' 교환');
-    const pg = ('판금' in t ? t['판금'] : b['판금']) === null ? null : pctIn('판금' in t ? t['판금'] : b['판금'], -30, b.label + ' 판금');
+    const ex = pctIn(has(t, '교환') ? t['교환'] : b['교환'], -30, b.label + ' 교환');
+    const pv = has(t, '판금') ? t['판금'] : b['판금'], pg = pv === null || pv === undefined ? null : pctIn(pv, -30, b.label + ' 판금');   // 판금 빈칸은 기본표도 비어 있는 줄만
     if (pg !== null && ex > pg) throw new Error(b.label + ': 교환은 판금보다 같거나 더 깎여야 합니다');
     return { key: b.key, '교환': ex, '판금': pg };
   });
   const o = body.once || {}, once = {};
-  ['사고', '골격'].forEach(k => { once[k] = pctIn(k in o ? o[k] : base.once[k], -20, '한 번 감가 ' + k); });
+  ['사고', '골격'].forEach(k => { once[k] = pctIn(has(o, k) ? o[k] : base.once[k], -20, '한 번 감가 ' + k); });
   const bd = body.band || {}, band = {}, bl = base.band.labels || [];               // 차값 배수(v2.33 Q241)
   ['외판', '골격'].forEach(g => { band[g] = base.band[g].map((v, j) => mulIn(Array.isArray(bd[g]) && bd[g][j] != null ? bd[g][j] : v, 0.3, 2, '차값 배수 ' + g + ' ' + (bl[j] || j))); });
   const order = base.order.map((v, j) => mulIn(Array.isArray(body.order) && body.order[j] != null ? body.order[j] : v, 0.3, 1, (j + 1) + '번째 곳 배수'));   // Q243
@@ -221,40 +258,18 @@ function buildCond(cur, body, base, now) {
   }
   const r = body.repair || {}, repair = { outside: {} };
   Object.keys(base.repair).forEach(k => {
-    if (k === 'outside') Object.keys(base.repair.outside).forEach(c => { repair.outside[c] = wonIn(r.outside && c in r.outside ? r.outside[c] : base.repair.outside[c], '수리비 ' + c); });
+    if (k === 'outside') Object.keys(base.repair.outside).forEach(c => { repair.outside[c] = wonIn(has(r.outside, c) ? r.outside[c] : base.repair.outside[c], '수리비 ' + c); });
     else if (k === '수입배수') {
-      const n = Number(k in r ? r[k] : base.repair[k]);
+      const n = Number(has(r, k) ? r[k] : base.repair[k]);
       if (!Number.isFinite(n) || n < 1 || n > 5) throw new Error('수입 배수는 1~5 사이로 넣어 주세요');
       repair[k] = Math.round(n * 10) / 10;
     } else if (k === '환산반영') {                                                  // 환산가에 빼는 수리필요 수리비 몫(%, Q261)
-      const n = Number(k in r ? r[k] : base.repair[k]);
-      if (r[k] === '' || r[k] === null || !Number.isFinite(n) || n < 0 || n > 100) throw new Error('환산가 반영 비율은 0~100(%) 사이로 넣어 주세요');
+      const n = Number(has(r, k) ? r[k] : base.repair[k]);
+      if (!Number.isFinite(n) || n < 0 || n > 100) throw new Error('환산가 반영 비율은 0~100(%) 사이로 넣어 주세요');
       repair[k] = Math.round(n);
-    } else repair[k] = wonIn(k in r ? r[k] : base.repair[k], '수리비 ' + k);
+    } else repair[k] = wonIn(has(r, k) ? r[k] : base.repair[k], '수리비 ' + k);
   });
-  const prev = cur || { rows: base.rows, once: base.once, repair: base.repair, band: base.band, order: base.order, auction: base.auction && { count: base.auction.count, band: base.auction.band, age: base.auction.age } }, what = [];
-  rows.forEach(x => {
-    const p = (prev.rows || []).find(y => y.key === x.key) || {};
-    ['교환', '판금'].forEach(s => { if (p[s] !== x[s]) what.push(x.key + ' ' + s + ' ' + p[s] + ' → ' + x[s] + '%'); });
-  });
-  Object.keys(once).forEach(k => { if ((prev.once || {})[k] !== once[k]) what.push('한 번 ' + k + ' ' + (prev.once || {})[k] + ' → ' + once[k] + '%'); });
-  const pb = prev.band || base.band, po = prev.order || base.order, same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-  ['외판', '골격'].forEach(g => { if (!same(pb[g], band[g])) what.push('차값 배수 ' + g + ' ' + band[g].join(' · ')); });
-  if (!same(po, order)) what.push('곳 배수 ' + order.join(' · '));
-  if (auction) {
-    const pa = prev.auction || base.auction;
-    auction.count.forEach((row, i) => { if (!same((pa.count || [])[i], row)) what.push('경매 감가 ' + base.auction.classes[i] + ' ' + row.join(' · ') + '%'); });
-    ['band', 'age'].forEach(k => ['외판', '골격'].forEach(g => { if (!same(((pa[k] || {})[g]), auction[k][g])) what.push('경매 ' + (k === 'band' ? '차값' : '연식') + ' 배수 ' + g + ' ' + auction[k][g].join(' · ')); }));
-  }
-  Object.keys(repair).forEach(k => {
-    if (k === 'outside') Object.keys(repair.outside).forEach(c => { if (((prev.repair || {}).outside || {})[c] !== repair.outside[c]) what.push('수리비 ' + c + ' → ' + repair.outside[c] + '만'); });
-    else if (((prev.repair || {})[k] === undefined ? base.repair[k] : prev.repair[k]) !== repair[k])
-      what.push(k === '환산반영' ? '환산가 반영 비율 → ' + repair[k] + '%' : '수리비 ' + k + ' → ' + repair[k] + (k === '수입배수' ? '배' : '만'));
-  });
-  if (!what.length) throw new Error('바뀐 것이 없습니다');
-  const rev = (cur ? cur.rev : 0) + 1, note = str(body.note, 200);
-  const log = [{ rev, at: now, by, note, what: what.slice(0, 40) }].concat((cur && cur.log) || []).slice(0, MAX_LOG);
-  return Object.assign({ rev, updated_at: now, updated_by: by, rows, once, band, order, repair, log }, auction ? { auction } : {});
+  return { rows, once, band, order, auction, repair };
 }
 async function condPut(request, env) {
   if (!env.RATES) return json({ ok: false, error: '저장소(KV)가 아직 연결되지 않았습니다' }, 503);

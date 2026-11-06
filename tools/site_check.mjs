@@ -2,7 +2,8 @@
 //   node tools/site_check.mjs
 // 1) index.html 이 부르는 파일이 다 있는지  2) 데이터 파일이 읽히고 필요한 항목이 있는지(비교 매물·지수·차종 비교·내려받기)
 // 3) 라이브러리를 실제 데이터로 한 번씩 돌려 보기(성능 표기 읽기 → 차명 매칭 → 시세 산정 → 환산 비율 팀 수정 → 엑셀)
-// 하나라도 틀리면 종료 코드 1
+// 하나라도 틀리면 종료 코드 1, 배포를 막아야 하는 점검(★ — 화면 파일 · 비교 매물 파일 · 25MiB · 출처 이름 · 스크립트 문법 · JSON 읽기)이 틀리면 2
+// (auto_update.py 는 2이면 그 주 배포를 멈추고 지난주 사이트를 그대로 둔다 — 리뷰 11-05)
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -12,8 +13,9 @@ const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const WEB = path.join(ROOT, 'web'), V2 = path.join(WEB, 'v2'), DATA = path.join(WEB, 'data');
 const require = createRequire(import.meta.url);
 const read = p => JSON.parse(fs.readFileSync(p, 'utf8'));
-let fail = 0, n = 0;
-function ok(cond, name, extra) { n++; if (!cond) fail++; console.log((cond ? '  ✓ ' : '  ✗ ') + name + (cond || extra === undefined ? '' : ' — ' + extra)); }
+let fail = 0, n = 0, crit = 0;
+function ok(cond, name, extra, block) { n++; if (!cond) { fail++; if (block) crit++; } console.log((cond ? '  ✓ ' : '  ✗ ') + (block ? '★ ' : '') + name + (cond || extra === undefined ? '' : ' — ' + extra)); }
+process.on('uncaughtException', e => { console.error('\n★ 점검 중 오류(파일을 읽지 못함): ' + (e && e.stack || e)); process.exit(2); });   // JSON이 깨졌거나 파일이 없으면 배포를 막는다
 function section(t) { console.log('[' + t + ']'); }
 
 section('화면 파일');
@@ -22,7 +24,7 @@ for (const page of ['index.html', 'v2/index.html']) {
   const h = fs.readFileSync(path.join(WEB, page), 'utf8'), dir = path.dirname(path.join(WEB, page));
   const refs = [...h.matchAll(/(?:src|href)="([^"#:]+)"/g)].map(m => m[1]).filter(r => !/^(https?:)?\/\//.test(r));
   const missing = refs.filter(r => !fs.existsSync(path.join(dir, r)));
-  ok(!missing.length, `${page}이 부르는 파일 ${refs.length}개가 모두 있음`, missing.join(', '));
+  ok(!missing.length, `${page}이 부르는 파일 ${refs.length}개가 모두 있음`, missing.join(', '), true);
 }
 const html = fs.readFileSync(path.join(WEB, 'index.html'), 'utf8'), v2html = fs.readFileSync(path.join(V2, 'index.html'), 'utf8');
 for (const f of ['app.js', 'batch.js', 'rates.js', 'market.js', 'pulse.js', 'curve.js', 'data.js', 'auth.js', 'members.js']) ok(html.includes(`src="v2/${f}"`) && v2html.includes(`src="${f}"`), `${f}를 부름(기본 주소·/v2/)`);
@@ -34,9 +36,9 @@ ok(/<title>카리스마R/.test(html) && /카리스마R/.test(v2html) && html.inc
 section('데이터 파일');
 const idx = read(path.join(DATA, 'comps', 'index.json'));
 const groupFiles = idx.makers.flatMap(m => m.groups.map(g => g.file));
-ok(idx.engine && idx.engine.steps && idx.makers.length > 20, `비교 매물 index.json (제조사 ${idx.makers.length}, 모델그룹 ${groupFiles.length})`);
+ok(idx.engine && idx.engine.steps && idx.makers.length > 20, `비교 매물 index.json (제조사 ${idx.makers.length}, 모델그룹 ${groupFiles.length})`, undefined, true);
 const noFile = groupFiles.filter(f => !fs.existsSync(path.join(DATA, 'comps', f)));
-ok(!noFile.length, '모델그룹 파일이 모두 있음', noFile.slice(0, 5).join(', '));
+ok(!noFile.length, '모델그룹 파일이 모두 있음', noFile.slice(0, 5).join(', '), true);
 const models = idx.makers.flatMap(m => m.groups.flatMap(g => g.models));
 ok(models.every(m => m.y0 && m.y1 && m.y0 <= m.y1), `세부모델 ${models.length}개 모두 연도 범위(y0·y1)`);
 ok(idx.engine.stale && idx.engine.stale.tau > 0 && ['A', 'B', 'C'].every(g => idx.engine.range_k && idx.engine.range_k[g].length === 3 && idx.engine.range_k[g].every(k => k >= 0.8 && k <= 3)),
@@ -103,7 +105,7 @@ const head = new TextDecoder('euc-kr').decode(fs.readFileSync(path.join(WEB, 'do
 ok(head.startsWith('제조사,모델,세부모델'), 'CSV가 CP949(엑셀용)로 읽힘', head);
 const big = fs.readdirSync(path.join(WEB, 'downloads')).concat(fs.readdirSync(DATA).map(f => '../data/' + f))
   .filter(f => { const p = path.join(WEB, 'downloads', f); return fs.statSync(p).isFile() && fs.statSync(p).size > 25 * 1048576; });
-ok(!big.length, '배포 파일 25MiB 한도 안', big.join(', '));
+ok(!big.length, '배포 파일 25MiB 한도 안', big.join(', '), true);
 // 데이터 탭은 회원에게 요약 파일만(로그인 기획 Q288) — 매물 단위 원자료 2개는 목록에서 빼고, /downloads/* 는 Worker가 먼저 받아 회원만 · 요약만 준다.
 // 마켓 펄스 자료와 비교 매물도 Worker가 먼저 받는다(잠금 · 로그인하지 않은 한도). 잠금 켜기는 [vars] AUTH_ENFORCE.
 const shells = ['index.html', path.join('v2', 'index.html')].map(f => fs.readFileSync(path.join(WEB, f), 'utf8'));
@@ -125,7 +127,7 @@ const ALLOW = 'fem.encar.com/cars/detail/', srcHit = [];
     if (/엔카|encar/i.test(t)) srcHit.push(path.relative(WEB, p));
   }
 })(WEB);
-ok(!srcHit.length, '공개 파일에 출처 사이트 이름 없음(원문 매물 링크 주소만 예외)', srcHit.slice(0, 8).join(', '));
+ok(!srcHit.length, '공개 파일에 출처 사이트 이름 없음(원문 매물 링크 주소만 예외)', srcHit.slice(0, 8).join(', '), true);
 const gone = ['old.html', 'app.js', 'README.md', 'dataset.json', 'insights.json', 'inventory.json', 'models.json', 'pricing.json', 'trend.json']
   .map(f => f.endsWith('.json') ? 'data/' + f : f).filter(f => fs.existsSync(path.join(WEB, f)));
 ok(!gone.length, '이전 사이트 파일·이전 사이트 전용 데이터가 공개 폴더에 없음', gone.join(', '));
@@ -161,12 +163,12 @@ const XW = require(path.join(WEB, 'lib', 'xlsx_writer.js'));
 for (const f of ['batch.js', 'rates.js', 'market.js', 'pulse.js', 'curve.js', 'data.js']) {
   let e = null;
   try { require(path.join(V2, f)); } catch (err) { e = err; }
-  ok(!e, `${f} 읽힘`, e && e.message);
+  ok(!e, `${f} 읽힘`, e && e.message, true);
 }
 for (const f of ['app.js', 'track.js', 'admin.js', 'auth.js', 'members.js']) {   // 화면을 그리는 파일은 여기서 실행할 수 없어 문법만 본다(리뷰 11-05 · 로그인 기획)
   let e = null;
   try { new (require('node:vm').Script)(fs.readFileSync(path.join(V2, f), 'utf8'), { filename: f }); } catch (err) { e = err; }
-  ok(!e, `${f} 문법`, e && e.message);
+  ok(!e, `${f} 문법`, e && e.message, true);
 }
 {                                                            // 주소(해시) 값은 남이 만든 링크일 수 있다 — 연·월은 숫자만 받는다(공유 링크로 스크립트가 들어가던 결함, 11-05)
   const app = fs.readFileSync(path.join(V2, 'app.js'), 'utf8');
@@ -194,6 +196,12 @@ const nm = NM.create(idx);
 const res = nm.model('더 뉴 그랜저 IG 2.5 프리미엄', 2020);
 ok(res.best && res.best.model === '더 뉴그랜저IG' && res.conf === 'high', `차명 매칭 → ${res.best && res.best.model} (${res.conf})`);
 const CT = CTB.create(read(path.join(DATA, 'inspection_model.json')));
+{                                                            // 팀 감가 표는 바뀐 칸만 담긴다(리뷰 11-05) — 담기지 않은 칸은 기본표 값
+  const m = read(path.join(DATA, 'inspection_model.json')), b = CTB.create(m).apply(null).table, t = CTB.create(m).apply({ rows: [{ key: '후드', '교환': -5 }], band: {}, once: {}, repair: { outside: {} } }).table;
+  const hood = x => x.rows.find(r => r.key === '후드'), out1 = x => x.rows.find(r => r.key === '외판1');
+  ok(hood(t)['교환'] === -5 && hood(t)['판금'] === hood(b)['판금'] && out1(t)['판금'] === out1(b)['판금'] && JSON.stringify(t.band) === JSON.stringify(b.band) &&
+     JSON.stringify(t.order) === JSON.stringify(b.order) && JSON.stringify(t.repair) === JSON.stringify(b.repair), '팀 감가 표: 바뀐 칸만 덮고 나머지는 기본표');
+}
 const eng = PE.create({ config: idx.engine, coef, rates, cond: CT });
 const G = eng.group(read(path.join(DATA, 'comps', res.best.file)));
 const gr = nm.grade(G, res.best.model, '더 뉴 그랜저 IG 2.5 프리미엄');
@@ -271,8 +279,33 @@ const ft = B.formTSV().split(/\r?\n/);
 ok(ft.length === 3 && ft[0].split('\t').length === 8 && ft[0].startsWith('차량번호\t차명\t최초등록\t주행거리') && ft[0].endsWith('판매 가격'), '묶음 산정 양식(머리글 8열 — 판매 가격 포함 + 예시 2대, 탭 구분)', ft[0]);
 const t = B.parseTSV('차명\t주행\n"그랜저\nIG"\t3.8만');
 ok(t.length === 2 && t[1][0] === '그랜저 IG', '엑셀 붙여넣기(줄바꿈 든 칸)');
+{                                                            // 묶음 산정 입력 읽기(리뷰 11-05) — 따옴표 글자 · 머리글 단위 · 꾸밈 벗기기 · 바탕색 먼저
+  const q = B.parseTSV('12가3456\t"\t2019-03\n34나5678\t그랜저\t2020-01\n56다7890\t쏘나타\t2021-01');
+  ok(q.length === 3 && q[0][1] === '"' && q[2][1] === '쏘나타', '닫히지 않은 따옴표는 글자로(뒤 줄이 한 칸으로 합쳐지지 않음)', JSON.stringify(q));
+  ok(B.kmOf('8.6', 1e4) === 86000 && B.priceOf('17,500', 0.1) === 1750 && B.costOf('1,500', 0.1) === 150 && B.priceOf('18,500,000', 1e-4) === 1850,
+    '머리글 단위로 읽기((만km) · (천원) · (원))');
+  ok(B.priceOf('₩12,340,000') === 1234 && B.priceOf('1,200(VAT별도)') === 1200 && B.priceOf('3천만원') === 3000 && B.priceOf('1억2천만') === 12000 &&
+     B.costOf('30만원(견적)') === 30 && B.costOf('₩500,000') === 50 && B.kmOf('86k') === 86000, '₩ · (메모) · 약 · 천만 표기 읽기');
+  const cs = ['오로라블랙펄', '문라이트블루펄', '타이가브라운펄', '판테라메탈', '은하색', '하늘색', '흑진주', '스노우화이트펄'].map(B.colorOf).join();
+  ok(cs === '검정,청색,기타,회색·은색,회색·은색,청색,검정,흰색·진주', '색 이름은 바탕색 먼저(블랙펄 = 검정, 펄은 다른 색이 없을 때만 흰색)', cs);
+  const bt = B.create({ X: { idx, coef, rates, mi: { crawls: [] } }, ENG: eng, ISC: isc, GROUPS: {}, esc: s => String(s), man: v => String(Math.round(v)), pad: v => ('0' + v).slice(-2),
+    getJSON: () => Promise.reject(new Error('시험')), terms: { list: () => [], writable: () => false, pw: () => '' } });
+  const role = (h, d) => bt.detect([h.split('|'), d.split('|')]).roles.join(',');
+  const r1 = role('매각일자|차량번호|차명|최초등록|주행|낙찰가', '2026-10-15|12가3456|그랜저|2019-03|86,000|1,450');
+  const r2 = role('차량번호|차명|연식|배기량|주행거리|색상', '12가3456|그랜저 IG 2.4|2018|2,359|85,000|흰색');
+  const r3 = role('차량번호|진행상태|차명|최초등록|주행|성능점검|경락가', '12가3456|완료|그랜저|2019-03|86,000|무사고|1,450');
+  ok(r1 === ',plate,name,reg,km,actual' && r2 === 'plate,name,year,,km,color' && r3 === 'plate,,name,reg,km,cond,actual',
+    '열 알아보기: 매각일 · 배기량 · 진행상태는 안 씀, 머리글로 정한 쓰임 먼저', [r1, r2, r3].join(' | '));
+  const items = isc.parseText('후드 수리필요, 앞범퍼 수리필요, 프론트 휀더(좌) 교환', { status3: true }).items;
+  const back = isc.parseText(isc.summary(items).split(' · ').join(', '), { status3: true }).items;
+  ok(JSON.stringify(back) === JSON.stringify(items) && items.some(x => x.status === '수리필요'), '한 대 산정 → 묶음에 추가: 성능 글을 상태 이름으로 써서 수리필요도 그대로');
+  const pk = isc.parseText('도어 X, 좌리어도어 판금', { status3: true, picks: { '도어 X': [] } });
+  ok(pk.items.length === 1 && pk.items[0].part === '리어 도어' && isc.parseText('골격 손상', { status3: true, picks: { '골격 손상': 'clean' } }).state === '무사고' &&
+     isc.parseText('판금 없음 / 교환 없음', { status3: true }).state === '무사고' && isc.parseText('양호').state === '무사고',
+    '성능 표기 고침은 그 조각만 · 무사고로 보기 · 교환 없음 · 양호', JSON.stringify(pk.items));
+}
 const xl = XW.build([{ name: '시험', rows: [['a', 'b'], [1, { v: 1234, money: true }]], header: true }]);
 ok(xl && xl.length > 500 && xl[0] === 0x50 && xl[1] === 0x4b, `엑셀 파일 만들기(${xl && xl.length}바이트)`);
 
-console.log(fail ? `\n실패 ${fail}건 / ${n}건` : `\n모두 통과 (${n}건)`);
-process.exit(fail ? 1 : 0);
+console.log(fail ? `\n실패 ${fail}건 / ${n}건` + (crit ? ` — 배포를 막는 점검(★) ${crit}건` : '') : `\n모두 통과 (${n}건)`);
+process.exit(crit ? 2 : fail ? 1 : 0);

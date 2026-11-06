@@ -16,7 +16,7 @@ auto_update.py — 엔카 크롤링 → 사이트 빌드 → 자동 배포 무�
      push가 실패해도 '완료'로 끝내고, watchdog.py가 30분마다 다시 올린다: git_push.py)
 
 옵션:
-  --full   전체 초기화 후 풀 재크롤(체크포인트·상세까지 삭제, 수일 소요·주말 권장).
+  --full   전체 초기화 후 풀 재크롤(체크포인트·판매된 차 상세까지 삭제, 수일 소요) — 정기적으로 쓰지 않는다(AUTOMATION.md).
            누적된 '판매 완료' 매물을 비우고 완전히 새로 수집.
 """
 import sys, os, subprocess, glob, datetime, argparse, time, ctypes, json
@@ -39,6 +39,7 @@ LOCK = os.path.join(ROOT, "auto_update.lock")
 LOCK_STALE_HOURS = 36          # 이 시간 지난 lock은 비정상 종료로 보고 무시
 PY = sys.executable            # 현재 파이썬 인터프리터 재사용
 LOCAL_STEPS = os.path.join(OUT, "local_steps.json")   # 이 PC에만 있는 추가 단계(저장소 밖): [{"label", "script", "args"}]
+BLOCKED = os.path.join(LOGDIR, "DEPLOY_BLOCKED.txt")    # 사이트 점검(★)으로 배포를 멈춘 회차 표시 — 다음에 배포되면 지운다
 
 os.makedirs(LOGDIR, exist_ok=True)
 _logfile = os.path.join(LOGDIR, "auto_%s.log" % datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
@@ -69,15 +70,40 @@ def local_steps():
         log("local_steps.json 읽기 실패(무시): %s" % e)
         return []
 
+def pid_alive(pid):
+    """그 프로세스가 아직 살아 있나(Windows: OpenProcess + GetExitCodeProcess — os.kill(pid, 0)은 Windows에서 프로세스를 끝내 버린다)"""
+    try:
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(0x1000, False, int(pid))                # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        code = ctypes.c_ulong()
+        ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+        k.CloseHandle(h)
+        return bool(ok) and code.value == 259                     # STILL_ACTIVE
+    except Exception:
+        return False
+
 def acquire_lock():
+    """lock = 실행 중인 프로세스 번호 + 시작 시각. 그 프로세스가 살아 있으면 시간과 상관없이 건너뛴다(리뷰 11-05: 36시간 넘게 도는
+    --full 과 주간 작업이 겹쳐 돌던 문제). 번호가 없는 예전 lock 은 시간으로만 판단"""
     if os.path.exists(LOCK):
         age_h = (time.time() - os.path.getmtime(LOCK)) / 3600
-        if age_h < LOCK_STALE_HOURS:
+        pid = None
+        try:
+            with open(LOCK, encoding="utf-8") as f:
+                pid = json.load(f).get("pid")
+        except Exception:
+            pass
+        if pid and pid_alive(pid):
+            log("이미 실행 중(프로세스 %s, lock %.1f시간 전) → 이번 회차 건너뜀" % (pid, age_h))
+            sys.exit(0)
+        if not pid and age_h < LOCK_STALE_HOURS:
             log("이미 실행 중(lock %.1f시간 전 생성) → 이번 회차 건너뜀" % age_h)
             sys.exit(0)
-        log("오래된 lock(%.1f시간) 발견 → 무시하고 진행" % age_h)
+        log("끝난 실행의 lock(%s, %.1f시간) 발견 → 무시하고 진행" % ("프로세스 %s 없음" % pid if pid else "오래됨", age_h))
     with open(LOCK, "w", encoding="utf-8") as f:
-        f.write(datetime.datetime.now().isoformat())
+        json.dump({"pid": os.getpid(), "at": datetime.datetime.now().isoformat()}, f)
 
 def release_lock():
     try:
@@ -85,6 +111,16 @@ def release_lock():
             os.remove(LOCK)
     except OSError:
         pass
+
+def restore(*paths):
+    """그 폴더를 마지막 커밋 상태로(바뀐 · 지운 파일은 되돌리고 새로 생긴 파일은 지운다) — 실패한 단계의 반쯤 쓴 파일이 배포되지 않게"""
+    for p in paths:
+        try:
+            subprocess.call(["git", "checkout", "--", p], cwd=ROOT)
+            subprocess.call(["git", "clean", "-fdq", "--", p], cwd=ROOT)
+            log("  %s → 마지막 커밋 상태로 되돌림" % p)
+        except Exception as e:
+            log("  %s 되돌리기 실패: %s" % (p, e))
 
 def purge_id_caches():
     """지역별 ID 캐시 + 병합본 삭제 → Stage 1 API 재조회 강제 (신규 매물 반영).
@@ -117,11 +153,14 @@ def git_deploy(full):
     run(["git", "add", "web/data", "web/downloads"], "git add")
     today = datetime.date.today().isoformat()
     msg = "%s %s%s" % (git_push.DATA_PREFIX, today, " (전체 재크롤)" if full else " (주간)")
-    # 변경 없으면 commit가 실패(비정상 아님) → 분기 처리
-    with open(_logfile, "a", encoding="utf-8") as f:
-        rc = subprocess.call(["git", "commit", "-m", msg], cwd=ROOT, stdout=f, stderr=subprocess.STDOUT)
-    if rc != 0:
-        log("커밋할 변경 없음(또는 commit 스킵)")
+    staged = subprocess.call(["git", "diff", "--cached", "--quiet"], cwd=ROOT) != 0   # 1 = 스테이징된 변경 있음
+    if not staged:
+        log("커밋할 변경 없음")
+    else:
+        with open(_logfile, "a", encoding="utf-8") as f:
+            rc = subprocess.call(["git", "commit", "-m", msg], cwd=ROOT, stdout=f, stderr=subprocess.STDOUT)
+        if rc != 0:                                                  # 변경이 있는데 커밋 실패 → '완료'로 끝내지 않는다(리뷰 11-05: 스테이징된 채 배포 안 됨)
+            raise RuntimeError("git commit 실패(exit=%d) — 변경이 스테이징된 채 남았습니다" % rc)
     log("▶ git push(자동 배포)")
     res = git_push.push(ROOT, log)
     if res == "none":
@@ -183,11 +222,13 @@ def main():
         except Exception as e:
             log("시황 지수 실패(무시하고 계속): %s" % e)
 
-        # 2.9) 사이트용 비교 매물 파일(WP1 시세 엔진 입력 → web/data/comps, 보정 계수·시황 지수 다음) — 실패해도 배포는 계속
+        # 2.9) 사이트용 비교 매물 파일(WP1 시세 엔진 입력 → web/data/comps, 보정 계수·시황 지수 다음) — 실패하면 지난 판으로 되돌리고 계속
+        #      (내보내기는 폴더를 비우고 새로 쓰므로, 중간에 멈추면 반쯤 지운 폴더가 배포됐다 — 리뷰 11-05)
         try:
             run([PY, "price_engine.py", "--export"], "비교 매물 파일(price_engine.py --export)")
         except Exception as e:
-            log("비교 매물 파일 실패(무시하고 계속): %s" % e)
+            log("비교 매물 파일 실패 → 지난 판으로 되돌리고 계속: %s" % e)
+            restore("web/data/comps")
 
         # 2.91) 마켓 펄스(이번 주 숫자·주목 모델·요약 → web/data/pulse.json, 시황 지수 다음) — 실패해도 배포는 계속
         try:
@@ -199,7 +240,8 @@ def main():
         try:
             run([PY, "model_report.py"], "모델 리포트(model_report.py)")
         except Exception as e:
-            log("모델 리포트 실패(무시하고 계속): %s" % e)
+            log("모델 리포트 실패 → 지난 판으로 되돌리고 계속: %s" % e)
+            restore("web/data/report")
 
         # 2.93) 시세 점검(오차 · 사고 단계별 치우침 · 범위 적중 → web/data/audit.json 관리자 요약, 감가 옆 시장 근거 cond_market.json — 기획 v2.33). 실패해도 배포는 계속
         try:
@@ -210,11 +252,24 @@ def main():
         # 3) 사이트 데이터 빌드
         run([PY, "build_data.py"], "사이트 빌드(build_data.py)")
 
-        # 3.1) 사이트 점검(파일 날짜·모양·'환산' 문구 등) — 결과는 로그에만, 실패해도 배포는 계속(2.91·2.92가 실패해 묵은 파일이 남으면 여기서 보임)
-        try:
-            run(["node", os.path.join("tools", "site_check.mjs")], "사이트 점검(site_check.mjs)")
-        except Exception as e:
-            log("사이트 점검 실패(배포는 계속, 로그 확인): %s" % e)
+        # 3.1) 사이트 점검(파일 날짜·모양·출처 이름 등) — 배포를 막는 점검(★: 화면 파일 · 비교 매물 파일 · 25MiB · 출처 이름 · 스크립트 문법 ·
+        #      JSON 읽기)이 틀리면(종료 코드 2) 이번 주는 배포하지 않고 지난주 사이트를 그대로 둔다. 나머지 점검 실패(1)는 로그만 남기고 배포(리뷰 11-05)
+        log("▶ 사이트 점검(site_check.mjs)")
+        with open(_logfile, "a", encoding="utf-8") as f:
+            rc = subprocess.call(["node", os.path.join("tools", "site_check.mjs")], cwd=ROOT, stdout=f, stderr=subprocess.STDOUT)
+        if rc not in (0, 1):
+            log("!! 사이트 점검에서 배포를 막는 문제(★)가 나왔습니다 → 이번 주는 배포하지 않고 지난주 사이트를 그대로 둡니다. 로그의 ★ 줄을 확인하세요")
+            with open(BLOCKED, "w", encoding="utf-8") as f:
+                f.write("%s 사이트 점검 실패(종료 코드 %d) — 배포 멈춤. 로그: %s\n" % (datetime.datetime.now().isoformat(), rc, _logfile))
+            restore("web/data", "web/downloads")                  # 묶인 변경을 남겨 두면 감시 작업 · 다음 회차가 그대로 올릴 수 있다
+            log("================ 배포 멈춤(사이트 점검) : %s ================" % mode)
+            return
+        if rc == 1:
+            log("사이트 점검 일부 실패(★ 아님) — 배포는 계속, 로그의 ✗ 줄을 확인하세요")
+        else:
+            log("✔ 사이트 점검 완료")
+        if os.path.exists(BLOCKED):
+            os.remove(BLOCKED)
 
         # 4) Git 배포
         git_deploy(args.full)

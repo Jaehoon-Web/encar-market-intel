@@ -25,6 +25,7 @@
   var SYMBOL_OF = { 교환: 'X', 판금: 'W', 용접절단: '절단', 요철: 'U', 손상: 'T', 부식: 'C', 흠집: 'A' };
 
   function compact(s) { return String(s).replace(/\s+/g, '').toUpperCase(); }
+  var NONE_OF = /^(교환|판금|용접|절단|수리필요|수리|사고|외판|골격|단순교환|사고이력|손상)+(없음|없슴|무|無)$/;   // 상태 말 + 없음 = 그 상태가 없음
   function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
   function spacedRe(c, flags) { return new RegExp(c.split('').map(escapeRe).join('\\s*'), flags); }   // 글자 사이 띄어쓰기 허용
   // numpy np.round 와 같은 반올림(정확히 .5 이면 짝수 쪽)
@@ -432,7 +433,7 @@
     // 조각 하나 읽기(상태 물려받기 전) — 덮기 → 안 되면 짐작
     function readTok(raw, lex) {
       var t = { text: raw, groups: [], header: null, nod: false, guess: [], skipped: [], amb: null, p: null };
-      if (NO_DAMAGE[compact(raw)]) { t.nod = true; return t; }
+      if (NO_DAMAGE[compact(raw)] || NONE_OF.test(compact(raw))) { t.nod = true; return t; }   // '교환 없음' · '판금 없음' · '수리 필요 없음' = 무사고(리뷰 11-05: 미상으로 읽던 결함)
       var p = t.p = prepTok(raw), f = seg(p, lex, false), segs = f.segs;
       if (f.skipped.length) {                                   // 사전 낱말로 다 못 덮으면 짐작까지
         f = seg(p, lex, true, f.segs.filter(function (s) { return s.j - s.i >= 2 && s.e.type !== 'outside'; }));
@@ -543,7 +544,10 @@
       s.split(/[\n\r]+/).forEach(function (line, li) {
         line.split(/[,\/;|·+&]+/).forEach(function (tok) { tok = tok.trim(); if (tok) toks.push({ raw: tok, line: li }); });
       });
-      var rd = toks.map(function (t) { return picks[t.raw] ? { text: t.raw, picked: picks[t.raw] } : readTok(t.raw, lex); });
+      var rd = toks.map(function (t) {                           // picks: 조각 원문 → 부위 목록(고른 것) · 'clean'(무사고로 보기 — 묶음 산정 ③)
+        var pk = Object.prototype.hasOwnProperty.call(picks, t.raw) ? picks[t.raw] : null;
+        return pk === 'clean' ? { text: t.raw, nod: true } : pk ? { text: t.raw, picked: pk } : readTok(t.raw, lex);
+      });
 
       // 상태 물려받기 — 같은 조각의 뒤 묶음 → 앞의 머리 상태('[교환] 본넷, 앞펜더') → 같은 줄 뒤 조각('본넷, 휀다 교환')
       var carry = null;

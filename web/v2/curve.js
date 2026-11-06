@@ -12,7 +12,7 @@
 (function (root) {
   'use strict';
 
-  var RV_OK = 20, SPEED_N = 100, MAX_CMP = 3;
+  var RV_OK = 20, SPEED_N = 100, START_N = 50, MAX_CMP = 3;   // START_N: 빠름·느림은 판매율 표본(구간 시작) 50대 이상(pulse_data MOVER_START)
   var LINES = [                                              // 이 모델 + 겹쳐 볼 모델 3개 — 색·선 모양·점 모양을 함께 바꿔 색만으로 구분하지 않게
     { c: 'var(--rp-c0)', dash: '', mk: 'circle' },
     { c: 'var(--rp-c1)', dash: '7 4', mk: 'square' },
@@ -39,8 +39,8 @@
       rate: '지난 수집 구간에 목록에서 사라진(판매된) 매물 ÷ 구간 시작 판매중 매물을 7일 기준으로 맞춘 값입니다. 구간 시작이 10대 이상일 때만 냅니다. ' +
         '동급 = 같은 차급·국산/수입 전체. 판매중 100대 이상일 때 동급의 1.15배 이상이면 빠름, 0.87배 이하이면 느림으로 씁니다(마켓 펄스와 같은 기준).',
       weeks: '지금 판매중 매물이 다 팔리는 데 걸리는 주(1 ÷ 주간 판매율)입니다. 짧을수록 빨리 팔립니다.',
-      dwell: '최근 90일에 팔린 매물이 온라인에 올라온 뒤 목록에서 사라지기까지 걸린 날수의 가운데 값입니다(5대 이상일 때).',
-      cut: '판매중 매물 가운데 첫 호가보다 값을 내린 매물의 비율입니다. 동급은 같은 차급·국산/수입 세부모델들을 판매중 대수로 가중 평균한 값입니다.',
+      dwell: '최근 90일에 팔린 매물이 온라인에 올라온 뒤 목록에서 사라지기까지 걸린 날수의 가운데 값입니다. 판매를 16일 안에 알아챈 매물만 셉니다(수집이 비었던 구간에 알아챈 판매는 판매일을 몰라 뺌, 5대 이상일 때).',
+      cut: '판매중 매물 가운데 첫 호가보다 값을 내린 매물의 비율입니다. 첫 호가부터 본 매물(등록 7일 안에 처음 봄)이나 4주 넘게 본 매물로만 셉니다. 동급은 같은 차급·국산/수입 세부모델들을 판매중 대수로 가중 평균한 값입니다.',
       pidx: '새로 올라온 매물(등록 7일 이내)의 첫 호가를 기준기간(' + BP + ') 같은 모델·등급 매물과 비교한 값입니다(기준기간 = 100). ' +
         '차령·주행·색상·성능을 맞추므로 시간에 따른 자연 감가는 빠집니다. 동급은 같은 차급·국산/수입 전체의 마지막 값입니다.',
       rvi: '판매중 매물마다 잔존율을 같은 차급·국산/수입·차령 연차 매물의 가운데 잔존율로 나눈 뒤, 그 가운데 값 × 100입니다(동급 = 100). ' +
@@ -112,7 +112,7 @@
           j.models.forEach(function (m) {
             by[m.maker + '|' + m.model] = m;
             var c = cut[m.seg + '·' + m.origin] || (cut[m.seg + '·' + m.origin] = [0, 0]);
-            if (m.cut != null && m.on) { c[0] += m.cut * m.on; c[1] += m.on; }
+            if (m.cut != null && m.on && !m.new_cov) { c[0] += m.cut * m.on; c[1] += m.on; }   // 새로 수집 모델은 동급 기준에서 뺀다
           });
           Object.keys(cut).forEach(function (k) { cut[k] = cut[k][1] ? cut[k][0] / cut[k][1] : null; });
           MM = { j: j, by: by, segCut: cut };
@@ -146,20 +146,22 @@
       var none = wait ? '불러오는 중…' : MM.err ? '시장 숫자 파일을 불러오지 못했습니다' : !mm ? '판매중 매물이 없어 생략합니다' : '';
       var t = [], segTxt = function (v) { return '<span class="peer">동급 <b>' + v + '</b></span>'; };
       var tag = function (txt, tone) { return '<span class="v2-pill ' + (tone || '') + '">' + txt + '</span>'; };
-      var thin = mm && mm.on < SPEED_N, spd = function (ratio) { return thin ? thinTag('빠름·느림') : speed(ratio); };
-      if (mm && mm.rate_w != null) t.push(tile('주간 판매율', TIP.rate, pc(mm.rate_w), '%',
+      var thin = mm && (mm.on < SPEED_N || (mm.rate_w != null && (mm.n_start || 0) < START_N)), spd = function (ratio) { return thin ? thinTag('빠름·느림') : speed(ratio); };
+      if (mm && mm.new_cov) none = '새로 수집한 매물이 많아 몇 주 뒤부터 나옵니다';   // 수집 범위가 넓어져 잡힌 오래된 매물(리뷰 11-05)
+      if (mm && mm.rate_w != null && !mm.new_cov) t.push(tile('주간 판매율', TIP.rate, pc(mm.rate_w), '%',
         (sg && sg.rate_w ? segTxt(pc(sg.rate_w) + '%') + spd(mm.rate_w / sg.rate_w) : '동급 값 없음')));
       else t.push(tile('주간 판매율', TIP.rate, '–', '', none || (iv ? '구간 시작 판매중이 10대 미만이라 생략' : '주간 수집 구간이 아직 없음')));
-      if (mm && mm.weeks != null) t.push(tile('재고 소진', TIP.weeks, String(mm.weeks), '주', sg && sg.weeks ? segTxt(sg.weeks + '주') + spd(sg.weeks / mm.weeks) : '동급 값 없음'));
+      if (mm && mm.weeks != null && !mm.new_cov) t.push(tile('재고 소진', TIP.weeks, String(mm.weeks), '주', sg && sg.weeks ? segTxt(sg.weeks + '주') + spd(sg.weeks / mm.weeks) : '동급 값 없음'));
       else t.push(tile('재고 소진', TIP.weeks, '–', '', none || (mm && mm.rate_w === 0 ? '구간에 판매가 없음' : '주간 판매율이 없어 생략')));
-      if (mm && mm.dwell != null) t.push(tile('중위 체류일', TIP.dwell, String(mm.dwell), '일', sg && sg.dwell ? segTxt(sg.dwell + '일') + spd(sg.dwell / mm.dwell) : '동급 값 없음'));
-      else t.push(tile('중위 체류일', TIP.dwell, '–', '', none || '최근 90일 판매가 5대 미만이라 생략'));
+      if (mm && mm.dwell != null && !mm.new_cov) t.push(tile('중위 체류일', TIP.dwell, String(mm.dwell), '일', (sg && sg.dwell ? segTxt(sg.dwell + '일') + spd(sg.dwell / mm.dwell) : '동급 값 없음') +
+        (mm.dwell_n ? ' <span class="v2-dim">· ' + mm.dwell_n + '대 기준</span>' : '')));
+      else t.push(tile('중위 체류일', TIP.dwell, '–', '', none || '판매일을 아는 최근 90일 판매가 5대 미만이라 생략'));
       var sc = MM && MM.segCut ? MM.segCut[o.seg] : null;
-      if (mm && mm.cut != null && mm.on) {
+      if (mm && mm.cut != null && mm.on && !mm.new_cov) {
         var dc = sc != null ? Math.round(mm.cut * 100) - Math.round(sc * 100) : null;
         t.push(tile('인하 매물', TIP.cut, pc(mm.cut, 0), '%', sc == null ? '동급 값 없음' : segTxt(pc(sc, 0) + '%') +
           (thin ? thinTag('많음·적음') : dc ? tag(Math.abs(dc) + '%p ' + (dc > 0 ? '많음' : '적음'), dc > 0 ? 'dn' : 'up') : tag('같음'))));
-      } else t.push(tile('인하 매물', TIP.cut, '–', '', none || '판매중 매물이 없어 생략'));
+      } else t.push(tile('인하 매물', TIP.cut, '–', '', none || (mm && mm.on ? '처음 호가부터 본 매물이 10대 미만이라 생략' : '판매중 매물이 없어 생략')));
       var si = segIdx(o.seg);
       if (mm && mm.pidx != null) {
         var dp = si ? mm.pidx - si.v : null;

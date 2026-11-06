@@ -795,3 +795,14 @@ tr.mem-suspended td, tr.mem-rejected td { opacity: .78; }
 .mem-temp .auth-temp { font-family: ui-monospace, Consolas, monospace; font-size: 17px; font-weight: 700; letter-spacing: .06em; padding: 3px 10px; background: var(--accent-wash);
   border-radius: 10px; user-select: all; }
 .mem-audit > summary { cursor: pointer; }
+
+/* 묶음 산정 ③ — 기억한 고침 목록 · ② 열 안내 · 고쳐 쓴 글도 못 읽음(리뷰 11-05) */
+.bt-mem { margin-top: 10px; font-size: 13px; color: var(--tx-3); }
+.bt-mem summary { cursor: pointer; padding: 4px 0; }
+.bt-mem ul { list-style: none; margin: 6px 0 8px; padding: 0; }
+.bt-mem li { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--line-soft); }
+.bt-mem li span { overflow-wrap: anywhere; color: var(--tx-2); }
+.bt-cnotes { margin-top: 8px; font-size: 13px; }
+.v2-fixrow .bt-pkbad { flex-basis: 100%; font-size: 12px; }
+.v2-notes ul { margin: 4px 0 2px 16px; padding: 0; font-size: 13px; color: var(--tx-2); }
+.bt-mem li .v2-link { flex: none; white-space: nowrap; }

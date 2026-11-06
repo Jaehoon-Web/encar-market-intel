@@ -20,8 +20,8 @@
     ['rvi', '잔존가치', 'n'], ['d1', '시세 1주', 'n']];
 
   // 차종 비교 설명 — 표 머리글과 같은 말로(market_models.json 의 note 는 CSV 열 이름 설명이라 화면에는 쓰지 않는다)
-  var MODEL_NOTE = '세부모델별 시장 숫자. 판매중 = 상세까지 확인한 판매중 매물 · 인하 매물 = 첫 호가보다 내린 매물 비율 · ' +
-    '90일 판매·중위 체류 = 최근 90일 판매 대수와 중위 체류일(5대 이상일 때) · 주간 판매율 = 최근 판매속도 구간의 주간 판매율(구간 시작 10대 이상) · ' +
+  var MODEL_NOTE = '세부모델별 시장 숫자. 판매중 = 상세까지 확인한 판매중 매물 · 인하 매물 = 첫 호가부터 본 매물(등록 7일 안에 처음 봄)이나 4주 넘게 본 매물 중 첫 호가보다 내린 비율(10대 이상) · ' +
+    '90일 판매 = 최근 90일 판매 대수 · 중위 체류 = 그중 판매를 16일 안에 알아챈 매물의 체류일 가운데 값(5대 이상 — 수집이 비었던 구간에 알아챈 판매는 판매일을 몰라 뺌) · 주간 판매율 = 최근 판매속도 구간의 주간 판매율(구간 시작 10대 이상) · ' +
     '소진 주수 = 지금 재고가 다 팔리는 데 걸리는 주(1 ÷ 주간 판매율) · 시세(7월=100) = 새로 올라온 매물 시세(기준기간 = 100, 양쪽 10대 이상) · ' +
     '잔존가치 = 잔존가치 지수(판매중 매물마다 잔존율(호가 ÷ 출고가)을 같은 차급·국산수입·차령 연차의 가운데 잔존율로 나눈 값의 가운데 값 × 100, 동급 = 100, 계산한 매물 20대 이상일 때) · ' +
     '시세 1주 = 직전 목록 대비 세부모델 시세지수 변화(흐린 값은 신규 매물 수로 생기는 흔들림의 2배를 넘지 않아 보합으로 봄)';
@@ -697,8 +697,9 @@
         var k = mkey(m), name = esc(m.maker + ' ' + m.model) + (YR[k] ? ' <span class="v2-dim">(' + YR[k] + ')</span>' : '');
         h += '<tr><td>' + mLink(m, name) + '</td><td>' + esc(m.seg + '·' + m.origin) + '</td>' +
           '<td class="num">' + m.on.toLocaleString() + '</td><td class="num">' + (m.price != null ? man(m.price) : '–') + '</td>' +
-          '<td class="num">' + (m.cut * 100).toFixed(0) + '%</td><td class="num">' + m.sold90.toLocaleString() + '</td>' +
-          '<td class="num">' + (m.dwell != null ? m.dwell + '일' : '–') + '</td><td class="num">' + (m.rate_w != null ? (m.rate_w * 100).toFixed(1) + '%' : '–') + '</td>' +
+          '<td class="num">' + (m.cut != null && !m.new_cov ? (m.cut * 100).toFixed(0) + '%' : '<span class="v2-dim" title="' + (m.new_cov ? '새로 수집한 매물이 많아 몇 주 뒤부터' : '처음 호가부터 본 매물이 10대 미만') + '">–</span>') +
+          '</td><td class="num">' + m.sold90.toLocaleString() + '</td>' +
+          '<td class="num">' + (m.dwell != null ? '<span title="판매를 16일 안에 알아챈 ' + (m.dwell_n || '') + '대 기준">' + m.dwell + '일</span>' : '–') + '</td><td class="num">' + (m.rate_w != null ? (m.rate_w * 100).toFixed(1) + '%' : '–') + '</td>' +
           '<td class="num">' + (m.weeks != null ? m.weeks + '주' : '–') + '</td><td class="num">' + (m.pidx != null ? f1(m.pidx) : '–') + '</td>' +
           '<td class="num">' + rvCell(m) + '</td><td class="num">' + d1Cell(m) + '</td>' +
           '<td>' + (HAVE[k] ? '<a class="v2-quad-mini" href="' + esc(ctx.href({ mk: m.maker, grp: m.group, model: m.model }, 'model')) + '" title="시세 산정의 모델 요약으로">모델 요약</a>' : '') + '</td></tr>';
@@ -712,7 +713,7 @@
       var rows = [['제조사', '모델', '세부모델', '차급', '국산·수입', '판매중(대)', '중앙 호가(만원)', '인하 매물 비율(%)', '최근 90일 판매(대)', '중위 체류일',
         '주간 판매율(%)', '재고 소진 주수', '시세(기준기간=100)', '잔존가치 지수(동급=100)', '시세 1주 변화', '시세 1주 흔들림(±)', '시세 1주 판정']].concat(list.map(function (m) {
         var d = wk(m);
-        return [m.maker, m.group, m.model, m.seg, m.origin, m.on, m.price, +(m.cut * 100).toFixed(1), m.sold90, m.dwell != null ? m.dwell : null,
+        return [m.maker, m.group, m.model, m.seg, m.origin, m.on, m.price, m.cut != null && !m.new_cov ? +(m.cut * 100).toFixed(1) : null, m.sold90, m.dwell != null ? m.dwell : null,
           m.rate_w != null ? +(m.rate_w * 100).toFixed(2) : null, m.weeks != null ? m.weeks : null, m.pidx != null ? m.pidx : null,
           rviOf(m), d ? d.d : null, d ? +d.se.toFixed(2) : null, d ? (d.sig ? (d.d > 0 ? '오름' : '내림') : '보합') : null];
       }));

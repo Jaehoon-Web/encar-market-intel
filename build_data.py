@@ -51,7 +51,7 @@ def norm_fuel(f):
     return "기타"
 
 SIDO_ORDER = ["서울","경기","인천","부산","대구","광주","대전","울산","세종",
-              "강원","충북","충남","전북","전남","경북","경남","제주"]
+              "강원","충북","충남","전북","전남","전남광주","경북","경남","제주"]   # 전남광주: 2026-11 목록부터 쓰는 지역 이름(리뷰 11-05 — 지역별 요약에서 빠지던 4천여 대)
 
 def norm_sido(r):
     if not r or str(r).strip() == "" or str(r) == "nan":
@@ -449,7 +449,7 @@ insights = {
     "fuel": [],
     "bodyType": [],
 }
-for sd in SIDO_ORDER:
+for sd in SIDO_ORDER + sorted(set(l2p["sido"].dropna()) - set(SIDO_ORDER)):   # 목록에 없는 지역 이름도 빠지지 않게(30대 이상이면)
     sub = l2p[l2p["sido"] == sd]
     p = sub["sale_price"].dropna()
     if len(p) < 30: continue
